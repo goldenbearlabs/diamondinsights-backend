@@ -1,8 +1,8 @@
 from typing import List, Optional
-from datetime import date, datetime
+import datetime
 from sqlalchemy import Column, ForeignKey, Table, Date, ForeignKeyConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from src.database import Base
+from src.database.database import Base
 
 card_quirk_association = Table(
     "card_quirks",
@@ -82,7 +82,7 @@ class Card(Base):
     is_sellable: Mapped[bool] = mapped_column()
     has_augment: Mapped[bool] = mapped_column()
     augment_text: Mapped[Optional[str]] = mapped_column()
-    augment_end_date: Mapped[Optional[date]] = mapped_column(Date)
+    augment_end_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
     has_matchup: Mapped[bool] = mapped_column()
     stars: Mapped[Optional[str]] = mapped_column()
     trend: Mapped[Optional[str]] = mapped_column()
@@ -190,7 +190,7 @@ class PriceHistory(Base):
     __tablename__ = "price_history"
 
     card_id: Mapped[str] = mapped_column(ForeignKey("listings.card_id"), primary_key=True)
-    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
     best_buy_price: Mapped[Optional[int]] = mapped_column()
     best_sell_price: Mapped[Optional[int]] = mapped_column()
     volume: Mapped[Optional[int]] = mapped_column()
@@ -204,7 +204,7 @@ class CompletedOrder(Base):
     __tablename__ = "completed_orders"
 
     card_id: Mapped[str] = mapped_column(ForeignKey("listings.card_id"), primary_key=True)
-    date: Mapped[datetime] = mapped_column(primary_key=True)
+    date: Mapped[datetime.datetime] = mapped_column(primary_key=True)
     price: Mapped[int] = mapped_column()
     is_buy: Mapped[Optional[bool]] = mapped_column()
 
@@ -217,7 +217,7 @@ class MarketCandle(Base):
     __tablename__ = "market_candles"
 
     card_id: Mapped[str] = mapped_column(ForeignKey("listings.card_id"), primary_key=True)
-    start_time: Mapped[datetime] = mapped_column(primary_key=True)
+    start_time: Mapped[datetime.datetime] = mapped_column(primary_key=True)
 
     open_buy_price: Mapped[int] = mapped_column()
     open_sell_price: Mapped[int] = mapped_column()
@@ -239,7 +239,7 @@ class RosterUpdate(Base):
     __tablename__ = "roster_updates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    date: Mapped[date] = mapped_column()
+    date: Mapped[datetime.date] = mapped_column()
     is_major: Mapped[bool] = mapped_column()
     is_fielding: Mapped[bool] = mapped_column()
 
@@ -308,7 +308,7 @@ class Player(Base):
     first_name: Mapped[str] = mapped_column()
     last_name: Mapped[str] = mapped_column()
     number: Mapped[str] = mapped_column()
-    birth_date: Mapped[date] = mapped_column(Date)
+    birth_date: Mapped[datetime.date] = mapped_column(Date)
     current_age: Mapped[int] = mapped_column()
     birth_location_id: Mapped[Optional[int]] = mapped_column(ForeignKey("birth_locations.id"))
     height: Mapped[Optional[str]] = mapped_column()
@@ -318,7 +318,7 @@ class Player(Base):
     position_id: Mapped[int] = mapped_column(ForeignKey("mlb_positions.id"))
     boxscore_name: Mapped[str] = mapped_column()
     draft_year: Mapped[Optional[int]] = mapped_column()
-    mlb_debut_date: Mapped[Optional[date]] = mapped_column()
+    mlb_debut_date: Mapped[Optional[datetime.date]] = mapped_column()
     bat_side_code: Mapped[str] = mapped_column()
     pitch_hand_code: Mapped[str] = mapped_column()
     strike_zone_top: Mapped[str] = mapped_column()
@@ -395,7 +395,7 @@ class MLBGame(Base):
 
     game_type: Mapped[str] = mapped_column()
     season: Mapped[int] = mapped_column()
-    game_date: Mapped[datetime] = mapped_column()
+    game_date: Mapped[datetime.datetime] = mapped_column()
     status_code: Mapped[str] = mapped_column()
     home_team_id: Mapped[int] = mapped_column(ForeignKey("mlb_teams.id"))
     away_team_id: Mapped[int] = mapped_column(ForeignKey("mlb_teams.id"))
