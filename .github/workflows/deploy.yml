@@ -15,10 +15,12 @@ jobs:
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_KEY }}
         script: |
+          set -e
+          
           cd /opt/di
-          # 1. Pull latest code
-          git pull origin main
-
+          
+          git fetch origin main
+          git reset --hard origin/main
+          
           docker compose up -d --build
-
           docker image prune -f
