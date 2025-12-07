@@ -2,9 +2,9 @@ import sys
 import os
 from dotenv import load_dotenv
 
-load_dotenv() 
+load_dotenv()
+
 sys.path.append(os.getcwd())
-sys.path.append(os.path.join(os.getcwd(), 'backend'))
 
 from logging.config import fileConfig
 
