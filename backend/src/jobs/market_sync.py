@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import random
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from src.jobs.base import BaseJob
 from src.core.config import THE_SHOW_YEARS
-from src.database.models import Card, Listing, PriceHistory, CompletedOrder
+from src.database.models import Card, CompletedOrder, Listing, PriceHistory
+from src.jobs.base import BaseJob
 
 
 class MarketSync(BaseJob):
@@ -21,41 +25,107 @@ class MarketSync(BaseJob):
         self.logger.info("Starting MarketSync Execution...")
 
         season_year = 2000 + self.year
-        card_ids = self._get_card_ids(db_session)
+        now = datetime.utcnow()
+        cutoff = now - timedelta(hours=48)
 
+        card_ids = self._get_card_ids(db_session)
         self.logger.info(f"Syncing market data for {len(card_ids)} cards (mlb{self.year})")
 
-        now = datetime.utcnow()
-
-        for i, card_id in enumerate(card_ids, start=1):
-            try:
-                with db_session.begin_nested():
-                    payload = self._fetch_market_payload(card_id)
-                    if not payload:
-                        continue
-
-                    self._sync_market_snapshot(
-                        session=db_session,
-                        payload=payload,
-                        season_year=season_year,
-                        now=now,
-                    )
-                    
-                if i % 200 == 0:
-                    db_session.commit()
-                    self.logger.info(f"Progress: {i}/{len(card_ids)} cards (committed)")
-
-            except Exception as e:
-                self.logger.error(f"Card {card_id} failed: {e}", exc_info=True)
-                continue
-
+        db_session.execute(delete(CompletedOrder).where(CompletedOrder.date < cutoff))
         db_session.commit()
+
+        chunk_size = 200
+        total = len(card_ids)
+        done = 0
+
+        for start in range(0, total, chunk_size):
+            chunk = card_ids[start : start + chunk_size]
+
+            payloads: List[Dict[str, Any]] = []
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                futures = {ex.submit(self._fetch_market_payload_jitter, cid): cid for cid in chunk}
+                for fut in as_completed(futures):
+                    cid = futures[fut]
+                    try:
+                        payload = fut.result()
+                    except Exception as e:
+                        self.logger.error(f"Card {cid} fetch failed: {e}", exc_info=True)
+                        continue
+                    if payload:
+                        payloads.append(payload)
+
+            listing_rows: List[Dict[str, Any]] = []
+            order_rows: List[Dict[str, Any]] = []
+            ph_rows: List[Dict[str, Any]] = []
+
+            for payload in payloads:
+                out = self._build_rows_from_payload(
+                    payload=payload,
+                    season_year=season_year,
+                    now=now,
+                    cutoff=cutoff,
+                )
+                if not out:
+                    continue
+                lrow, orows, prows = out
+                if lrow:
+                    listing_rows.append(lrow)
+                if orows:
+                    order_rows.extend(orows)
+                if prows:
+                    ph_rows.extend(prows)
+
+            if listing_rows or order_rows or ph_rows:
+                db_session.execute(text("SET LOCAL synchronous_commit TO OFF"))
+
+            if listing_rows:
+                stmt = pg_insert(Listing).values(listing_rows).on_conflict_do_update(
+                    index_elements=["card_id"],
+                    set_={
+                        "best_buy_price": pg_insert(Listing).excluded.best_buy_price,
+                        "best_sell_price": pg_insert(Listing).excluded.best_sell_price,
+                    },
+                )
+                db_session.execute(stmt)
+
+            if order_rows:
+                stmt = pg_insert(CompletedOrder).values(order_rows).on_conflict_do_update(
+                    index_elements=["card_id", "date"],
+                    set_={
+                        "price": pg_insert(CompletedOrder).excluded.price,
+                        "is_buy": pg_insert(CompletedOrder).excluded.is_buy,
+                    },
+                )
+                db_session.execute(stmt)
+
+            if ph_rows:
+                excluded = pg_insert(PriceHistory).excluded
+                stmt = pg_insert(PriceHistory).values(ph_rows).on_conflict_do_update(
+                    index_elements=["card_id", "date"],
+                    set_={
+                        "best_buy_price": excluded.best_buy_price,
+                        "best_sell_price": excluded.best_sell_price,
+                        "volume": func.coalesce(excluded.volume, PriceHistory.volume),
+                    },
+                )
+                db_session.execute(stmt)
+
+            db_session.commit()
+
+            done = min(start + chunk_size, total)
+            self.logger.info(
+                f"Progress: {done}/{total} payloads={len(payloads)} "
+                f"listing_rows={len(listing_rows)} order_rows={len(order_rows)} ph_rows={len(ph_rows)}"
+            )
+
+        self.logger.info("MarketSync complete.")
 
     def _get_card_ids(self, session: Session) -> List[str]:
         stmt = select(Card.id).where(Card.year == self.year)
         return session.execute(stmt).scalars().all()
 
-    def _fetch_market_payload(self, card_id: str) -> Optional[Dict[str, Any]]:
+    def _fetch_market_payload_jitter(self, card_id: str) -> Optional[Dict[str, Any]]:
+        time.sleep(random.uniform(0.05, 0.25))
         url = f"https://mlb{self.year}.theshow.com/apis/listing.json"
         params = {"uuid": card_id}
         return self.api_client.get(url, params)
@@ -102,17 +172,15 @@ class MarketSync(BaseJob):
 
         if bb is not None and bs is not None and bs >= bb:
             spread = bs - bb
-
             tol = max(1, int(round(0.10 * spread)), int(round(0.002 * max(bs, bb))))
-
             mid = (bb + bs) / 2.0
 
             out: List[Optional[bool]] = []
             for p in prices:
                 if abs(p - bs) <= tol:
-                    out.append(True)   # buy side (higher cluster)
+                    out.append(True)
                 elif abs(p - bb) <= tol:
-                    out.append(False)  # sell side (lower cluster)
+                    out.append(False)
                 else:
                     out.append(p > mid)
 
@@ -173,93 +241,34 @@ class MarketSync(BaseJob):
 
         return labels
 
-    def _sync_market_snapshot(
+    def _build_rows_from_payload(
         self,
-        session: Session,
         payload: Dict[str, Any],
         season_year: int,
         now: datetime,
-    ) -> None:
+        cutoff: datetime,
+    ) -> Optional[Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]]:
         item = payload.get("item") or {}
         card_id = item.get("uuid")
         if not card_id:
-            return
+            return None
 
         best_buy = self._to_int_price(payload.get("best_buy_price"))
         best_sell = self._to_int_price(payload.get("best_sell_price"))
 
+        listing_row = {
+            "card_id": card_id,
+            "best_buy_price": best_buy,
+            "best_sell_price": best_sell,
+        }
 
-        self._sync_listing(session, card_id, best_buy, best_sell)
-
-        parsed_orders = self._sync_completed_orders(
-            session=session,
-            card_id=card_id,
-            completed_orders_payload=payload.get("completed_orders") or [],
-            best_buy_price=best_buy,
-            best_sell_price=best_sell,
-            now=now,
-        )
-
-        self.logger.info(f"{card_id}: listing={best_buy}/{best_sell} orders={len(parsed_orders)}")
-
-        self._sync_price_history(
-            session=session,
-            card_id=card_id,
-            price_history_payload=payload.get("price_history") or [],
-            season_year=season_year,
-            parsed_orders=parsed_orders,
-            now=now,
-        )
-
-        session.flush()
-
-    def _sync_listing(
-        self,
-        session: Session,
-        card_id: str,
-        best_buy_price: Optional[int],
-        best_sell_price: Optional[int],
-    ) -> None:
-        session.merge(
-            Listing(
-                card_id=card_id,
-                best_buy_price=best_buy_price,
-                best_sell_price=best_sell_price,
-            )
-        )
-
-    def _sync_completed_orders(
-        self,
-        session: Session,
-        card_id: str,
-        completed_orders_payload: List[Dict[str, Any]],
-        best_buy_price: Optional[int],
-        best_sell_price: Optional[int],
-        now: datetime,
-    ) -> List[Tuple[datetime, int, Optional[bool]]]:
-        cutoff = now - timedelta(hours=48)
-
-        session.execute(
-            delete(CompletedOrder).where(
-                CompletedOrder.card_id == card_id,
-                CompletedOrder.date < cutoff,
-            )
-        )
-
-        existing_dates = set(
-            session.execute(
-                select(CompletedOrder.date).where(
-                    CompletedOrder.card_id == card_id,
-                    CompletedOrder.date >= cutoff,
-                )
-            ).scalars().all()
-        )
-
+        completed_orders_payload = payload.get("completed_orders") or []
         seen_ts: set[datetime] = set()
         parsed: List[Tuple[datetime, int]] = []
-        for item in completed_orders_payload:
-            dt_str = item.get("date")
-            price_int = self._to_int_price(item.get("price"))
+
+        for it in completed_orders_payload:
+            dt_str = it.get("date")
+            price_int = self._to_int_price(it.get("price"))
             if not dt_str or price_int is None:
                 continue
             try:
@@ -273,92 +282,56 @@ class MarketSync(BaseJob):
             seen_ts.add(ts)
             parsed.append((ts, price_int))
 
-        labels = self._infer_buy_sell_labels(parsed, best_buy_price, best_sell_price)
+        labels = self._infer_buy_sell_labels(parsed, best_buy, best_sell)
 
-        to_add = []
-        added_ts: set[datetime] = set()
-        out: List[Tuple[datetime, int, Optional[bool]]] = []
-
+        order_rows: List[Dict[str, Any]] = []
         for (ts, price_int), is_buy in zip(parsed, labels):
-            if ts in existing_dates or ts in added_ts:
-                continue
-            out.append((ts, price_int, is_buy))
-            added_ts.add(ts)
-
-            if ts in existing_dates:
-                continue
-
-            to_add.append(
-                CompletedOrder(
-                    card_id=card_id,
-                    date=ts,
-                    price=price_int,
-                    is_buy=is_buy,
-                )
+            order_rows.append(
+                {
+                    "card_id": card_id,
+                    "date": ts,
+                    "price": price_int,
+                    "is_buy": is_buy,
+                }
             )
 
-        if to_add:
-            session.add_all(to_add)
-
-        return out
-
-    def _sync_price_history(
-        self,
-        session: Session,
-        card_id: str,
-        price_history_payload: List[Dict[str, Any]],
-        season_year: int,
-        parsed_orders: List[Tuple[datetime, int, Optional[bool]]],
-        now: datetime,
-    ) -> int:
         yesterday = (now - timedelta(days=1)).date()
         start_yesterday = datetime(yesterday.year, yesterday.month, yesterday.day, 0, 0, 0)
 
-        earliest_ts = min((ts for ts, _, _ in parsed_orders), default=None)
-        is_truncated = (len(parsed_orders) >= 200)
+        earliest_ts = min((ts for ts, _ in parsed), default=None)
+        is_truncated = (len(parsed) >= 200)
         can_compute_yesterday = (earliest_ts is not None) and (earliest_ts <= start_yesterday) and (not is_truncated)
 
         orders_by_date: Dict[Any, int] = {}
-        for ts, _, _ in parsed_orders:
-            d = ts.date()
-            orders_by_date[d] = orders_by_date.get(d, 0) + 1
+        if can_compute_yesterday:
+            for ts, _ in parsed:
+                d = ts.date()
+                orders_by_date[d] = orders_by_date.get(d, 0) + 1
 
-        existing_dates = set(
-            session.execute(
-                select(PriceHistory.date).where(PriceHistory.card_id == card_id)
-            ).scalars().all()
-        )
+        price_history_payload = payload.get("price_history") or []
+        ph_rows: List[Dict[str, Any]] = []
 
-        to_insert: List[PriceHistory] = []
-
-        for item in price_history_payload:
-            mmdd = item.get("date")
+        for it in price_history_payload:
+            mmdd = it.get("date")
             if not mmdd:
                 continue
-
             try:
                 d = datetime.strptime(f"{season_year}/{mmdd}", "%Y/%m/%d").date()
             except ValueError:
-                continue
-
-            if d in existing_dates:
                 continue
 
             volume = None
             if d == yesterday and can_compute_yesterday:
                 volume = orders_by_date.get(d, 0)
 
-            to_insert.append(
-                PriceHistory(
-                    card_id=card_id,
-                    date=d,
-                    best_buy_price=item.get("best_buy_price"),
-                    best_sell_price=item.get("best_sell_price"),
-                    volume=volume,
-                )
+            ph_rows.append(
+                {
+                    "card_id": card_id,
+                    "date": d,
+                    "best_buy_price": it.get("best_buy_price"),
+                    "best_sell_price": it.get("best_sell_price"),
+                    "volume": volume,
+                }
             )
 
-        if to_insert:
-            session.add_all(to_insert)
-
-        return len(to_insert)
+        return listing_row, order_rows, ph_rows
