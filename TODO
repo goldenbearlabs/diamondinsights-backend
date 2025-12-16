@@ -1,0 +1,2 @@
+- Finish the roster update sync (I just added the new double pk so see if that works.)
+- Also lots of the fields in the card table need to be updated to be nullable (2021 api is weak)

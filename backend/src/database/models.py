@@ -23,6 +23,7 @@ class Card(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column()
+    year: Mapped[int] = mapped_column()
     img: Mapped[str] = mapped_column()
     baked_img: Mapped[Optional[str]] = mapped_column()
     name: Mapped[str] = mapped_column(index=True)
@@ -31,7 +32,7 @@ class Card(Base):
     team: Mapped[str] = mapped_column()
     team_short_name: Mapped[str] = mapped_column()
     ovr: Mapped[int] = mapped_column()
-    series_id: Mapped[int] = mapped_column(ForeignKey("series.series_id"))
+    series_name: Mapped[str] = mapped_column(ForeignKey("series.name"))
     display_position: Mapped[str] = mapped_column()
     display_secondary_positions: Mapped[Optional[str]] = mapped_column()
     jersey_number: Mapped[int] = mapped_column()
@@ -79,19 +80,19 @@ class Card(Base):
         secondary=card_quirk_association,
         back_populates="cards"
     )
-    is_sellable: Mapped[bool] = mapped_column()
-    has_augment: Mapped[bool] = mapped_column()
+    is_sellable: Mapped[Optional[bool]] = mapped_column()
+    has_augment: Mapped[Optional[bool]] = mapped_column()
     augment_text: Mapped[Optional[str]] = mapped_column()
     augment_end_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
     has_matchup: Mapped[bool] = mapped_column()
     stars: Mapped[Optional[str]] = mapped_column()
     trend: Mapped[Optional[str]] = mapped_column()
     new_rank: Mapped[int] = mapped_column()
-    has_rank_change: Mapped[bool] = mapped_column()
-    event: Mapped[bool] = mapped_column()
+    has_rank_change: Mapped[Optional[bool]] = mapped_column()
+    event: Mapped[Optional[bool]] = mapped_column()
     set_name: Mapped[Optional[str]] = mapped_column()
     is_live_set: Mapped[bool] = mapped_column()
-    ui_anim_index: Mapped[int] = mapped_column()
+    ui_anim_index: Mapped[Optional[int]] = mapped_column()
     locations: Mapped[List["Location"]] = relationship(
         secondary=card_location_association,
         back_populates="cards"
@@ -114,13 +115,12 @@ class Card(Base):
 class Series(Base):
     __tablename__ = "series"
 
-    series_id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column()
+    name: Mapped[str] = mapped_column(primary_key=True)
 
     cards: Mapped[List["Card"]] = relationship(back_populates="series")
 
     def __repr__(self) -> str:
-        return f"SERIES (series_id={self.series_id}, name={self.name})"
+        return f"SERIES (name={self.name})"
     
 class Location(Base):
     __tablename__ = "locations"
@@ -201,6 +201,7 @@ class PriceHistory(Base):
         return f"PRICE_HISTORY (card_id={self.card_id}, date={self.date}, best_buy_price={self.best_buy_price}, best_sell_price={self.best_sell_price})"
 
 class CompletedOrder(Base):
+    # We store the past 48 hours here.
     __tablename__ = "completed_orders"
 
     card_id: Mapped[str] = mapped_column(ForeignKey("listings.card_id"), primary_key=True)
@@ -214,6 +215,9 @@ class CompletedOrder(Base):
         return f"COMPLETED_ORDER (card_id={self.card_id}, date={self.date}, price={self.price}, is_buy={self.is_buy})"
     
 class MarketCandle(Base):
+    # This is a history table where start time is basically the start of each day at yesterdays midnight and 
+    # we summarize the completed order table so after its pruned we have a saved summary. It will run in its own
+    # job at midnight
     __tablename__ = "market_candles"
 
     card_id: Mapped[str] = mapped_column(ForeignKey("listings.card_id"), primary_key=True)
@@ -239,7 +243,7 @@ class RosterUpdate(Base):
     __tablename__ = "roster_updates"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    date: Mapped[datetime.date] = mapped_column()
+    date: Mapped[datetime.date] = mapped_column(primary_key=True)
     is_major: Mapped[bool] = mapped_column()
     is_fielding: Mapped[bool] = mapped_column()
 
@@ -253,8 +257,10 @@ class RosterUpdate(Base):
 class CardUpdate(Base):
     __tablename__ = "card_updates"
 
-    update_id: Mapped[int] = mapped_column(ForeignKey("roster_updates.id"), primary_key=True)
+    update_id: Mapped[int] = mapped_column(primary_key=True)
+    update_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
     card_id: Mapped[str] = mapped_column(ForeignKey("cards.id"), primary_key=True)
+    
     new_ovr: Mapped[int] = mapped_column()
     new_rarity: Mapped[str] = mapped_column()
     old_ovr: Mapped[int] = mapped_column()
@@ -264,6 +270,14 @@ class CardUpdate(Base):
     roster_update: Mapped["RosterUpdate"] = relationship(
         back_populates="card_updates"
     )
+    
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["update_id", "update_date"],
+            ["roster_updates.id", "roster_updates.date"],
+        ),
+    )
+
     card: Mapped["Card"] = relationship()
     attribute_changes: Mapped[List["CardAttributeChange"]] = relationship(
         back_populates="card_update",
@@ -271,14 +285,17 @@ class CardUpdate(Base):
     )
 
     def __repr__(self) -> str:
-        return f"CARD_UPDATES (id={self.update_id}, card_id={self.card_id}, new_ovr={self.new_ovr})" 
+        return f"CARD_UPDATES (id={self.update_id}, date={self.update_date}, card={self.card_id})" 
 
 class CardAttributeChange(Base):
     __tablename__ = "card_attribute_changes"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
     update_id: Mapped[int] = mapped_column()
+    update_date: Mapped[datetime.date] = mapped_column(Date)
     card_id: Mapped[str] = mapped_column()
+    
     name: Mapped[str] = mapped_column()
     new_value: Mapped[int] = mapped_column()
     old_value: Mapped[int] = mapped_column()
@@ -292,13 +309,13 @@ class CardAttributeChange(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["update_id", "card_id"],
-            ["card_updates.update_id", "card_updates.card_id"],
+            ["update_id", "update_date", "card_id"],
+            ["card_updates.update_id", "card_updates.update_date", "card_updates.card_id"],
         ),
     )
 
     def __repr__(self) -> str:
-        return f"CARD_ATTRIBUTE_CHANGES (id={self.id}, update_id={self.update_id}, card_id={self.card_id}, name={self.name}, delta={self.delta})" 
+        return f"ATTR_CHANGE ({self.name}: {self.delta})"
 
 class Player(Base):
     __tablename__ = "players"
@@ -573,4 +590,3 @@ class MLBGameFieldingStats(Base):
 
     def __repr__(self) -> str:
         return f"MLB_GAME_FIELDING_STATS (game_id={self.game_id}, player_id={self.player_id}, put_outs={self.put_outs})"
-
