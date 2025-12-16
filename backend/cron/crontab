@@ -1,13 +1,6 @@
 TZ=America/Vancouver
 
-# market_sync: every 10 minutes
-*/10 * * * * flock -n /tmp/market_sync.lock python -m src.run_job market_sync
-
-# card_sync: 3am and 3pm daily (reload-all-years for now)
-0 3,15 * * * flock -n /tmp/card_sync.lock python -m src.run_job card_sync --reload-all-years
-
-# market_candle_sync: daily at 12:01am
-1 0 * * * flock -n /tmp/market_candle_sync.lock python -m src.run_job market_candle_sync
-
-# roster_update_sync: Fri/Sat/Sun at 3pm
-0 15 * * 5,6,0 flock -n /tmp/roster_update_sync.lock python -m src.run_job roster_update_sync --reload-all-years
+# */10 * * * * flock -n /tmp/market_sync.lock python -m src.run_job market_sync
+# 0 3,15 * * * flock -n /tmp/card_sync.lock python -m src.run_job card_sync --reload-all-years
+# 1 0 * * * flock -n /tmp/market_candle_sync.lock python -m src.run_job market_candle_sync
+# 0 15 * * 5,6,0 flock -n /tmp/roster_update_sync.lock python -m src.run_job roster_update_sync
