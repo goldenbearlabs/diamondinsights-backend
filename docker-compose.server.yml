@@ -10,6 +10,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app_network
+    ports:
+      - "${TS_IP}:5432:5432"
 
   backend:
     build: ./backend
@@ -31,28 +33,6 @@ services:
     networks:
       - app_network
     command: bash -c "alembic upgrade head && tail -f /dev/null"
-
-  scheduler:
-    image: mlb_backend_image
-    restart: unless-stopped
-    depends_on:
-      - db
-      - backend
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      TZ: America/Vancouver
-    volumes:
-      - ./backend/src:/app/src
-      - ./backend/alembic:/app/alembic
-      - ./backend/alembic.ini:/app/alembic.ini
-      - ./backend/cron/crontab:/app/crontab:ro
-    networks:
-      - app_network
-    command: ["/usr/local/bin/supercronic", "/app/crontab"]
 
   portainer:
     image: portainer/portainer-ce:latest
