@@ -3,7 +3,7 @@ from src.core.config import THE_SHOW_YEARS
 from src.adapters.card_adapter import CardAdapter
 from src.database.models import Series, Quirk, Location, Card
 
-from typing import List, Dict, Iterable
+from typing import List, Dict
 from sqlalchemy import select, text, inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert
 
