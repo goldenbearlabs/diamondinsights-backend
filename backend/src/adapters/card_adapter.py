@@ -85,6 +85,7 @@ class CardAdapter(BaseAdapter):
 
             series_name = self._json_get(item, "series", "")
             if series_name and series_name in self.series_map:
+                card.series_name = series_name
                 card.series = self.series_map[series_name]
             
             item_quirks = self._json_get(item, "quirks", [])

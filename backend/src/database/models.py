@@ -110,7 +110,7 @@ class Card(Base):
     )
     
     def __repr__(self) -> str:
-        return f"CARD (id={self.id}, name={self.name}, series={self.series_id}, ovr={self.ovr})"
+        return f"CARD (id={self.id}, name={self.name}, series={self.series_name}, ovr={self.ovr})"
 
 class Series(Base):
     __tablename__ = "series"
@@ -578,6 +578,8 @@ class MLBGameFieldingStats(Base):
     chances: Mapped[int] = mapped_column()
     passed_balls: Mapped[int] = mapped_column()
     pickoffs: Mapped[int] = mapped_column()
+    stolen_bases_allowed: Mapped[int] = mapped_column()
+    caught_stealing: Mapped[int] = mapped_column()
 
     boxscore: Mapped["MLBGameBoxscore"] = relationship(back_populates="fielding_stats")
 
