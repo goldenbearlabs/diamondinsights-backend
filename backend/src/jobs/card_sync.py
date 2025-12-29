@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 
 class CardSync(BaseJob):
-    def __init__(self, reload_all_years: bool = False):
+    def __init__(self, reload_all_years: bool = True):
         super().__init__()
         self.set_child_instance(self)
         self.reload_all_years = reload_all_years
