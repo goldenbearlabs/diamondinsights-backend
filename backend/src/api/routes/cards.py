@@ -35,7 +35,12 @@ def get_cards(
     offset: int=0,
     db: Session = Depends(get_db)
 ):
-    "gets multiple cards (with optional filters)"
+    """
+    gets multiple cards (with optional filters)
+    Response Time: ~150 - 240ms for first time loading
+
+    
+    """
 
     query = db.query(Card)
 
