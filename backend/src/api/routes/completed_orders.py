@@ -19,7 +19,12 @@ def get_completed_orders(
     db: Session = Depends(get_db)
 ):
     
-    "gets the completed orders for cards (can filter by specific card_id)"
+    """
+    gets the completed orders for cards (can filter by specific card_id) |
+    Response Time: ~230 - 330 ms | 
+    Joins with CARD table ON card_id, to get name, team, ovr, and series
+    
+    """
 
     query = db.query(CompletedOrder, Card).join(Card, CompletedOrder.card_id == Card.id)
 

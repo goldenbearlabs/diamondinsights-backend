@@ -13,7 +13,11 @@ router = APIRouter(prefix="/cards", tags=["cards"])
 
 @router.get("/{card_id}", response_model=CardResponse)
 def get_card(card_id: str, db: Session = Depends(get_db)):
-    "gets a single card by its id"
+    """
+    gets a single card by its id |
+    Response Time: ~190ms
+    
+    """
     
     card = db.get(Card, card_id)
     
@@ -36,10 +40,9 @@ def get_cards(
     db: Session = Depends(get_db)
 ):
     """
-    gets multiple cards (with optional filters)
-    Response Time: ~150 - 240ms for first time loading
-
-    
+    gets multiple cards (with optional filters) |
+    Response Time: ~150 - 240ms for first time loading |
+    These queries don't join with any other tables.
     """
 
     query = db.query(Card)
