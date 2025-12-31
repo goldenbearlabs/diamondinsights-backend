@@ -28,39 +28,42 @@ class MarketSync(BaseJob):
         now = datetime.utcnow()
         cutoff = now - timedelta(hours=48)
 
-        card_ids = self._get_card_ids(db_session)
-        self.logger.info(f"Syncing market data for {len(card_ids)} cards (mlb{self.year})")
+        card_keys = self._get_card_keys(db_session)  # (derived_id, source_uuid)
+        self.logger.info(f"Syncing market data for {len(card_keys)} cards (mlb{self.year})")
 
         db_session.execute(delete(CompletedOrder).where(CompletedOrder.date < cutoff))
         db_session.commit()
 
         chunk_size = 200
-        total = len(card_ids)
-        done = 0
+        total = len(card_keys)
 
         for start in range(0, total, chunk_size):
-            chunk = card_ids[start : start + chunk_size]
+            chunk = card_keys[start : start + chunk_size]
 
-            payloads: List[Dict[str, Any]] = []
-            with ThreadPoolExecutor(max_workers=3) as ex:
-                futures = {ex.submit(self._fetch_market_payload_jitter, cid): cid for cid in chunk}
+            payloads: List[Tuple[str, Dict[str, Any]]] = []
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                futures = {
+                    ex.submit(self._fetch_market_payload_jitter, source_uuid): (card_id, source_uuid)
+                    for (card_id, source_uuid) in chunk
+                }
                 for fut in as_completed(futures):
-                    cid = futures[fut]
+                    card_id, source_uuid = futures[fut]
                     try:
                         payload = fut.result()
                     except Exception as e:
-                        self.logger.error(f"Card {cid} fetch failed: {e}", exc_info=True)
+                        self.logger.error(f"Card {card_id} ({source_uuid}) fetch failed: {e}", exc_info=True)
                         continue
                     if payload:
-                        payloads.append(payload)
+                        payloads.append((card_id, payload))
 
             listing_rows: List[Dict[str, Any]] = []
             order_rows: List[Dict[str, Any]] = []
             ph_rows: List[Dict[str, Any]] = []
 
-            for payload in payloads:
+            for card_id, payload in payloads:
                 out = self._build_rows_from_payload(
                     payload=payload,
+                    card_id=card_id,
                     season_year=season_year,
                     now=now,
                     cutoff=cutoff,
@@ -120,14 +123,15 @@ class MarketSync(BaseJob):
 
         self.logger.info("MarketSync complete.")
 
-    def _get_card_ids(self, session: Session) -> List[str]:
-        stmt = select(Card.id).where(Card.year == self.year)
-        return session.execute(stmt).scalars().all()
+    def _get_card_keys(self, session: Session) -> List[Tuple[str, str]]:
+        stmt = select(Card.id, Card.source_uuid).where(Card.year == self.year)
+        rows = session.execute(stmt).all()
+        return [(r[0], r[1]) for r in rows if r[0] and r[1]]
 
-    def _fetch_market_payload_jitter(self, card_id: str) -> Optional[Dict[str, Any]]:
-        time.sleep(random.uniform(0.05, 0.25))
+    def _fetch_market_payload_jitter(self, source_uuid: str) -> Optional[Dict[str, Any]]:
+        time.sleep(random.uniform(0.1, 0.3))
         url = f"https://mlb{self.year}.theshow.com/apis/listing.json"
-        params = {"uuid": card_id}
+        params = {"uuid": source_uuid}
         return self.api_client.get(url, params)
 
     def _to_int_price(self, v: Any) -> Optional[int]:
@@ -244,12 +248,11 @@ class MarketSync(BaseJob):
     def _build_rows_from_payload(
         self,
         payload: Dict[str, Any],
+        card_id: str,
         season_year: int,
         now: datetime,
         cutoff: datetime,
     ) -> Optional[Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]]:
-        item = payload.get("item") or {}
-        card_id = item.get("uuid")
         if not card_id:
             return None
 
@@ -328,8 +331,8 @@ class MarketSync(BaseJob):
                 {
                     "card_id": card_id,
                     "date": d,
-                    "best_buy_price": it.get("best_buy_price"),
-                    "best_sell_price": it.get("best_sell_price"),
+                    "best_buy_price": self._to_int_price(it.get("best_buy_price")),
+                    "best_sell_price": self._to_int_price(it.get("best_sell_price")),
                     "volume": volume,
                 }
             )
