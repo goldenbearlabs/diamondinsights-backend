@@ -10,15 +10,20 @@ class CardAdapter(BaseAdapter):
         self.quirk_map = quirk_map
         self.location_map = location_map
 
+    def _card_id(self, year: int, source_uuid: str) -> str:
+        return f"{year}:{source_uuid}"
+
     def run(self, data) -> List[Card]:
         cards = []
         for item in data:
-            uuid = self._json_get(item, "uuid", "")
-            if not uuid:
+            source_uuid = self._json_get(item, "source_uuid", "") or self._json_get(item, "uuid", "")
+            year = self._json_get(item, "year", 0) or 0
+            if not source_uuid or not year:
                 continue
-
+            
             card = Card()
-            card.id = uuid
+            card.id = self._card_id(year, source_uuid)
+            card.source_uuid = source_uuid
             card.year = self._json_get(item, "year", 0)
             card.name = self._json_get(item, "name", "Unknown")
             card.ovr = self._json_get(item, "ovr", 0) or 0
