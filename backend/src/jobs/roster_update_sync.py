@@ -1,11 +1,9 @@
 from datetime import datetime
 from src.jobs.base import BaseJob
 from src.core.config import THE_SHOW_YEARS, MAJOR_ROSTER_UPDATES, FIELDING_ROSTER_UPDATES
-from typing import Dict, List
-from sqlalchemy import select
+from typing import Dict
 from sqlalchemy.orm import Session
 import time
-
 
 from src.database.models import RosterUpdate, CardUpdate, CardAttributeChange
 
@@ -16,14 +14,13 @@ class RosterUpdateSync(BaseJob):
         self.set_child_instance(self)
         self.reload_all_years = reload_all_years
 
-    def execute(self, db_session):
+    def _card_id(self, year: int, source_uuid: str) -> str:
+        return f"{year}:{source_uuid}"
 
+    def execute(self, db_session):
         self.logger.info("Starting Roster Update Sync...")
 
-        if self.reload_all_years:
-            years_to_process = THE_SHOW_YEARS
-        else:
-            years_to_process = [THE_SHOW_YEARS[0]]
+        years_to_process = THE_SHOW_YEARS if self.reload_all_years else [THE_SHOW_YEARS[0]]
 
         for year in years_to_process:
             self.logger.info(f"Fetching data for year {year}")
@@ -38,14 +35,12 @@ class RosterUpdateSync(BaseJob):
                     self.logger.warning(
                         f"Year mismatch: processing mlb{year} but update {update_obj.id} has date {update_obj.date}"
                     )
-            
+
                 self.sync_update_details(db_session, year, update_obj.id, update_obj.date)
-                
                 time.sleep(1)
 
     def sync_roster_updates(self, session: Session, year: int, raw_data) -> Dict[int, RosterUpdate]:
         data = self._json_get(raw_data, "roster_updates", [])
-
         final_map: Dict[int, RosterUpdate] = {}
 
         for item in data:
@@ -74,22 +69,19 @@ class RosterUpdateSync(BaseJob):
                     is_fielding=fielding_update,
                 )
             )
-
             final_map[update_id] = ru
 
         session.flush()
-
         for ru in final_map.values():
             session.expunge(ru)
 
         self.logger.info(f"Synced {len(final_map)} roster updates for year {year}")
         return final_map
-    
-    def sync_update_details(self, session, year, update_id, update_date):
-        """Fetches the specific update details and populates CardUpdate + AttributeChanges"""
+
+    def sync_update_details(self, session: Session, year: int, update_id: int, update_date):
         url = f"https://mlb{year}.theshow.com/apis/roster_update.json"
         params = {"id": update_id}
-        
+
         data = self.api_client.get(url, params)
         attribute_changes = self._json_get(data, "attribute_changes", [])
 
@@ -99,10 +91,11 @@ class RosterUpdateSync(BaseJob):
 
         for item in attribute_changes:
             card_data = self._json_get(item, "item", {})
-            card_id = self._json_get(card_data, "uuid", "")
-            
-            if not card_id:
+            source_uuid = self._json_get(card_data, "uuid", "")
+            if not source_uuid:
                 continue
+
+            card_id = self._card_id(year, source_uuid)
 
             card_update = CardUpdate(
                 update_id=update_id,
@@ -112,39 +105,43 @@ class RosterUpdateSync(BaseJob):
                 old_ovr=self._json_get(item, "old_rank", 0),
                 new_rarity=self._json_get(item, "current_rarity", ""),
                 old_rarity=self._json_get(item, "old_rarity", ""),
-                trend_display=self._json_get(item, "trend_display", "")
+                trend_display=self._json_get(item, "trend_display", ""),
             )
 
-            changes_list = self._json_get(item, "changes", [])
+            changes_list = self._json_get(item, "changes", []) or []
             attr_change_objects = []
 
             for change in changes_list:
                 current_val_str = self._json_get(change, "current_value", "0")
                 delta_str = self._json_get(change, "delta", "0")
+
                 try:
                     current_val = int(current_val_str)
-                    delta_val = int(delta_str.strip().replace("+", "")) 
+                    delta_val = int(str(delta_str).strip().replace("+", ""))
                     old_val = current_val - delta_val
                 except ValueError:
                     current_val = 0
                     old_val = 0
 
-                attr_change = CardAttributeChange(
-                    name=self._json_get(change, "name", ""),
-                    new_value=current_val,
-                    old_value=old_val,
-                    direction=self._json_get(change, "direction", ""),
-                    delta=delta_str,
-                    color=self._json_get(change, "color", "")
+                attr_change_objects.append(
+                    CardAttributeChange(
+                        update_id=update_id,
+                        update_date=update_date,
+                        card_id=card_id,
+                        name=self._json_get(change, "name", ""),
+                        new_value=current_val,
+                        old_value=old_val,
+                        direction=self._json_get(change, "direction", ""),
+                        delta=delta_str,
+                        color=self._json_get(change, "color", ""),
+                    )
                 )
-                attr_change_objects.append(attr_change)
 
             card_update.attribute_changes = attr_change_objects
-
             session.merge(card_update)
 
         try:
             session.commit()
         except Exception as e:
             self.logger.error(f"Failed to commit update {update_id}: {e}")
-            session.rollback()    
+            session.rollback()

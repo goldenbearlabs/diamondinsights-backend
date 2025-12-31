@@ -1,6 +1,6 @@
 from typing import List, Optional
 import datetime
-from sqlalchemy import Column, ForeignKey, Table, Date, ForeignKeyConstraint
+from sqlalchemy import Column, ForeignKey, Table, Date, ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.database.database import Base
 
@@ -20,9 +20,11 @@ card_location_association = Table(
 
 class Card(Base):
     __tablename__ = "cards"
+    __table_args__ = (UniqueConstraint("year", "source_uuid", name="uq_cards_year_source_uuid"),)
 
     id: Mapped[str] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column()
+    source_uuid: Mapped[str] = mapped_column()
     year: Mapped[int] = mapped_column()
     img: Mapped[str] = mapped_column()
     baked_img: Mapped[Optional[str]] = mapped_column()

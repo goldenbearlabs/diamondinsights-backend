@@ -6,6 +6,8 @@ from src.database.models import Series, Quirk, Location, Card
 from typing import List, Dict
 from sqlalchemy import select, text, inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert
+import time
+import random
 
 
 class CardSync(BaseJob):
@@ -27,10 +29,14 @@ class CardSync(BaseJob):
             data = self.fetch_paginated_data(url, params)
 
             for item in data:
-                uuid = item.get("uuid")
-                if uuid:
-                    raw_items_map[uuid] = item
-                    raw_items_map[uuid]["year"] = year
+                source_uuid = item.get("uuid")
+                if not source_uuid:
+                    continue
+                    
+                derived_id = f"{year}:{source_uuid}"
+                raw_items_map[derived_id] = item
+                raw_items_map[derived_id]["year"] = year
+                raw_items_map[derived_id]["source_uuid"] = source_uuid
 
             self.logger.info(f"Done fetching year {year}. Unique items so far: {len(raw_items_map)}")
 
@@ -148,6 +154,9 @@ class CardSync(BaseJob):
             fetched_objects.extend(items)
 
             page += 1
+            if page > max_pages:
+                break
+
             params["page"] = page
             res = self.api_client.get(url, params)
 
