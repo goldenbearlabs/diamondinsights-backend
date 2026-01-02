@@ -37,7 +37,7 @@ IGNORED_GAME_TYPES = {"S", "A", "I", "E"}
 class GameBoxscoreSync(BaseJob):
     def __init__(
         self,
-        season_year: Optional[int] = 2025,
+        season_year: Optional[int] = 2024,
         window_start_month: int = 2,
         window_start_day: int = 1,
         window_end_month: int = 12,
