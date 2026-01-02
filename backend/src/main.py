@@ -3,7 +3,8 @@ import time
 from fastapi import FastAPI, Request
 from dotenv import load_dotenv
 load_dotenv()
-from backend.src.api.routes import cards, listings, completed_orders, quirks, market_candles
+from backend.src.api.routes import cards, listings, completed_orders, quirks, market_candles, mlb_game_batting_stats, players
+
 
 
 
@@ -30,6 +31,8 @@ app.include_router(listings.router)
 app.include_router(completed_orders.router)
 app.include_router(quirks.router)
 app.include_router(market_candles.router)
+app.include_router(mlb_game_batting_stats.router)
+app.include_router(players.router)
 
 @app.get("/")
 def health_check():
