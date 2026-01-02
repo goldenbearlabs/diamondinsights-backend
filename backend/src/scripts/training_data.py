@@ -141,19 +141,34 @@ def calc_batting_metrics(s, prefix):
     return out
 
 def agg_batting(df, prefix):
-    total_sum = df.sum(numeric_only=True).to_dict()
+    def clean_split(s):
+        return str(s).lower().replace(" ", "")
+
+    if not df.empty and "split" in df.columns:
+        splits_clean = df["split"].apply(clean_split)
+        
+        total_mask = splits_clean.isin(["vslhp", "vsrhp"])
+        total_sum = df[total_mask].sum(numeric_only=True).to_dict()
+    else:
+        total_sum = df.sum(numeric_only=True).to_dict()
+
     out = calc_batting_metrics(total_sum, prefix)
 
     if not df.empty and "split" in df.columns:
         for split_name, gdf in df.groupby("split"):
-            s_clean = str(split_name).lower().replace(" ", "")
+            s_clean = clean_split(split_name)
             split_prefix = f"{prefix}{s_clean}_"
             split_sum = gdf.sum(numeric_only=True).to_dict()
             out.update(calc_batting_metrics(split_sum, split_prefix))
     return out
 
 def calc_pitching_metrics(s, prefix):
-    ip = s.get("ip", 0)
+    outs = s.get("outs_pitched", 0)
+    
+    math_ip = outs / 3.0
+    
+    display_ip = (outs // 3) + ((outs % 3) / 10.0)
+
     ab = s.get("ab", 0)
     h = s.get("h", 0)
     bb = s.get("bb", 0)
@@ -161,25 +176,40 @@ def calc_pitching_metrics(s, prefix):
     er = s.get("er", 0)
     k = s.get("k", 0)
 
-    exclude = {"player_id", "season", "game_id"}
+    exclude = {"player_id", "season", "game_id", "outs_pitched", "ip"}
     out = {f"{prefix}{k}": v for k, v in s.items() if k not in exclude}
 
-    out[f"{prefix}era"] = safe_div(er * 9, ip)
-    out[f"{prefix}k9"] = safe_div(k * 9, ip)
-    out[f"{prefix}bb9"] = safe_div(bb * 9, ip)
-    out[f"{prefix}hr9"] = safe_div(hr * 9, ip)
-    out[f"{prefix}whip"] = safe_div(bb + h, ip)
+    out[f"{prefix}outs_pitched"] = outs
+    out[f"{prefix}ip"] = display_ip
+
+    out[f"{prefix}era"] = safe_div(er * 9, math_ip)
+    out[f"{prefix}k9"] = safe_div(k * 9, math_ip)
+    out[f"{prefix}bb9"] = safe_div(bb * 9, math_ip)
+    out[f"{prefix}hr9"] = safe_div(hr * 9, math_ip)
+    out[f"{prefix}whip"] = safe_div(bb + h, math_ip)
+    
     out[f"{prefix}avg_against"] = safe_div(h, ab)
     out[f"{prefix}strike_pct"] = safe_div(s.get("strikes_thrown", 0), s.get("pitches_thrown", 0))
+    
     return out
 
 def agg_pitching(df, prefix):
-    total_sum = df.sum(numeric_only=True).to_dict()
+    def clean_split(s):
+        return str(s).lower().replace(" ", "")
+
+    if not df.empty and "split" in df.columns:
+        splits_clean = df["split"].apply(clean_split)
+        
+        total_mask = splits_clean.isin(["vslhb", "vsrhb"])
+        total_sum = df[total_mask].sum(numeric_only=True).to_dict()
+    else:
+        total_sum = df.sum(numeric_only=True).to_dict()
+
     out = calc_pitching_metrics(total_sum, prefix)
 
     if not df.empty and "split" in df.columns:
         for split_name, gdf in df.groupby("split"):
-            s_clean = str(split_name).lower().replace(" ", "")
+            s_clean = clean_split(split_name)
             split_prefix = f"{prefix}{s_clean}_"
             split_sum = gdf.sum(numeric_only=True).to_dict()
             out.update(calc_pitching_metrics(split_sum, split_prefix))
@@ -273,22 +303,25 @@ def main():
         br_p = baserunning[baserunning.player_id == pid].copy()
         f_p = fielding[fielding.player_id == pid].copy()
 
-        szn_mask_b = (b_p.season == year)
-        szn_mask_p = (p_p.season == year)
+        szn_mask_b = (b_p.season == year) & (b_p.game_date < ud)
+        szn_mask_p = (p_p.season == year) & (p_p.game_date < ud)
         
         m1_start = ud - timedelta(days=30)
-        m1_mask_b = (b_p.game_date >= m1_start) & (b_p.game_date <= ud)
-        m1_mask_p = (p_p.game_date >= m1_start) & (p_p.game_date <= ud)
+        m1_mask_b = (b_p.game_date >= m1_start) & (b_p.game_date < ud)
+        m1_mask_p = (p_p.game_date >= m1_start) & (p_p.game_date < ud)
 
         if pd.notna(last):
-            since_mask_b = (b_p.game_date > last) & (b_p.game_date <= ud)
-            since_mask_p = (p_p.game_date > last) & (p_p.game_date <= ud)
+            since_mask_b = (b_p.game_date > last) & (b_p.game_date < ud)
+            since_mask_p = (p_p.game_date > last) & (p_p.game_date < ud)
         else:
             since_mask_b = szn_mask_b
             since_mask_p = szn_mask_p
 
+        szn_br_df = br_p[(br_p.season == year) & (br_p.game_date < ud)]
+        szn_f_df = f_p[(f_p.season == year) & (f_p.game_date < ud)]
+
         scopes = {
-            "szn_": (b_p[szn_mask_b], p_p[szn_mask_p], br_p[br_p.season == year], f_p[f_p.season == year]),
+            "szn_": (b_p[szn_mask_b], p_p[szn_mask_p], szn_br_df, szn_f_df),
             "m1_": (b_p[m1_mask_b], p_p[m1_mask_p], br_p[br_p.game_date.between(m1_start, ud)], f_p[f_p.game_date.between(m1_start, ud)]),
             "since_": (b_p[since_mask_b], p_p[since_mask_p], None, None) 
         }
