@@ -51,6 +51,19 @@ def load_base():
     
     return df
 
+def load_attribute_changes():
+    q = """
+        SELECT update_id, update_date, card_id, name, new_value, old_value, delta
+        FROM card_attribute_changes
+    """
+    df = pd.read_sql(text(q), engine, parse_dates=["update_date"])
+    df = make_naive(df, "update_date")
+    
+    # Clean delta (remove '+' string and cast to numeric)
+    df["delta"] = df["delta"].astype(str).str.replace("+", "", regex=False)
+    df["delta"] = pd.to_numeric(df["delta"], errors='coerce').fillna(0)
+    return df
+
 def load_batting():
     df = pd.read_sql(text("""
         SELECT b.player_id, g.game_date, g.season, b.split,
@@ -201,11 +214,37 @@ def agg_fielding(df, prefix):
 def main():
     print("Loading Data...")
     base = load_base()
+    attr_changes = load_attribute_changes()
     batting = load_batting()
     pitching = load_pitching()
     baserunning = load_baserunning()
     fielding = load_fielding()
     print("Data Loaded.")
+
+    # --- Start: Merge Attribute Changes ---
+    if not attr_changes.empty:
+        # Pivot to wide format: (update_id, card_id) -> contactLeft_delta, contactLeft_old, etc.
+        attr_pivot = attr_changes.pivot_table(
+            index=["update_id", "update_date", "card_id"],
+            columns="name",
+            values=["new_value", "old_value", "delta"],
+            aggfunc="first"
+        )
+        
+        # Flatten MultiIndex columns: e.g., ('new_value', 'contactLeft') -> 'contactLeft_new'
+        # Mapping: new_value -> new, old_value -> old, delta -> delta
+        val_map = {"new_value": "new", "old_value": "old", "delta": "delta"}
+        attr_pivot.columns = [f"{col[1]}_{val_map[col[0]]}" for col in attr_pivot.columns]
+        
+        attr_pivot = attr_pivot.reset_index()
+        
+        # Merge into base (left join keeps all base rows, fills missing attrs with NaN)
+        base = pd.merge(base, attr_pivot, on=["update_id", "update_date", "card_id"], how="left")
+        
+        # Fill newly created attribute columns with 0
+        new_cols = [c for c in attr_pivot.columns if c not in ["update_id", "update_date", "card_id"]]
+        base[new_cols] = base[new_cols].fillna(0)
+    # --- End: Merge Attribute Changes ---
 
     rows = []
     
