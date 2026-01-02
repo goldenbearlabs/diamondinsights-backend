@@ -70,10 +70,25 @@ def _batter_hand_split(play: Dict[str, Any]) -> str:
 
 
 def _is_risp_start(play: Dict[str, Any]) -> bool:
+    """
+    Determines if the play started with runners in scoring position.
+    Checks runner start positions first to catch HRs clearing the bases.
+    """
+    runners = play.get("runners") or []
+    for r in runners:
+        mv = r.get("movement") or {}
+        start_pos = str(mv.get("start") or "").strip().upper()
+        if start_pos in {"2B", "3B"}:
+            return True
+
     matchup = play.get("matchup") or {}
     splits = matchup.get("splits") or {}
-    men = _norm(splits.get("menOnBase"))
-    return "risp" in men
+    men_on = _norm(splits.get("menOnBase"))
+    
+    if men_on in {"risp", "loaded"}:
+        return True
+
+    return False
 
 
 def _event_type(play: Dict[str, Any]) -> str:
@@ -260,14 +275,6 @@ class MLBPlayByPlayPitchingAggregator:
         Updates self._runners_on_base_ids based on who ends up on base after the play.
         """
         self._runners_on_base_ids.clear()
-        
-        # 'runners' list contains events. We need to find who ends up safe on a base.
-        # Usually, if someone is on base, they appear in 'runners' with an 'end' base.
-        # Note: If a runner does NOT move, they might NOT be in the runners list for this play in some API versions.
-        # BUT, the official API usually includes a snapshot of all runners if there is any action.
-        # To be safe, we can look at matchup.splits.menOnBase for the NEXT play, but we don't have access to the next play here.
-        # Generally, 'runners' array in 'allPlays' describes the outcome. 
-        # If 'end' is '1B', '2B', '3B', they are on base.
         
         runners = play.get("runners") or []
         for r in runners:

@@ -68,10 +68,21 @@ def _pitcher_hand_split(play: Dict[str, Any]) -> Optional[str]:
 
 
 def _is_risp_start(play: Dict[str, Any]) -> bool:
+    runners = play.get("runners") or []
+    for r in runners:
+        mv = r.get("movement") or {}
+        start_pos = str(mv.get("start") or "").strip().upper()
+        if start_pos in {"2B", "3B"}:
+            return True
+
     matchup = play.get("matchup") or {}
     splits = matchup.get("splits") or {}
-    return _norm(splits.get("menOnBase")) == "risp"
+    men_on = _norm(splits.get("menOnBase"))
 
+    if men_on in {"risp", "loaded"}:
+        return True
+
+    return False
 
 @dataclass
 class BatLine:
@@ -208,11 +219,6 @@ class MLBPlayByPlayBattingAggregator:
         
         if "strikeout" in event_type: 
             line.so += 1
-
-        if "sac_fly" in event_type or "sacrifice_fly" in event_type:
-            line.sac_flies += 1
-        elif "sac_bunt" in event_type or "sacrifice_bunt" in event_type:
-            line.sac_bunts += 1
         
         if "double_play" in event_type:
             line.gidp += 1

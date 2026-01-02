@@ -166,7 +166,6 @@ def calc_pitching_metrics(s, prefix):
     outs = s.get("outs_pitched", 0)
     
     math_ip = outs / 3.0
-    
     display_ip = (outs // 3) + ((outs % 3) / 10.0)
 
     ab = s.get("ab", 0)
@@ -177,7 +176,8 @@ def calc_pitching_metrics(s, prefix):
     k = s.get("k", 0)
 
     exclude = {"player_id", "season", "game_id", "outs_pitched", "ip"}
-    out = {f"{prefix}{k}": v for k, v in s.items() if k not in exclude}
+    
+    out = {f"{prefix}p{k}": v for k, v in s.items() if k not in exclude}
 
     out[f"{prefix}outs_pitched"] = outs
     out[f"{prefix}ip"] = display_ip
