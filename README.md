@@ -59,3 +59,6 @@ Steps to add new machine as a runner
 <img width="515" height="534" alt="Screenshot 2025-12-16 at 3 43 55 PM" src="https://github.com/user-attachments/assets/43cc83ac-561e-4685-b9bc-525e580a2de4" />
 
 [MIT](https://choosealicense.com/licenses/mit/)
+
+## Get new set of training data
+docker compose exec backend python -m src.scripts.training_data

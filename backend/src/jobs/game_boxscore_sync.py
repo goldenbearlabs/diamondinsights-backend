@@ -40,7 +40,7 @@ class GameBoxscoreSync(BaseJob):
         season_year: Optional[int] = 2025,
         window_start_month: int = 2,
         window_start_day: int = 1,
-        window_end_month: int = 3,
+        window_end_month: int = 12,
         window_end_day: int = 1,
         game_chunk_size: int = 1000,
         boxscore_chunk_size: int = 5000,
@@ -131,105 +131,86 @@ class GameBoxscoreSync(BaseJob):
 
         self._prime_player_exists_cache(db_session)
 
-        boxscore_rows_buffer: List[Dict[str, Any]] = []
-        fielding_rows_buffer: List[Dict[str, Any]] = []
-        all_player_ids: Set[int] = set()
+        # --- REFACTORED: Process Boxscores in Batches to avoid SQL Parameter Limit ---
         per_game_player_ids: Dict[int, Set[int]] = {}
         failed_games = 0
+        
+        BOXSCORE_BATCH_SIZE = 100
+        total_boxscore_games = len(target_game_ids)
+        
+        for i in range(0, total_boxscore_games, BOXSCORE_BATCH_SIZE):
+            batch_game_ids = target_game_ids[i : i + BOXSCORE_BATCH_SIZE]
+            self.logger.info(f"Processing Boxscore batch {i} to {i+len(batch_game_ids)} of {total_boxscore_games}")
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            futures = {pool.submit(self._fetch_boxscore_worker, gid): gid for gid in target_game_ids}
-            for fut in as_completed(futures):
-                gid = futures[fut]
-                try:
-                    rows_for_game, f_rows_for_game, player_ids_for_game = fut.result()
-                except Exception as e:
-                    failed_games += 1
-                    self.logger.info(f"[BOXSCORE_FAILED] game_id={gid} err='{e}'")
+            boxscore_rows_buffer: List[Dict[str, Any]] = []
+            fielding_rows_buffer: List[Dict[str, Any]] = []
+            batch_player_ids: Set[int] = set()
+
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+                futures = {pool.submit(self._fetch_boxscore_worker, gid): gid for gid in batch_game_ids}
+                for fut in as_completed(futures):
+                    gid = futures[fut]
+                    try:
+                        rows_for_game, f_rows_for_game, player_ids_for_game = fut.result()
+                    except Exception as e:
+                        failed_games += 1
+                        self.logger.info(f"[BOXSCORE_FAILED] game_id={gid} err='{e}'")
+                        continue
+
+                    if not rows_for_game:
+                        self.logger.info(f"[BOXSCORE_EMPTY] game_id={gid}")
+                    if not player_ids_for_game:
+                        self.logger.info(f"[BOXSCORE_NO_PLAYERS] game_id={gid} rows={len(rows_for_game)}")
+                    
+                    if rows_for_game:
+                        boxscore_rows_buffer.extend(rows_for_game)
+
+                    if f_rows_for_game:
+                        fielding_rows_buffer.extend(f_rows_for_game)
+
+                    if player_ids_for_game:
+                        batch_player_ids |= player_ids_for_game
+                        # Persist for PBP phase
+                        per_game_player_ids[int(gid)] = set(player_ids_for_game)
+
+            # Sync Players found in this batch
+            if batch_player_ids:
+                missing = {pid for pid in batch_player_ids if pid not in self._player_exists_cache}
+                if missing:
+                    self.logger.info(f"Missing players to upsert in batch={len(missing)}")
+                    people = self._fetch_people_bulk(missing)
+                    created_p, updated_p, failed_p = self._upsert_people_from_people_payload(db_session, people)
+                    db_session.commit()
+
+            # Filter Boxscore Rows (ensure player exists)
+            filtered_boxscore_rows: List[Dict[str, Any]] = []
+            skipped_missing_player = 0
+            for r in boxscore_rows_buffer:
+                pid = int(r["player_id"])
+                if pid not in self._player_exists_cache:
+                    skipped_missing_player += 1
                     continue
+                filtered_boxscore_rows.append(r)
 
-                if not rows_for_game:
-                    self.logger.info(f"[BOXSCORE_EMPTY] game_id={gid}")
-                if not player_ids_for_game:
-                    self.logger.info(f"[BOXSCORE_NO_PLAYERS] game_id={gid} rows={len(rows_for_game)}")
-                if player_ids_for_game and len(player_ids_for_game) < 10:
-                    self.logger.info(
-                        f"[BOXSCORE_SMALL] game_id={gid} player_ids={len(player_ids_for_game)} rows={len(rows_for_game)}"
-                    )
+            # Upsert Boxscores
+            if filtered_boxscore_rows:
+                created, updated = self._upsert_game_boxscores(db_session, filtered_boxscore_rows)
+            
+            # Filter and Upsert Fielding Rows
+            filtered_fielding_rows: List[Dict[str, Any]] = []
+            for r in fielding_rows_buffer:
+                if int(r["player_id"]) in self._player_exists_cache:
+                    filtered_fielding_rows.append(r)
 
-                if rows_for_game:
-                    boxscore_rows_buffer.extend(rows_for_game)
+            if filtered_fielding_rows:
+                self._upsert_fielding_stats(db_session, filtered_fielding_rows)
 
-                if f_rows_for_game:
-                    fielding_rows_buffer.extend(f_rows_for_game)
-
-                if player_ids_for_game:
-                    all_player_ids |= player_ids_for_game
-                    per_game_player_ids[int(gid)] = set(player_ids_for_game)
+            db_session.commit()
+            self.logger.info(f"Boxscore Batch {i} committed. skipped_players={skipped_missing_player}")
 
         self.logger.info(
-            f"Fetched boxscores. games_ok={len(per_game_player_ids)} failed_games={failed_games} "
-            f"raw_boxscore_rows={len(boxscore_rows_buffer)} raw_fielding_rows={len(fielding_rows_buffer)} "
-            f"unique_player_ids={len(all_player_ids)}"
+            f"Finished fetching boxscores. games_ok={len(per_game_player_ids)} failed_games={failed_games}"
         )
-
-        if all_player_ids:
-            missing = {pid for pid in all_player_ids if pid not in self._player_exists_cache}
-            if missing:
-                self.logger.info(f"Missing players to upsert={len(missing)}")
-                people = self._fetch_people_bulk(missing)
-                created_p, updated_p, failed_p = self._upsert_people_from_people_payload(db_session, people)
-                self.logger.info(
-                    f"Players upserted from boxscores. created={created_p} updated={updated_p} failed={failed_p}"
-                )
-                db_session.commit()
-
-        filtered_boxscore_rows: List[Dict[str, Any]] = []
-        skipped_missing_player = 0
-        for r in boxscore_rows_buffer:
-            pid = int(r["player_id"])
-            if pid not in self._player_exists_cache:
-                skipped_missing_player += 1
-                continue
-            filtered_boxscore_rows.append(r)
-
-        raw_rows_by_game: Dict[int, int] = {}
-        kept_rows_by_game: Dict[int, int] = {}
-        for r in boxscore_rows_buffer:
-            gid = int(r["game_id"])
-            raw_rows_by_game[gid] = raw_rows_by_game.get(gid, 0) + 1
-        for r in filtered_boxscore_rows:
-            gid = int(r["game_id"])
-            kept_rows_by_game[gid] = kept_rows_by_game.get(gid, 0) + 1
-
-        fully_filtered_games = [
-            gid for gid, n in raw_rows_by_game.items() if n > 0 and kept_rows_by_game.get(gid, 0) == 0
-        ]
-        if fully_filtered_games:
-            self.logger.info(
-                f"[BOXSCORE_FILTERED_ALL] games={len(fully_filtered_games)} sample={fully_filtered_games[:25]}"
-            )
-
-        if filtered_boxscore_rows:
-            created, updated = self._upsert_game_boxscores(db_session, filtered_boxscore_rows)
-            db_session.commit()
-        else:
-            created, updated = 0, 0
-
-        self.logger.info(
-            f"Boxscores upserted. created_or_touched={created} updated_or_touched={updated} "
-            f"skipped_missing_player_rows={skipped_missing_player}"
-        )
-
-        filtered_fielding_rows: List[Dict[str, Any]] = []
-        for r in fielding_rows_buffer:
-            if int(r["player_id"]) in self._player_exists_cache:
-                filtered_fielding_rows.append(r)
-
-        if filtered_fielding_rows:
-            self._upsert_fielding_stats(db_session, filtered_fielding_rows)
-            self.logger.info(f"Fielding stats upserted. count={len(filtered_fielding_rows)}")
-            db_session.commit()
 
         missing_boxscore_games = list(
             db_session.execute(
@@ -299,7 +280,7 @@ class GameBoxscoreSync(BaseJob):
                     games_with_pbp += 1
 
             self.logger.info(
-                f"[PBP_FINAL_FLUSH] batting={len(batting_rows_buffer)} baserun={len(baserunning_rows_buffer)} "
+                f"[PBP_BATCH_FLUSH] batting={len(batting_rows_buffer)} baserun={len(baserunning_rows_buffer)} "
                 f"pitching={len(pitching_rows_buffer)}"
             )
 
@@ -473,53 +454,70 @@ class GameBoxscoreSync(BaseJob):
         res = client.get(url, params=None) or {}
         teams = res.get("teams") or {}
 
-        boxscore_rows: List[Dict[str, Any]] = []
-        fielding_rows: List[Dict[str, Any]] = []
         player_ids: Set[int] = set()
 
-        def process_side(side: str):
+        # Ensure unique (game_id, player_id) for boxscores
+        boxscore_team_by_pid: Dict[int, int] = {}
+
+        # Ensure unique (game_id, player_id) for fielding rows
+        fielding_by_pid: Dict[int, Dict[str, Any]] = {}
+
+        def process_side(side: str) -> None:
             t = teams.get(side) or {}
             team_id_raw = (t.get("team") or {}).get("id")
             if team_id_raw is None:
                 return
-            
+
             team_id = int(team_id_raw)
             players = t.get("players") or {}
-            
+
             for pdata in players.values():
                 person = pdata.get("person") or {}
                 pid_raw = person.get("id")
                 if pid_raw is None:
                     continue
-                
+
                 pid = int(pid_raw)
                 player_ids.add(pid)
-                
-                boxscore_rows.append({
-                    "game_id": int(game_id),
-                    "player_id": pid, 
-                    "team_id": team_id
-                })
+
+                prev_team = boxscore_team_by_pid.get(pid)
+                if prev_team is None:
+                    boxscore_team_by_pid[pid] = team_id
+                elif prev_team != team_id:
+                    self.logger.info(
+                        f"[BOXSCORE_BOTH_TEAMS] game_id={int(game_id)} player_id={pid} "
+                        f"team_prev={prev_team} team_new={team_id}"
+                    )
+                    boxscore_team_by_pid[pid] = prev_team
 
                 stats = pdata.get("stats") or {}
                 f_stats = stats.get("fielding") or {}
-                
+
                 assists = self._safe_int(f_stats.get("assists")) or 0
                 put_outs = self._safe_int(f_stats.get("putOuts")) or 0
                 errors = self._safe_int(f_stats.get("errors")) or 0
                 passed_balls = self._safe_int(f_stats.get("passedBall")) or 0
                 pickoffs = self._safe_int(f_stats.get("pickoffs")) or 0
-                
-                # These are the Defensive/Allowed stats
+
                 sb_allowed = self._safe_int(f_stats.get("stolenBases")) or 0
                 cs_allowed = self._safe_int(f_stats.get("caughtStealing")) or 0
-                
+
                 chances = self._safe_int(f_stats.get("chances")) or (assists + put_outs + errors)
 
-                has_fielding_stat = (chances > 0) or (passed_balls > 0) or (pickoffs > 0) or (sb_allowed > 0) or (cs_allowed > 0)
-                
-                if has_fielding_stat:
-                    fielding_rows.append({
+                has_fielding_stat = (
+                    (chances > 0)
+                    or (passed_balls > 0)
+                    or (pickoffs > 0)
+                    or (sb_allowed > 0)
+                    or (cs_allowed > 0)
+                )
+
+                if not has_fielding_stat:
+                    continue
+
+                existing = fielding_by_pid.get(pid)
+                if existing is None:
+                    fielding_by_pid[pid] = {
                         "game_id": int(game_id),
                         "player_id": pid,
                         "assists": assists,
@@ -529,11 +527,26 @@ class GameBoxscoreSync(BaseJob):
                         "passed_balls": passed_balls,
                         "pickoffs": pickoffs,
                         "stolen_bases_allowed": sb_allowed,
-                        "caught_stealing": cs_allowed
-                    })
+                        "caught_stealing": cs_allowed,
+                    }
+                else:
+                    existing["assists"] += assists
+                    existing["put_outs"] += put_outs
+                    existing["errors"] += errors
+                    existing["chances"] += chances
+                    existing["passed_balls"] += passed_balls
+                    existing["pickoffs"] += pickoffs
+                    existing["stolen_bases_allowed"] += sb_allowed
+                    existing["caught_stealing"] += cs_allowed
 
         process_side("home")
         process_side("away")
+
+        boxscore_rows: List[Dict[str, Any]] = [
+            {"game_id": int(game_id), "player_id": pid, "team_id": tid}
+            for pid, tid in boxscore_team_by_pid.items()
+        ]
+        fielding_rows: List[Dict[str, Any]] = list(fielding_by_pid.values())
 
         return boxscore_rows, fielding_rows, player_ids
 
