@@ -9,7 +9,7 @@ from src.database.models import RosterUpdate, CardUpdate, CardAttributeChange
 
 
 class RosterUpdateSync(BaseJob):
-    def __init__(self, reload_all_years: bool = False):
+    def __init__(self, reload_all_years: bool = True):
         super().__init__()
         self.set_child_instance(self)
         self.reload_all_years = reload_all_years

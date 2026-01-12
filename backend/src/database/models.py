@@ -2,7 +2,7 @@ from typing import List, Optional
 import datetime
 from sqlalchemy import Column, ForeignKey, Table, Date, ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from backend.src.database.database import Base
+from src.database.database import Base
 
 card_quirk_association = Table(
     "card_quirks",
