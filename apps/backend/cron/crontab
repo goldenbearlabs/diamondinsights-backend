@@ -3,4 +3,6 @@ TZ=America/Vancouver
 */10 * * * * flock -n /tmp/market_sync.lock python -m src.run_job market_sync
 0 3,15 * * * flock -n /tmp/card_sync.lock python -m src.run_job card_sync
 1 0 * * * flock -n /tmp/market_candle_sync.lock python -m src.run_job market_candle_sync
+0 2 * * * flock -n /tmp/player_sync.lock python -m src.run_job player_sync
+0 3 * * * flock -n /tmp/game_boxscore_sync.lock python -m src.run_job game_boxscore_sync
 0 15 * * 5,6,0 flock -n /tmp/roster_update_sync.lock python -m src.run_job roster_update_sync
