@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from backend.src.database.database import get_db
-from backend.src.database.models import MarketCandle, Card
-from backend.src.schemas.market_candle import MarketCandleResponse
+from src.database.database import get_db
+from src.database.models import MarketCandle, Card
+from src.schemas.market_candle import MarketCandleResponse
 
 
 router = APIRouter(prefix="/market_candles", tags=["market_candles"])
@@ -97,4 +97,3 @@ def get_market_candle(card_id: str, db: Session = Depends(get_db)):
         "sell_volume": market_candle.sell_volume,
         "buy_volume": market_candle.buy_volume
     }
-

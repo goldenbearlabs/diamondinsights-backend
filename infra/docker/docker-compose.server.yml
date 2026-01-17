@@ -11,16 +11,14 @@ services:
     networks:
       - app_network
     ports:
-      - "127.0.0.1:5432:5432"
+      - "${TS_IP}:5432:5432"
 
   backend:
-    build: ./backend
+    build:
+      context: ../../apps/backend
+      dockerfile: Dockerfile
     image: mlb_backend_image
     restart: unless-stopped
-    volumes:
-      - ./backend/src:/app/src
-      - ./backend/alembic:/app/alembic
-      - ./backend/alembic.ini:/app/alembic.ini
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -32,7 +30,8 @@ services:
       - db
     networks:
       - app_network
-    command: bash -c "alembic upgrade head && tail -f /dev/null"
+    command: bash -c "alembic upgrade head && python src/main.py"
+
 
   portainer:
     image: portainer/portainer-ce:latest

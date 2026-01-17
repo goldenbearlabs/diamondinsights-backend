@@ -1,9 +1,9 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from backend.src.database.database import get_db
-from backend.src.database.models import MLBGameBattingStats, MLBGame
-from backend.src.schemas.mlb_game_batting_stat import MLBGameBattingStatResponse
+from src.database.database import get_db
+from src.database.models import MLBGameBattingStats, MLBGame
+from src.schemas.mlb_game_batting_stat import MLBGameBattingStatResponse
 
 router = APIRouter(prefix="/mlb_game_batting_stats", tags=["mlb_game_batting_stats"])
 

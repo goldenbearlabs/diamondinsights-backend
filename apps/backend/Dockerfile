@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 ARG TARGETARCH
@@ -24,6 +24,7 @@ RUN echo "Building for TARGETPLATFORM=${TARGETPLATFORM} TARGETARCH=${TARGETARCH}
 COPY alembic.ini .
 COPY alembic ./alembic
 COPY src ./src
+COPY cron/crontab ./crontab
 
 RUN useradd app
 USER app

@@ -20,15 +20,36 @@ Github is source of truth, will auto deploy main branch to server. There is bran
 ## Portainer
 http://142.93.158.215:9000
 
+## Local Development (Docker + Makefile)
+
+### Setup
+1) Copy `.env.example` to `.env`
+2) Run `make up` to build and start local services
+
+### Common commands
+- `make up` builds and starts local services (db + backend + portainer)
+- `make down` stops local services
+- `make ps` shows running containers
+- `make logs` tails local logs
+
 ## Updating DB
 
 1) update models.py
-2) docker compose exec backend alembic revision --autogenerate -m "desc"
-3) docker compose exec backend alembic upgrade head
+2) `make revision REV_MSG="desc"` generates a migration
+3) `make migrate` applies migrations
 
 ## Run a job locally
 
-1) docker compose exec backend python -c "from src.jobs.card_sync import CardSync; CardSync().run()
+Example:
+`make run-job JOB_MODULE=src.jobs.card_sync JOB_CLASS=CardSync`
+
+Or use the shortcuts:
+- `make card-sync`
+- `make market_sync`
+- `make market_candle_sync`
+- `make roster_update_sync`
+- `make player_sync`
+- `make game_boxscore_sync`
 
 ## Cron jobs with external proxy runners using tailscale
 
@@ -36,22 +57,22 @@ Problem - Digital Ocean IP address is blocked from making api calls to external 
 Obvious issue - Creates single point of failure if someone unplugs my desktop or power goes out. Basic solution - add a secondary raspberry pi at alternative location that also tries running jobs (they race to acquire locks from the db)
 Heartbeats are sent into the db to monitor. Tailscale IP: 100.84.249.5
 
-Steps to update
-1) cd to repo on runner device
-2) git pull
-3) docker compose -f docker-compose.runner.yml --env-file .env-runner up -d --build or docker compose -f docker-compose.yml --env-file .env-runner restart
+Runner setup (cron machine)
+1) copy `.env.example` to `.env-runner` and set `POSTGRES_HOST` to the server/Tailscale IP
+2) `make runner-up` to build and start the cron runner
 
-Steps to restart
-1) maker sure tailscale and docker are running
-2) docker compose -f docker-compose.runner.yml --env-file .env-runner .ps (this checks if anything is running)
-3) docker compose -f docker-compose.runner.yml --env-file .env-runner up -d
+Runner maintenance
+- `make runner-ps` shows runner status
+- `make runner-logs` tails cron logs
+- `make runner-restart` restarts the runner container
+- `make runner-update` pulls latest code and rebuilds
 
 Steps to add new machine as a runner
 1) download tailscale and signin to admin gbl account (github sign in)
 2) install docker & docker-compose.
 3) clone repo
 4) create .env-runner file
-5) run step 3 of steps to update
+5) run step 2 of steps to update
 
 ** Note that if you update runner you have to apply update to each device.
 
@@ -61,4 +82,4 @@ Steps to add new machine as a runner
 [MIT](https://choosealicense.com/licenses/mit/)
 
 ## Get new set of training data
-docker compose exec backend python -m src.scripts.training_data
+`make up` then `make training-data`
