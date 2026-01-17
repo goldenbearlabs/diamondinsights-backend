@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 SPLIT_VS_LHP = "vslhp"
@@ -14,6 +14,14 @@ def _norm(s: Any) -> str:
         return ""
     return str(s).strip().lower()
 
+def _pid(x: Any) -> Optional[int]:
+    try:
+        if not x:
+            return None
+        v = x.get("id") if isinstance(x, dict) else None
+        return int(v) if v is not None else None
+    except Exception:
+        return None
 
 def _safe_int(v: Any, default: int = 0) -> int:
     try:
@@ -22,6 +30,24 @@ def _safe_int(v: Any, default: int = 0) -> int:
         return int(v)
     except Exception:
         return default
+
+
+def _get(d: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+    cur: Any = d
+    for k in keys:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k)
+    return cur if cur is not None else default
+
+
+def _base_code(v: Any) -> str:
+    s = _norm(v).upper()
+    if s in {"1B", "2B", "3B"}:
+        return s
+    if s in {"HOME", "H"}:
+        return "HOME"
+    return ""
 
 
 def _is_pa_play(play: Dict[str, Any]) -> bool:
@@ -67,22 +93,124 @@ def _pitcher_hand_split(play: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _is_risp_start(play: Dict[str, Any]) -> bool:
-    runners = play.get("runners") or []
-    for r in runners:
-        mv = r.get("movement") or {}
-        start_pos = str(mv.get("start") or "").strip().upper()
-        if start_pos in {"2B", "3B"}:
-            return True
+
+def _post_base_state(play: Dict[str, Any], prev: Tuple[Optional[int], Optional[int], Optional[int]]) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    matchup = play.get("matchup") or {}
+
+    on1, on2, on3 = prev
 
     matchup = play.get("matchup") or {}
-    splits = matchup.get("splits") or {}
-    men_on = _norm(splits.get("menOnBase"))
+    on1 = _pid(matchup.get("postOnFirst"))
+    on2 = _pid(matchup.get("postOnSecond"))
+    on3 = _pid(matchup.get("postOnThird"))
 
-    if men_on in {"risp", "loaded"}:
-        return True
+    return on1, on2, on3
 
-    return False
+
+def _seed_bases_from_play_start(play: Dict[str, Any]) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    on1 = on2 = on3 = None
+
+    matchup = play.get("matchup") or {}
+    batter_id = (matchup.get("batter") or {}).get("id")
+    runners = play.get("runners") or []
+    runner_ids: Set[int] = set()
+    for r in runners:
+        details = r.get("details") or {}
+        rid = _safe_int((details.get("runner") or {}).get("id"))
+        if rid == 0:
+            continue
+        if batter_id is not None and rid == batter_id:
+            continue
+        runner_ids.add(rid)
+
+        mv = r.get("movement") or {}
+        start = _base_code(mv.get("start") or mv.get("originBase"))
+        if start == "1B":
+            on1 = rid
+        elif start == "2B":
+            on2 = rid
+        elif start == "3B":
+            on3 = rid
+
+    # Extra-innings ghost runners can appear on 2B/3B without movement entries.
+    post_on_second = _pid(matchup.get("postOnSecond"))
+    post_on_third = _pid(matchup.get("postOnThird"))
+    if on2 is None and post_on_second and post_on_second != batter_id and post_on_second not in runner_ids:
+        on2 = post_on_second
+    if on3 is None and post_on_third and post_on_third != batter_id and post_on_third not in runner_ids:
+        on3 = post_on_third
+
+    return on1, on2, on3
+
+
+def _apply_runner_movement(
+    bases: Tuple[Optional[int], Optional[int], Optional[int]],
+    runner: Dict[str, Any],
+) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    on1, on2, on3 = bases
+
+    details = runner.get("details") or {}
+    rid = _safe_int(_get(details, "runner", "id", default=None), 0)
+    if rid == 0:
+        return on1, on2, on3
+
+    mv = runner.get("movement") or {}
+    end = _base_code(mv.get("end"))
+    is_out = bool(mv.get("isOut", False))
+
+    if on1 == rid:
+        on1 = None
+    if on2 == rid:
+        on2 = None
+    if on3 == rid:
+        on3 = None
+
+    if is_out:
+        return on1, on2, on3
+
+    if end == "1B":
+        on1 = rid
+    elif end == "2B":
+        on2 = rid
+    elif end == "3B":
+        on3 = rid
+
+    return on1, on2, on3
+
+
+def _risp_on_last_pitch(
+    play: Dict[str, Any],
+    start_bases: Tuple[Optional[int], Optional[int], Optional[int]],
+) -> bool:
+    on1, on2, on3 = start_bases
+
+    mv_by_idx: Dict[int, List[Dict[str, Any]]] = {}
+    runners = play.get("runners") or []
+    for r in runners:
+        idx = _safe_int(_get(r, "details", "playIndex", default=None), -1)
+        if idx >= 0:
+            mv_by_idx.setdefault(idx, []).append(r)
+
+    last_pitch_risp = (on2 is not None) or (on3 is not None)
+
+    events = play.get("playEvents") or []
+    for i, ev in enumerate(events):
+        is_pitch = ev.get("isPitch")
+        if is_pitch is None and ev.get("type") == "pitch":
+            is_pitch = True
+
+        if is_pitch:
+            last_pitch_risp = (on2 is not None) or (on3 is not None)
+
+        for r in mv_by_idx.get(i, []):
+            on1, on2, on3 = _apply_runner_movement((on1, on2, on3), r)
+
+    for idx in sorted(k for k in mv_by_idx.keys() if k >= len(events)):
+        for r in mv_by_idx[idx]:
+            on1, on2, on3 = _apply_runner_movement((on1, on2, on3), r)
+
+    return bool(last_pitch_risp)
+
 
 @dataclass
 class BatLine:
@@ -149,27 +277,49 @@ class MLBPlayByPlayBattingAggregator:
         self._lines.clear()
 
         plays = payload.get("allPlays") or []
+        plays = sorted(plays, key=lambda p: _safe_int((p.get("about") or {}).get("atBatIndex"), 0))
+        on1: Optional[int] = None
+        on2: Optional[int] = None
+        on3: Optional[int] = None
+
+        last_half_key: Optional[Tuple[int, bool]] = None
+
         for play in plays:
-            if not _is_pa_play(play):
-                continue
+            about = play.get("about") or {}
+            inning = _safe_int(about.get("inning"), -1)
+            is_top = bool(about.get("isTopInning", False))
+            half_key = (inning, is_top)
 
-            matchup = play.get("matchup") or {}
-            batter = matchup.get("batter") or {}
-            batter_id = batter.get("id")
+            if last_half_key is None:
+                last_half_key = half_key
+            elif half_key != last_half_key:
+                on1 = on2 = on3 = None
+                last_half_key = half_key
+            if on1 is None and on2 is None and on3 is None:
+                s1, s2, s3 = _seed_bases_from_play_start(play)
+                if s1 is not None or s2 is not None or s3 is not None:
+                    on1, on2, on3 = s1, s2, s3
 
-            vs_split = _pitcher_hand_split(play)
-            if vs_split is None:
-                continue
+            risp_start = (on2 is not None) or (on3 is not None)
+            risp_last_pitch = _risp_on_last_pitch(play, (on1, on2, on3))
 
-            risp = _is_risp_start(play)
+            if _is_pa_play(play):
+                matchup = play.get("matchup") or {}
+                batter_id = (matchup.get("batter") or {}).get("id")
 
-            self._apply_batter_stats(game_id, int(batter_id), vs_split, play)
-            if risp:
-                self._apply_batter_stats(game_id, int(batter_id), SPLIT_RISP, play)
+                vs_split = _pitcher_hand_split(play)
+                if vs_split is None or batter_id is None:
+                    pass
+                else:
+                    self._apply_batter_stats(game_id, int(batter_id), vs_split, play)
+                    self._apply_scoring(game_id, vs_split, play)
 
-            self._apply_scoring(game_id, vs_split, play)
-            if risp:
-                self._apply_scoring(game_id, SPLIT_RISP, play)
+                    if risp_last_pitch:
+                        self._apply_batter_stats(game_id, int(batter_id), SPLIT_RISP, play)
+                        self._apply_scoring(game_id, SPLIT_RISP, play)
+
+            if bool(about.get("isComplete", True)):
+                on1, on2, on3 = _post_base_state(play, (on1, on2, on3))
 
         out: List[Dict[str, Any]] = []
         for (g, pid, split), line in self._lines.items():
