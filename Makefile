@@ -5,8 +5,8 @@
 	card-sync game_boxscore_sync market_candle_sync market_sync player_sync roster_update_sync
 
 ENV_FILE ?= .env
-RUNNER_ENV ?= .env-runner
-SERVER_ENV ?= .env.server
+RUNNER_ENV ?= .env
+SERVER_ENV ?= .env
 
 COMPOSE_BASE = docker compose -f infra/docker/docker-compose.yml --env-file $(ENV_FILE)
 COMPOSE_RUNNER = docker compose -f infra/docker/docker-compose.runner.yml --env-file $(RUNNER_ENV)
