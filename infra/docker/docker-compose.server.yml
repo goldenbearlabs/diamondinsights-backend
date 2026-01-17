@@ -30,7 +30,22 @@ services:
       - db
     networks:
       - app_network
-    command: bash -c "alembic upgrade head && python -m src.main"
+    command: bash -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - app_network
 
 
   portainer:
@@ -53,3 +68,5 @@ networks:
 volumes:
   postgres_data:
   portainer_data:
+  caddy_data:
+  caddy_config:
