@@ -88,7 +88,7 @@ class CardAdapter(BaseAdapter):
             card.is_live_set = self._json_get(item, "is_live_set", False)
             card.ui_anim_index = self._json_get(item, "ui_anim_index", 0) or 0
 
-            series_name = self._json_get(item, "series", "")
+            series_name = (self._json_get(item, "series") or "").strip() or "UNKNOWN"
             if series_name and series_name in self.series_map:
                 card.series_name = series_name
                 card.series = self.series_map[series_name]

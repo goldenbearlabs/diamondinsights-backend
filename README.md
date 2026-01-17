@@ -68,7 +68,7 @@ Runner maintenance
 - `make runner-update` pulls latest code and rebuilds
 
 Steps to add new machine as a runner
-1) download tailscale and signin to admin gbl account (github sign in)
+1) download tailscale and signin to admin gbl account (same as github sign in)
 2) install docker & docker-compose.
 3) clone repo
 4) create .env-runner file
