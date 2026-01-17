@@ -50,9 +50,9 @@ def main() -> None:
             elif job_key == "roster_update_sync":
                 RosterUpdateSync(reload_all_years=args.reload_all_years).execute(session)
             elif job_key == "player_sync":
-                PlayerSync().execute(session, rerun_all_cards=args.reload_all_years)
+                PlayerSync(rerun_all_cards=args.reload_all_years).execute(session)
             elif job_key == "game_boxscore_sync":
-                GameBoxscoreSync().execute(session, rerun_all_boxscores=args.reload_all_years)
+                GameBoxscoreSync(rerun_all_boxscores=args.reload_all_years).execute(session)
 
         finally:
             session.rollback()
