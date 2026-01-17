@@ -292,9 +292,14 @@ def main():
         
         try:
             raw_year = int(u["year"])
-            year = raw_year + 2000 if raw_year < 100 else raw_year
+            card_year = raw_year + 2000 if raw_year < 100 else raw_year
         except (ValueError, TypeError):
-            year = 0
+            card_year = 0
+
+        if pd.notna(ud):
+            season_year = int(ud.year)
+        else:
+            season_year = card_year
 
         if pid == 0: continue
 
@@ -303,8 +308,8 @@ def main():
         br_p = baserunning[baserunning.player_id == pid].copy()
         f_p = fielding[fielding.player_id == pid].copy()
 
-        szn_mask_b = (b_p.season == year) & (b_p.game_date < ud)
-        szn_mask_p = (p_p.season == year) & (p_p.game_date < ud)
+        szn_mask_b = (b_p.season == season_year) & (b_p.game_date < ud)
+        szn_mask_p = (p_p.season == season_year) & (p_p.game_date < ud)
         
         m1_start = ud - timedelta(days=30)
         m1_mask_b = (b_p.game_date >= m1_start) & (b_p.game_date < ud)
@@ -317,8 +322,8 @@ def main():
             since_mask_b = szn_mask_b
             since_mask_p = szn_mask_p
 
-        szn_br_df = br_p[(br_p.season == year) & (br_p.game_date < ud)]
-        szn_f_df = f_p[(f_p.season == year) & (f_p.game_date < ud)]
+        szn_br_df = br_p[(br_p.season == season_year) & (br_p.game_date < ud)]
+        szn_f_df = f_p[(f_p.season == season_year) & (f_p.game_date < ud)]
 
         scopes = {
             "szn_": (b_p[szn_mask_b], p_p[szn_mask_p], szn_br_df, szn_f_df),

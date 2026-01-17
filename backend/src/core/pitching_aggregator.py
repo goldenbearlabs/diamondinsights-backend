@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 SPLIT_VS_LHB = "vslhb"
@@ -21,6 +21,15 @@ def _safe_int(v: Any, default: int = 0) -> int:
         return int(v)
     except Exception:
         return default
+
+
+def _get(d: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+    cur: Any = d
+    for k in keys:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(k)
+    return cur if cur is not None else default
 
 
 def _ip_from_outs(outs: int) -> float:
@@ -66,51 +75,173 @@ def _batter_hand_split(play: Dict[str, Any]) -> str:
         return SPLIT_VS_LHB
     if code == "R":
         return SPLIT_VS_RHB
-    return SPLIT_VS_RHB  # Default fallback
+    return SPLIT_VS_RHB
 
 
-def _is_risp_start(play: Dict[str, Any]) -> bool:
-    """
-    Determines if the play started with runners in scoring position.
-    Checks runner start positions first to catch HRs clearing the bases.
-    """
-    runners = play.get("runners") or []
-    for r in runners:
-        mv = r.get("movement") or {}
-        start_pos = str(mv.get("start") or "").strip().upper()
-        if start_pos in {"2B", "3B"}:
-            return True
+def _pid(x: Any) -> Optional[int]:
+    try:
+        if not x:
+            return None
+        v = x.get("id") if isinstance(x, dict) else None
+        return int(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _post_base_state(
+    play: Dict[str, Any], prev: Tuple[Optional[int], Optional[int], Optional[int]]
+) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    matchup = play.get("matchup") or {}
+
+    on1, on2, on3 = prev
 
     matchup = play.get("matchup") or {}
-    splits = matchup.get("splits") or {}
-    men_on = _norm(splits.get("menOnBase"))
-    
-    if men_on in {"risp", "loaded"}:
-        return True
+    on1 = _pid(matchup.get("postOnFirst"))
+    on2 = _pid(matchup.get("postOnSecond"))
+    on3 = _pid(matchup.get("postOnThird"))
 
-    return False
+    return on1, on2, on3
 
 
-def _event_type(play: Dict[str, Any]) -> str:
-    res = play.get("result") or {}
-    return _norm(res.get("eventType"))
+def _seed_bases_from_play_start(play: Dict[str, Any]) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    on1 = on2 = on3 = None
+
+    batter_id = _batter_id(play)
+    runners = play.get("runners") or []
+    runner_ids: Set[int] = set()
+    for r in runners:
+        details = r.get("details") or {}
+        rid = _safe_int((details.get("runner") or {}).get("id"))
+        if rid == 0:
+            continue
+        if batter_id is not None and rid == batter_id:
+            continue
+        runner_ids.add(rid)
+
+        mv = r.get("movement") or {}
+        start = _base_code(mv.get("start") or mv.get("originBase"))
+        if start == "1B":
+            on1 = rid
+        elif start == "2B":
+            on2 = rid
+        elif start == "3B":
+            on3 = rid
+
+    # Extra-innings ghost runners can appear on 2B/3B without movement entries.
+    matchup = play.get("matchup") or {}
+    post_on_second = _pid(matchup.get("postOnSecond"))
+    post_on_third = _pid(matchup.get("postOnThird"))
+    if on2 is None and post_on_second and post_on_second != batter_id and post_on_second not in runner_ids:
+        on2 = post_on_second
+    if on3 is None and post_on_third and post_on_third != batter_id and post_on_third not in runner_ids:
+        on3 = post_on_third
+
+    return on1, on2, on3
+
+
+def _apply_runner_movement(
+    bases: Tuple[Optional[int], Optional[int], Optional[int]],
+    runner: Dict[str, Any],
+) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    on1, on2, on3 = bases
+
+    details = runner.get("details") or {}
+    rid = _safe_int(_get(details, "runner", "id", default=None), 0)
+    if rid == 0:
+        return on1, on2, on3
+
+    mv = runner.get("movement") or {}
+    end = _base_code(mv.get("end"))
+    is_out = bool(mv.get("isOut", False))
+
+    if on1 == rid:
+        on1 = None
+    if on2 == rid:
+        on2 = None
+    if on3 == rid:
+        on3 = None
+
+    if is_out:
+        return on1, on2, on3
+
+    if end == "1B":
+        on1 = rid
+    elif end == "2B":
+        on2 = rid
+    elif end == "3B":
+        on3 = rid
+
+    return on1, on2, on3
+
+
+def _risp_on_last_pitch(
+    play: Dict[str, Any],
+    start_bases: Tuple[Optional[int], Optional[int], Optional[int]],
+) -> bool:
+    on1, on2, on3 = start_bases
+
+    mv_by_idx: Dict[int, List[Dict[str, Any]]] = {}
+    runners = play.get("runners") or []
+    for r in runners:
+        idx = _safe_int(_get(r, "details", "playIndex", default=None), -1)
+        if idx >= 0:
+            mv_by_idx.setdefault(idx, []).append(r)
+
+    last_pitch_risp = (on2 is not None) or (on3 is not None)
+
+    events = play.get("playEvents") or []
+    for i, ev in enumerate(events):
+        is_pitch = ev.get("isPitch")
+        if is_pitch is None and ev.get("type") == "pitch":
+            is_pitch = True
+
+        if is_pitch:
+            last_pitch_risp = (on2 is not None) or (on3 is not None)
+
+        for r in mv_by_idx.get(i, []):
+            on1, on2, on3 = _apply_runner_movement((on1, on2, on3), r)
+
+    for idx in sorted(k for k in mv_by_idx.keys() if k >= len(events)):
+        for r in mv_by_idx[idx]:
+            on1, on2, on3 = _apply_runner_movement((on1, on2, on3), r)
+
+    return bool(last_pitch_risp)
 
 
 def _is_bf_play(play: Dict[str, Any]) -> bool:
     res = play.get("result") or {}
     if _norm(res.get("type")) != "atbat":
         return False
-    # If the play is complete (result recorded) and has pitcher/batter, it counts as a BF event
     about = play.get("about") or {}
     if not about.get("isComplete", True):
+        return False
+    event_type = _norm(res.get("eventType"))
+    non_pa_events = {
+        "caught_stealing_2b",
+        "caught_stealing_3b",
+        "caught_stealing_home",
+        "pickoff_1b",
+        "pickoff_2b",
+        "pickoff_3b",
+        "pickoff_caught_stealing_2b",
+        "pickoff_caught_stealing_3b",
+        "pickoff_caught_stealing_home",
+        "stolen_base_2b",
+        "stolen_base_3b",
+        "stolen_base_home",
+        "wild_pitch",
+        "passed_ball",
+        "balk",
+        "other_advance",
+        "runner_double_play",
+        "pickoff_error_1b",
+    }
+    if event_type in non_pa_events:
         return False
     return _pitcher_id(play) is not None and _batter_id(play) is not None
 
 
 def _analyze_events(play: Dict[str, Any]) -> Tuple[int, int, int, int, int]:
-    """
-    Returns: (pitches, balls, strikes, balks, wild_pitches)
-    """
     pitches = 0
     balls = 0
     strikes = 0
@@ -120,19 +251,18 @@ def _analyze_events(play: Dict[str, Any]) -> Tuple[int, int, int, int, int]:
     events = play.get("playEvents") or []
     for ev in events:
         details = ev.get("details") or {}
-        
+
         is_pitch = ev.get("isPitch")
-        if is_pitch is None:
-            if ev.get("type") == "pitch":
-                is_pitch = True
-        
+        if is_pitch is None and ev.get("type") == "pitch":
+            is_pitch = True
+
         if is_pitch:
             pitches += 1
             if bool(details.get("isBall")):
                 balls += 1
             else:
                 strikes += 1
-        
+
         et = _norm(details.get("eventType"))
         if "wild_pitch" in et:
             wild_pitches += 1
@@ -207,12 +337,8 @@ class PitchLine:
 class MLBPlayByPlayPitchingAggregator:
     def __init__(self):
         self._lines: Dict[Tuple[int, int, str], PitchLine] = {}
-        # Stores ONLY the split context for a runner. 
-        # API handles "Responsible Pitcher", we just need to know "Was this runner put on vsLHB or vsRHB?"
-        self._runner_splits: Dict[int, str] = {} 
+        self._runner_splits: Dict[int, str] = {}
         self._current_pitcher_id: Optional[int] = None
-        
-        # Track runners currently on base to calculate "Inherited Runners" count
         self._runners_on_base_ids: Set[int] = set()
 
     def build_rows(self, game_id: int, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -222,44 +348,74 @@ class MLBPlayByPlayPitchingAggregator:
         self._current_pitcher_id = None
 
         plays = payload.get("allPlays") or []
+        plays = sorted(plays, key=lambda p: _safe_int((p.get("about") or {}).get("atBatIndex"), 0))
+
+        on1: Optional[int] = None
+        on2: Optional[int] = None
+        on3: Optional[int] = None
+        last_half_key: Optional[Tuple[int, bool]] = None
+
         for play in plays:
+            about = play.get("about") or {}
+            inning = _safe_int(about.get("inning"), -1)
+            is_top = bool(about.get("isTopInning", False))
+            half_key = (inning, is_top)
+
             pid = _pitcher_id(play)
             if pid is None:
                 continue
-            
-            # --- 1. Handle Pitching Change & Inherited Runners Count ---
+
+            if last_half_key is None:
+                last_half_key = half_key
+            elif half_key != last_half_key:
+                on1 = on2 = on3 = None
+                self._runners_on_base_ids.clear()
+                last_half_key = half_key
+
+            if on1 is None and on2 is None and on3 is None:
+                s1, s2, s3 = _seed_bases_from_play_start(play)
+                if s1 is not None or s2 is not None or s3 is not None:
+                    on1, on2, on3 = s1, s2, s3
+                    self._runners_on_base_ids = {x for x in (on1, on2, on3) if x is not None}
+
+            risp_start = (on2 is not None) or (on3 is not None)
+            risp_last_pitch = _risp_on_last_pitch(play, (on1, on2, on3))
+
             if self._current_pitcher_id is None:
                 self._current_pitcher_id = pid
             elif pid != self._current_pitcher_id:
-                # Pitcher changed. The new pitcher inherits everyone currently on base.
                 inherited_count = len(self._runners_on_base_ids)
                 if inherited_count > 0:
-                    # We attribute the "Inherited Runners" count to the new pitcher's "Total" context
-                    # Since we don't know the batter split yet, we can't perfectly assign it to vslhb/vsrhb.
-                    # Ideally, we assign it to the split of the *first batter they face*.
-                    # For simplicity, we'll try to guess based on the current batter.
                     split_guess = _batter_hand_split(play)
-                    line = self._line(game_id, pid, split_guess)
-                    line.inherited_runners += inherited_count
+                    self._line(game_id, pid, split_guess).inherited_runners += inherited_count
+                    self._line(game_id, pid, SPLIT_RISP).inherited_runners += inherited_count if risp_start else 0
                 self._current_pitcher_id = pid
 
-            # --- 2. Process Play Stats ---
             if _is_bf_play(play):
-                self._process_bf_play(game_id, play)
+                self._process_bf_play(game_id, play, risp_last_pitch)
             else:
-                self._process_non_bf_play(game_id, play)
+                self._process_non_bf_play(game_id, play, risp_last_pitch)
 
-            # --- 3. Update Runner State for Next Play ---
-            # We must look at the "runners" list (which shows the result state) 
-            # to know who is left on base for the *next* play.
-            self._update_on_base_state(play)
+            # Update bases for next play (use postOn keys when present; do not require isComplete)
+            on1, on2, on3 = _post_base_state(play, (on1, on2, on3))
+            self._runners_on_base_ids = {x for x in (on1, on2, on3) if x is not None}
+
+            # Ensure any new runners (pinch runners/subs) have a split context
+            split_guess = _batter_hand_split(play)
+            for rid in self._runners_on_base_ids:
+                if rid not in self._runner_splits:
+                    self._runner_splits[rid] = split_guess
 
         out: List[Dict[str, Any]] = []
         for (g, p_id, split), line in self._lines.items():
             if (
-                line.batters_faced > 0 or line.outs_pitched > 0 or 
-                line.pitches_thrown > 0 or line.r > 0 or line.er > 0 or 
-                line.inherited_runners > 0 or line.inherited_runners_scored > 0
+                line.batters_faced > 0
+                or line.outs_pitched > 0
+                or line.pitches_thrown > 0
+                or line.r > 0
+                or line.er > 0
+                or line.inherited_runners > 0
+                or line.inherited_runners_scored > 0
             ):
                 out.append(line.to_row(g, p_id, split))
         return out
@@ -270,54 +426,30 @@ class MLBPlayByPlayPitchingAggregator:
             self._lines[key] = PitchLine()
         return self._lines[key]
 
-    def _update_on_base_state(self, play: Dict[str, Any]) -> None:
-        """
-        Updates self._runners_on_base_ids based on who ends up on base after the play.
-        """
-        self._runners_on_base_ids.clear()
-        
-        runners = play.get("runners") or []
-        for r in runners:
-            mv = r.get("movement") or {}
-            end = _base_code(mv.get("end"))
-            is_out = bool(mv.get("isOut"))
-            
-            if not is_out and end in {"1B", "2B", "3B"}:
-                details = r.get("details") or {}
-                runner_obj = details.get("runner") or {}
-                rid = runner_obj.get("id")
-                if rid:
-                    self._runners_on_base_ids.add(int(rid))
-
-    def _process_bf_play(self, game_id: int, play: Dict[str, Any]) -> None:
+    def _process_bf_play(self, game_id: int, play: Dict[str, Any], risp_start: bool) -> None:
         pitcher_id = _pitcher_id(play)
         batter_id = _batter_id(play)
         if pitcher_id is None or batter_id is None:
             return
 
         vs_split = _batter_hand_split(play)
-        risp = _is_risp_start(play)
 
-        # Record the split for this batter (who might become a runner)
+        # Batter may become a runner; store split context for later run attribution
         self._runner_splits[batter_id] = vs_split
 
-        # Apply Batters Faced stats (K, BB, H, etc)
         self._apply_pa_stats(game_id, pitcher_id, vs_split, play)
-        if risp:
+        if risp_start:
             self._apply_pa_stats(game_id, pitcher_id, SPLIT_RISP, play)
 
-        # Handle Runners (Movement & Scoring) - ONLY CALL ONCE to avoid double counting
-        self._handle_runners_scoring(game_id, pitcher_id, play)
+        self._handle_runners_scoring(game_id, play, risp_start)
 
-    def _process_non_bf_play(self, game_id: int, play: Dict[str, Any]) -> None:
+    def _process_non_bf_play(self, game_id: int, play: Dict[str, Any], risp_start: bool) -> None:
         pid = _pitcher_id(play)
         if pid is None:
             return
-        
-        # Default to RHB if unknown, or try to infer
-        vs_split = _batter_hand_split(play) 
 
-        # Add pure pitch counts / balks
+        vs_split = _batter_hand_split(play)
+
         pitches, balls, strikes, balks, wild_pitches = _analyze_events(play)
         line = self._line(game_id, pid, vs_split)
         line.pitches_thrown += pitches
@@ -326,7 +458,15 @@ class MLBPlayByPlayPitchingAggregator:
         line.balks += balks
         line.wild_pitches += wild_pitches
 
-        self._handle_runners_scoring(game_id, pid, play)
+        if risp_start:
+            rline = self._line(game_id, pid, SPLIT_RISP)
+            rline.pitches_thrown += pitches
+            rline.balls_thrown += balls
+            rline.strikes_thrown += strikes
+            rline.balks += balks
+            rline.wild_pitches += wild_pitches
+
+        self._handle_runners_scoring(game_id, play, risp_start)
 
     def _apply_pa_stats(self, game_id: int, pitcher_id: int, split: str, play: Dict[str, Any]) -> None:
         line = self._line(game_id, pitcher_id, split)
@@ -339,21 +479,19 @@ class MLBPlayByPlayPitchingAggregator:
         line.balks += balks
         line.wild_pitches += wild_pitches
 
-        # Outs
         outs_on_play = 0
         runners = play.get("runners") or []
         for r in runners:
             mv = r.get("movement") or {}
             if bool(mv.get("isOut", False)):
                 outs_on_play += 1
-        
+
         res = play.get("result") or {}
         if outs_on_play == 0 and bool(res.get("isOut", False)):
-            outs_on_play = 1 # Batter is out
-        
+            outs_on_play = 1
+
         line.outs_pitched += outs_on_play
 
-        # Stats
         et = _norm(res.get("eventType"))
         is_walk = et in {"walk", "base_on_balls", "intent_walk", "intentional_walk"}
         is_hbp = et == "hit_by_pitch"
@@ -365,10 +503,10 @@ class MLBPlayByPlayPitchingAggregator:
             line.bb += 1
             if "intent" in et:
                 line.intentional_walks += 1
-        
+
         if "strikeout" in et:
             line.k += 1
-        
+
         if et == "single":
             line.h += 1
         elif et == "double":
@@ -380,47 +518,49 @@ class MLBPlayByPlayPitchingAggregator:
         elif "home_run" in et:
             line.h += 1
             line.hr += 1
-        
+
         if not (is_walk or is_hbp or is_sf or is_sh or is_ci):
             line.ab += 1
 
-    def _handle_runners_scoring(self, game_id: int, current_pitcher_id: int, play: Dict[str, Any]) -> None:
+    def _handle_runners_scoring(self, game_id: int, play: Dict[str, Any], risp_start: bool) -> None:
         """
-        Iterates all runners in the play. If they scored, use the API's 'responsiblePitcher' 
-        to attribute the run. This completely avoids double-counting or wrong attribution logic.
+        Charges R/ER to the *responsible pitcher* using the API.
+        Also mirrors those run charges into the responsible pitcher's RISP split
+        iff the PA started with RISP (risp_start=True).
         """
+        current_pitcher_id = _pitcher_id(play)
+        if current_pitcher_id is None:
+            return
+
         runners = play.get("runners") or []
-        
         for r in runners:
             details = r.get("details") or {}
-            is_scoring = bool(details.get("isScoringEvent", False))
-            
-            if is_scoring:
-                # 1. Who is responsible? (Trust the API)
-                resp_obj = details.get("responsiblePitcher") or {}
-                resp_pid = _safe_int(resp_obj.get("id"))
-                
-                # If API doesn't provide it (rare), fall back to current pitcher
-                if resp_pid == 0:
-                    resp_pid = current_pitcher_id
+            if not bool(details.get("isScoringEvent", False)):
+                continue
 
-                # 2. What split? (Use our cache, or default to vsRHB if unknown)
-                runner_id = _safe_int((details.get("runner") or {}).get("id"))
-                split = self._runner_splits.get(runner_id, SPLIT_VS_RHB)
+            resp_obj = details.get("responsiblePitcher") or {}
+            resp_pid = _safe_int(resp_obj.get("id"))
+            if resp_pid == 0:
+                resp_pid = current_pitcher_id
 
-                # 3. Charge the stats
-                line = self._line(game_id, resp_pid, split)
-                line.r += 1
-                if bool(details.get("earned", False)):
-                    line.er += 1
-                
-                # 4. Handle Inherited Runner Scored
-                if resp_pid != current_pitcher_id:
-                    # If the responsible pitcher is NOT the current pitcher, 
-                    # it means the current pitcher let an inherited runner score.
-                    # We charge 'inherited_runners_scored' to the CURRENT pitcher.
-                    # But which split? Probably the one matching the current batter context or RISP?
-                    # We'll use the current batter's hand to keep it simple.
-                    curr_split = _batter_hand_split(play)
-                    curr_line = self._line(game_id, current_pitcher_id, curr_split)
-                    curr_line.inherited_runners_scored += 1
+            runner_id = _safe_int((details.get("runner") or {}).get("id"))
+            split = self._runner_splits.get(runner_id, SPLIT_VS_RHB)
+
+            earned = bool(details.get("earned", False))
+
+            line = self._line(game_id, resp_pid, split)
+            line.r += 1
+            if earned:
+                line.er += 1
+
+            if risp_start:
+                rline = self._line(game_id, resp_pid, SPLIT_RISP)
+                rline.r += 1
+                if earned:
+                    rline.er += 1
+
+            if resp_pid != current_pitcher_id:
+                curr_split = _batter_hand_split(play)
+                self._line(game_id, current_pitcher_id, curr_split).inherited_runners_scored += 1
+                if risp_start:
+                    self._line(game_id, current_pitcher_id, SPLIT_RISP).inherited_runners_scored += 1
