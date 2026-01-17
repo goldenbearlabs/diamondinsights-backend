@@ -55,8 +55,9 @@ def main() -> None:
                 GameBoxscoreSync().execute(session, rerun_all_boxscores=args.reload_all_years)
 
         finally:
+            session.rollback()
             unlock(session, job_key)
-
+            session.commit()
 
 if __name__ == "__main__":
     main()

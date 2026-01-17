@@ -6,8 +6,6 @@ from src.database.models import Series, Quirk, Location, Card
 from typing import List, Dict
 from sqlalchemy import select, text, inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert
-import time
-import random
 
 
 class CardSync(BaseJob):
@@ -80,10 +78,10 @@ class CardSync(BaseJob):
 
     def _sync_series(self, session, raw_data) -> Dict[str, Series]:
         unique_series = {}
+        unique_series["UNKNOWN"] = {"name": "UNKNOWN"}
         for item in raw_data:
-            s_name = item.get("series", "")
-            if s_name:
-                unique_series[s_name] = {"name": s_name}
+            s_name = (item.get("series") or "").strip() or "UNKNOWN"
+            unique_series[s_name] = {"name": s_name}
 
         for data in unique_series.values():
             session.merge(Series(**data))
