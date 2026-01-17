@@ -1,0 +1,10 @@
+{
+  "name": "di-monorepo",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "web": "npm --workspace apps/web run dev",
+    "mobile": "npm --workspace apps/mobile start",
+    "mobile:tunnel": "npm --workspace apps/mobile start -- --tunnel"
+  }
+}

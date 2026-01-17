@@ -82,6 +82,9 @@ class MarketSync(BaseJob):
                 db_session.execute(text("SET LOCAL synchronous_commit TO OFF"))
 
             if listing_rows:
+                uniq = {r["card_id"]: r for r in listing_rows}
+                listing_rows = list(uniq.values())
+
                 stmt = pg_insert(Listing).values(listing_rows).on_conflict_do_update(
                     index_elements=["card_id"],
                     set_={
@@ -92,6 +95,9 @@ class MarketSync(BaseJob):
                 db_session.execute(stmt)
 
             if order_rows:
+                uniq = {(r["card_id"], r["date"]): r for r in order_rows}
+                order_rows = list(uniq.values())
+
                 stmt = pg_insert(CompletedOrder).values(order_rows).on_conflict_do_update(
                     index_elements=["card_id", "date"],
                     set_={
@@ -102,6 +108,21 @@ class MarketSync(BaseJob):
                 db_session.execute(stmt)
 
             if ph_rows:
+                uniq = {}
+                for r in ph_rows:
+                    k = (r["card_id"], r["date"])
+                    prev = uniq.get(k)
+                    if prev is None:
+                        uniq[k] = r
+                    else:
+                        if r.get("best_buy_price") is not None:
+                            prev["best_buy_price"] = r["best_buy_price"]
+                        if r.get("best_sell_price") is not None:
+                            prev["best_sell_price"] = r["best_sell_price"]
+                        if r.get("volume") is not None:
+                            prev["volume"] = r["volume"]
+                ph_rows = list(uniq.values())
+
                 excluded = pg_insert(PriceHistory).excluded
                 stmt = pg_insert(PriceHistory).values(ph_rows).on_conflict_do_update(
                     index_elements=["card_id", "date"],
