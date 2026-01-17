@@ -51,7 +51,7 @@ run-job:
 training-data:
 	$(COMPOSE_BASE) exec backend python -m src.scripts.training_data
 
-card-sync: up
+card_sync: up
 	$(COMPOSE_BASE) exec backend python -c "from src.jobs.card_sync import CardSync; CardSync().run()"
 game_boxscore_sync: up
 	$(COMPOSE_BASE) exec backend python -c "from src.jobs.game_boxscore_sync import GameBoxscoreSync; GameBoxscoreSync().run()"
