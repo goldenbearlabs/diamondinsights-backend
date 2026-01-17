@@ -7,6 +7,8 @@ from src.jobs.market_sync import MarketSync
 from src.jobs.card_sync import CardSync
 from src.jobs.market_candle_sync import MarketCandleSync
 from src.jobs.roster_update_sync import RosterUpdateSync
+from src.jobs.player_sync import PlayerSync
+from src.jobs.game_boxscore_sync import GameBoxscoreSync
 
 
 def try_lock(session, name: str) -> bool:
@@ -17,19 +19,17 @@ def try_lock(session, name: str) -> bool:
         ).scalar()
     )
 
-
 def unlock(session, name: str) -> None:
     session.execute(
         text("SELECT pg_advisory_unlock(hashtext(:k), 0)"),
         {"k": name},
     )
 
-
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument(
         "job",
-        choices=["market_sync", "card_sync", "market_candle_sync", "roster_update_sync"],
+        choices=["market_sync", "card_sync", "market_candle_sync", "roster_update_sync", "player_sync", "game_boxscore_sync"],
     )
     p.add_argument("--reload-all-years", action="store_true")
     args = p.parse_args()
@@ -49,6 +49,11 @@ def main() -> None:
                 MarketCandleSync().execute(session)
             elif job_key == "roster_update_sync":
                 RosterUpdateSync(reload_all_years=args.reload_all_years).execute(session)
+            elif job_key == "player_sync":
+                PlayerSync().execute(session, rerun_all_cards=args.reload_all_years)
+            elif job_key == "game_boxscore_sync":
+                GameBoxscoreSync().execute(session, rerun_all_boxscores=args.reload_all_years)
+
         finally:
             unlock(session, job_key)
 

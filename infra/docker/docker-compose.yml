@@ -11,16 +11,19 @@ services:
     networks:
       - app_network
     ports:
-      - "${TS_IP}:5432:5432"
+      - "127.0.0.1:5432:5432"
 
   backend:
-    build: ./backend
+    build: 
+      context: ../../apps/backend
+      dockerfile: Dockerfile
+    working_dir: /app
     image: mlb_backend_image
     restart: unless-stopped
     volumes:
-      - ./backend/src:/app/src
-      - ./backend/alembic:/app/alembic
-      - ./backend/alembic.ini:/app/alembic.ini
+      - ../../apps/backend/src:/app/src
+      - ../../apps/backend/alembic:/app/alembic
+      - ../../apps/backend/alembic.ini:/app/alembic.ini
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

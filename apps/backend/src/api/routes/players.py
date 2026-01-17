@@ -1,9 +1,9 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from backend.src.database.database import get_db
-from backend.src.database.models import Player  
-from backend.src.schemas.player import PlayerResponse
+from src.database.database import get_db
+from src.database.models import Player
+from src.schemas.player import PlayerResponse
 
 router = APIRouter(prefix="/players", tags=["players"])
 

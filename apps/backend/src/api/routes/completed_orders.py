@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from backend.src.database.database import get_db
-from backend.src.database.models import Card, CompletedOrder
-from backend.src.schemas.completed_order import CompletedOrderResponse
+from src.database.database import get_db
+from src.database.models import Card, CompletedOrder
+from src.schemas.completed_order import CompletedOrderResponse
 from datetime import datetime
 
 
@@ -58,4 +58,3 @@ def get_completed_orders(
     return completed_orders
 
     
-

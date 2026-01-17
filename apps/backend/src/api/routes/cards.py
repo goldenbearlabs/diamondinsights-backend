@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from backend.src.database.database import get_db
-from backend.src.database.models import Card
-from backend.src.schemas.card import CardResponse
+from src.database.database import get_db
+from src.database.models import Card
+from src.schemas.card import CardResponse
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -74,4 +74,3 @@ def get_cards(
 
     cards = query.limit(limit).offset(offset).all()
     return cards
-

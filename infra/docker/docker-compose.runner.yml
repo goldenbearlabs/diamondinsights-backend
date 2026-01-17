@@ -1,6 +1,8 @@
 services:
   runner:
-    build: ./backend
+    build:
+      context: ../../apps/backend
+      dockerfile: Dockerfile
     image: mlb_backend_image
     restart: unless-stopped
     environment:
@@ -11,8 +13,5 @@ services:
       POSTGRES_PORT: 5432
       TZ: America/Vancouver
     volumes:
-      - ./backend/src:/app/src
-      - ./backend/alembic:/app/alembic
-      - ./backend/alembic.ini:/app/alembic.ini
-      - ./backend/cron/crontab:/app/crontab:ro
+      - ../../apps/backend/cron/crontab:/app/crontab:ro
     command: ["/usr/local/bin/supercronic", "/app/crontab"]

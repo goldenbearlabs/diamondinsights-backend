@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from backend.src.database.database import get_db
-from backend.src.database.models import Listing, Card
-from backend.src.schemas.listing import ListingResponse
+from src.database.database import get_db
+from src.database.models import Listing, Card
+from src.schemas.listing import ListingResponse
 
 router = APIRouter(prefix="/listings", tags=["listings"])
 
@@ -83,7 +83,6 @@ def get_listing(card_id: str, db: Session = Depends(get_db)):
         "best_sell_price": listing.best_sell_price,
         "best_buy_price": listing.best_buy_price
     }
-
 
 
 
