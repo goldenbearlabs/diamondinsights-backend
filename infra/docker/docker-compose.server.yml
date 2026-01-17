@@ -30,7 +30,7 @@ services:
       - db
     networks:
       - app_network
-    command: bash -c "alembic upgrade head && python src/main.py"
+    command: bash -c "alembic upgrade head && python -m src.main.py"
 
 
   portainer:
