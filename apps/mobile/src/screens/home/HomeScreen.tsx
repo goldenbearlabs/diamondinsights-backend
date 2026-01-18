@@ -41,7 +41,7 @@ export default function HomeScreen() {
         <FloatingBackground />
       </View>
 
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <TouchableOpacity style={styles.proBadge}>
           <FontAwesome5 name="crown" size={12} color="#fbbf24" style={{ marginRight: 6 }} />
           <Text style={styles.proText}>PRO</Text>
@@ -86,7 +86,7 @@ export default function HomeScreen() {
           <ContactCard />
 
           
-          <View style={{ height: 100 }} />
+          
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -99,14 +99,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background 
   },
   backgroundLayer: { 
-    ...StyleSheet.absoluteFillObject 
+    ...StyleSheet.absoluteFillObject
+    
   },
   
  
   scrollContent: {
     paddingTop: 80,
     paddingHorizontal: 12,
-    paddingBottom: 50,
+    paddingBottom: 140,
   },
   
 
