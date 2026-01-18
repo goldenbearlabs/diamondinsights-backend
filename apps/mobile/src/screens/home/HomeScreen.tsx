@@ -1,100 +1,92 @@
-// apps/mobile/src/screens/home/HomeScreen.tsx
-
 import { useEffect, useState } from "react";
-import { Image, StyleSheet, Text, View, TouchableOpacity, ScrollView } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Linking} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons'; 
 import { apiGet } from "../../lib/api";
 import { theme } from "../../theme/colors";
+import { FloatingBackground } from "../../homescreencomponents/FloatingBackground";
+import { PredictionCarousel } from "../../homescreencomponents/PredictionCarousel";
+import { TrustStats } from "../../homescreencomponents/TrustStats"; 
+import { HowItWorks } from "../../homescreencomponents/HowItWorks"; 
+import { ContactCard } from "../../homescreencomponents/ContactCard";
 
-type Card = {
-  id: string;
-  name: string;
-  img: string;
-};
 
-export default function HomeScreen() {
-  const [card, setCard] = useState<Card | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
+const RosterCountdown = () => {
+  const [timeLeft, setTimeLeft] = useState({ d: 4, h: 12, m: 30, s: 0 });
   useEffect(() => {
-    let isMounted = true;
-    apiGet<Card[]>("/cards?limit=1")
-      .then((cards) => {
-        if (!isMounted) return;
-        setCard(cards[0] ?? null);
-      })
-      .catch((err: Error) => {
-        if (!isMounted) return;
-        setError(err.message);
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev.s > 0) return { ...prev, s: prev.s - 1 };
+        return { ...prev, s: 59 }; 
       });
-    return () => {
-      isMounted = false;
-    };
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
 
   return (
+    <View style={styles.countdownPill}>
+      <Text style={styles.countdownLabel}>NEXT UPDATE:</Text>
+      <View style={styles.timerRow}>
+        <Text style={styles.timeText}>{timeLeft.d}d {timeLeft.h}h {timeLeft.m}m {timeLeft.s}s</Text>
+      </View>
+    </View>
+  );
+};
+
+export default function HomeScreen() {
+  return (
     <View style={styles.container}>
-      {/* Background Blobs */}
       <View style={styles.backgroundLayer}>
-        <View style={[styles.blob, { top: -80, left: -60, backgroundColor: theme.colors.blobs.left }]} />
-        <View style={[styles.blob, { top: 80, right: -40, backgroundColor: theme.colors.blobs.right }]} />
+        <FloatingBackground />
       </View>
 
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.content}>
-          
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <Image
-              // Note: We go up 3 levels now (../../../) to get back to root assets
-              source={require("../../../assets/images/placeholder.png")}
-              style={styles.logo}
-              resizeMode="cover"
-            />
-            <View>
-              <Text style={styles.titleDiamond}>Diamond</Text>
-              <Text style={styles.titleInsights}>Insights</Text>
+        <TouchableOpacity style={styles.proBadge}>
+          <FontAwesome5 name="crown" size={12} color="#fbbf24" style={{ marginRight: 6 }} />
+          <Text style={styles.proText}>PRO</Text>
+        </TouchableOpacity>
+
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent} 
+          showsVerticalScrollIndicator={false}
+        >
+          {/* THE GLASS CARD */}
+          <View style={styles.mainCard}>
+            <View style={styles.headerContainer}>
+              <Text style={styles.titleMain}>
+                Diamond<Text style={styles.titleHighlight}>Insights</Text>
+              </Text>
+              <Text style={styles.subtitle}>
+                The <Text style={styles.goldText}>#1</Text> App for dominating   MLB The Show
+              </Text>
             </View>
+
+            <View style={{ marginBottom: 24 }}>
+              <RosterCountdown />
+            </View>
+
+            <View style={styles.buttonGroup}>
+              <TouchableOpacity style={styles.btnPrimary} onPress={() => {}}>
+                <Text style={styles.btnTextWhite}>Sign in/Create Account</Text>
+                
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnSecondary} onPress={() => {}}>
+                <Text style={styles.btnTextSecondary}>View Our AI-Powered Predictions</Text>
+              </TouchableOpacity>
+            </View>
+            <PredictionCarousel />
           </View>
 
-          {/* Subheader */}
-          <Text style={styles.subtitle}>
-            View Cards, Track Investments, & Improve Your Game.
-          </Text>
-
-          {/* Buttons */}
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity style={styles.btnPrimary} onPress={() => {}}>
-               <Image 
-                source={require("../../../assets/images/stub.png")} 
-                style={styles.btnIcon}
-              />
-              <Text style={styles.btnTextWhite}>Get Started</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.btnSecondary} onPress={() => {}}>
-              <Text style={styles.btnTextBlue}>Explore Cards</Text>
-            </TouchableOpacity>
+          <View style={[styles.mainCard, { marginTop: 24 }]}>
+          <TrustStats />
+          <HowItWorks />
           </View>
 
-          {/* Card Panel */}
-          <View style={styles.cardPanel}>
-            {error ? (
-              <Text style={styles.errorText}>{error}</Text>
-            ) : card ? (
-              <>
-                <Text style={styles.cardTitle}>{card.name}</Text>
-                <Image
-                  source={{ uri: card.img }}
-                  style={styles.cardImage}
-                  resizeMode="contain"
-                />
-              </>
-            ) : (
-              <Text style={styles.loadingText}>Loading card...</Text>
-            )}
-          </View>
+          <ContactCard />
 
+          
+          <View style={{ height: 100 }} />
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -102,117 +94,56 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
+  container: { 
+    flex: 1, 
+    backgroundColor: theme.colors.background 
   },
-  backgroundLayer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
+  backgroundLayer: { 
+    ...StyleSheet.absoluteFillObject 
   },
-  blob: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
+  
+ 
+  scrollContent: {
+    paddingTop: 80,
+    paddingHorizontal: 12,
+    paddingBottom: 50,
   },
-  content: {
-    padding: theme.spacing.l,
+  
+
+  mainCard: {
+    width: '100%',
+    backgroundColor: 'rgba(2, 6, 23, 0.7)',
+    borderRadius: 24,
+    paddingTop: 32,
+    paddingBottom: 20, 
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
   },
-  headerRow: {
+
+  proBadge: { position: 'absolute', top: 60, right: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: '#fbbf24', zIndex: 20 },
+  proText: { color: '#fbbf24', fontWeight: '800', fontSize: 12 },
+  headerContainer: { marginBottom: 24, alignItems: 'center' },
+  titleMain: { fontSize: 38, fontWeight: '800', color: theme.colors.text, textAlign: 'center', lineHeight: 42 },
+  titleHighlight: { color: theme.colors.primary },
+  subtitle: { marginTop: theme.spacing.m, fontSize: 22, color: theme.colors.muted, textAlign: 'center', fontWeight: '600' },
+  goldText: { color: '#fbbf24', fontWeight: '900', fontSize: 34 },
+  countdownPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.4)', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  countdownLabel: { color: theme.colors.muted, fontSize: 12, fontWeight: '700', marginRight: 8 },
+  timeText: { color: '#fbbf24', fontSize: 14, fontWeight: 'bold', fontVariant: ['tabular-nums'] },
+  buttonGroup: { width: '100%', gap: 16 },
+  btnPrimary: { backgroundColor: theme.colors.primary, paddingVertical: 18, borderRadius: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', shadowColor: theme.colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+  btnSecondary: { paddingVertical: 18, borderRadius: 14, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  btnTextWhite: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  btnTextSecondary: { color: 'white', fontSize: 18, fontWeight: '600' },
+  timerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.xl,
-    marginTop: theme.spacing.m,
   },
-  logo: {
-    width: 80,
-    height: 80,
-    borderRadius: 16,
-    marginRight: 16,
-  },
-  titleDiamond: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: theme.colors.text,
-    lineHeight: 40,
-  },
-  titleInsights: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: theme.colors.primary,
-    lineHeight: 40,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: theme.colors.muted,
-    marginBottom: theme.spacing.xl,
-    fontWeight: '500',
-  },
-  buttonGroup: {
-    gap: 16,
-  },
-  btnPrimary: {
-    backgroundColor: theme.colors.primary,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  btnSecondary: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  btnIcon: {
-    width: 20,
-    height: 20,
-    marginRight: 8,
-    tintColor: 'white'
-  },
-  btnTextWhite: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  btnTextBlue: {
-    color: '#60a5fa',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  cardPanel: {
-    marginTop: 40,
-    padding: 24,
-    backgroundColor: theme.colors.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: 'center',
-  },
-  cardTitle: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  cardImage: {
-    width: 220,
-    height: 320,
-    borderRadius: 8,
-  },
-  errorText: {
-    color: theme.colors.error,
-    fontSize: 16,
-  },
-  loadingText: {
-    color: theme.colors.muted,
-    fontStyle: 'italic',
-  }
+  
 });
