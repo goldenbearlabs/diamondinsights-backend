@@ -102,22 +102,20 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject 
   },
   
-  // FIX 1: SIMPLIFIED SCROLL CONTAINER
-  // No flexGrow, no alignItems center. Just padding.
+ 
   scrollContent: {
     paddingTop: 80,
     paddingHorizontal: 12,
     paddingBottom: 50,
   },
   
-  // FIX 2: CARD "HUGS" CONTENT
+
   mainCard: {
     width: '100%',
     backgroundColor: 'rgba(2, 6, 23, 0.7)',
     borderRadius: 24,
-    // Reduce vertical padding to tighten the "blank space"
     paddingTop: 32,
-    paddingBottom: 20, // Tight bottom padding
+    paddingBottom: 20, 
     paddingHorizontal: 16,
     alignItems: 'center',
     borderWidth: 1,

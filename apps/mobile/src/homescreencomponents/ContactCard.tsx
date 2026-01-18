@@ -15,7 +15,7 @@ export const ContactCard = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Divider */}
+    
       <View style={styles.divider} />
 
       {/* Socials Section */}
@@ -48,7 +48,6 @@ export const ContactCard = () => {
 };
 
 const styles = StyleSheet.create({
-  // The Main Glass Card Container
   card: {
     width: '100%',
     marginTop: 24, 
