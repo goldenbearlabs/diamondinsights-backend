@@ -6,26 +6,26 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        // 1. Dark Theme Styling for the Tab Bar
+        
         tabBarStyle: {
-          backgroundColor: '#0f172a', // Dark slate background
-          borderTopColor: 'rgba(255,255,255,0.1)', // Subtle top border
-          height: 88, // Taller bar for modern look
+          backgroundColor: '#0f172a', 
+          borderTopColor: 'rgba(255,255,255,0.1)', 
+          height: 88, 
           paddingTop: 8,
         },
         // 2. Text styling
-        tabBarActiveTintColor: '#3b82f6', // The "Blue" you requested
-        tabBarInactiveTintColor: '#64748b', // Muted gray for inactive
+        tabBarActiveTintColor: '#3b82f6', 
+        tabBarInactiveTintColor: '#64748b', 
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
           marginBottom: 8,
         },
-        // 3. Hide the top header (we have our own headers in screens)
+        
         headerShown: false,
       }}
     >
-      {/* 1. HOME TAB (Your current index.tsx) */}
+      {/* HOME TAB */}
       <Tabs.Screen
         name="index"
         options={{
@@ -36,7 +36,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 2. PREDICTIONS TAB */}
+      {/* PREDICTIONS TAB */}
       <Tabs.Screen
         name="predictions"
         options={{
@@ -47,7 +47,7 @@ export default function TabLayout() {
         }}
       />
 
-      {/* NEW PORTFOLIO TAB */}
+      {/* PORTFOLIO TAB */}
       <Tabs.Screen
         name="portfolio"
         options={{

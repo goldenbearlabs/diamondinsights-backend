@@ -14,6 +14,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
 import { apiGet } from '../../lib/api'; 
+import { useRouter } from 'expo-router';
 
 type CardData = {
   id: string;
@@ -24,7 +25,7 @@ type CardData = {
   series: string;
 };
 
-// HELPER: Generate consistent fake prediction
+
 const getFakePrediction = (baseOvr: number, id: string) => {
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
@@ -70,9 +71,20 @@ export default function PredictionsScreen() {
   const renderItem = ({ item }: { item: CardData }) => {
     const predictedOvr = getFakePrediction(item.ovr, item.id);
     const social = getFakeSocials(item.id);
+    const router = useRouter();
 
     return (
-      <TouchableOpacity style={styles.cardContainer} activeOpacity={0.7}>
+      <TouchableOpacity style={styles.cardContainer} 
+      activeOpacity={0.7}
+      onPress={() => {
+        // We pass the entire item object as a string so the next page has data instantly
+        router.push({
+          pathname: `/predictions/[id]`,
+          params: { 
+            id: item.id,
+            cardData: JSON.stringify(item) }
+        });
+      }}>
         {/* Full Card Art */}
         <Image 
           source={{ uri: item.baked_img }} 
