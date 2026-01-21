@@ -7,13 +7,24 @@ import { FloatingBackground } from '../../homescreencomponents/FloatingBackgroun
 import { AttributeBar } from '../../predictionscomponents/AttributeBar'; 
 import { theme } from '../../theme/colors';
 
+// 1. HARDCODED LIST OF TWO-WAY PLAYERS
+const TWO_WAY_PLAYERS = [
+  "Shohei Ohtani",
+  "Babe Ruth", // Just in case you add legends later!
+];
+
 export default function PlayerDetailsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  
   const card = params.cardData ? JSON.parse(params.cardData as string) : null;
 
   if (!card) return null;
+
+  const isTwoWay = TWO_WAY_PLAYERS.includes(card.name);
+
+  
+  const showPitching = card.is_hitter === false || isTwoWay;
+  const showBatting = card.is_hitter === true || isTwoWay;
 
   return (
     <View style={styles.container}>
@@ -22,23 +33,20 @@ export default function PlayerDetailsScreen() {
       </View>
 
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        {/* Back Button */}
+        {/* HEADER: Back Button */}
         <View style={styles.navBar}>
-            <TouchableOpacity
-                onPress={() =>{
-                    router.replace('/predictions')
-                }}
-                style={styles.backBtn}
-            >
-                <Ionicons name="arrow-back" size={24} color="white" />
-                <Text style={styles.backText}>Back</Text>
-            </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={() => router.replace('/predictions')} 
+            style={styles.backBtn}
+          >
+            <Ionicons name="arrow-back" size={24} color="white" />
+            <Text style={styles.backText}>Back</Text>
+          </TouchableOpacity>
         </View>
-        
 
         <ScrollView contentContainerStyle={styles.scrollContent}>
           
-          {/* bio section*/}
+          {/* bio section */}
           <View style={styles.glassCard}>
             <View style={styles.topRow}>
               <Image 
@@ -46,14 +54,13 @@ export default function PlayerDetailsScreen() {
                 style={styles.cardArt} 
                 resizeMode="contain" 
               />
-              
               <View style={styles.bioColumn}>
                 <Text style={styles.playerName}>{card.name}</Text>
-                <Text style={styles.teamText}>{card.team_short_name} • {card.display_position} • Age: {card.age}</Text>
-                <Text style={styles.teamText}>Bats: {card.bat_hand} • Throws: {card.throw_hand}</Text>
-                
+                <Text style={styles.teamText}>
+                  {card.team_short_name} • {card.display_position} • Age: {card.age}
+                </Text>
+                <Text style={styles.teamText}>Throws: {card.throw_hand} • Bats: {card.bat_hand}</Text>
                 <View style={styles.divider} />
-                
                 <View style={styles.statBadge}>
                   <Text style={styles.statLabel}>OVERALL</Text>
                   <Text style={styles.statValue}>{card.ovr}</Text>
@@ -62,12 +69,12 @@ export default function PlayerDetailsScreen() {
             </View>
           </View>
 
-          {/* attributes*/}
+          {/* attribute section */}
           <Text style={styles.sectionTitle}>Attributes</Text>
           <View style={styles.glassCard}>
             
-            {/* Pitching Stats  */}
-            {card.is_hitter === false && (
+            {/* pitching attributes */}
+            {showPitching && (
               <>
                 <Text style={styles.subHeader}>Pitching</Text>
                 <AttributeBar label="Stamina" value={card.stamina || 0} />
@@ -76,12 +83,13 @@ export default function PlayerDetailsScreen() {
                 <AttributeBar label="K/9" value={card.k_per_bf || 0} />
                 <AttributeBar label="BB/9" value={card.bb_per_bf || 0} />
                 <AttributeBar label="HR/9" value={card.hr_per_bf || 0} />
-                <View style={{ height: 16 }} />
+                {/* Add a spacer if we are about to show batting stats below */}
+                {showBatting && <View style={{ height: 24 }} />}
               </>
             )}
 
-            {/* Hitting Stats  */}
-            {card.is_hitter === true && (
+            {/* batting */}
+            {showBatting && (
                <>
                 <Text style={styles.subHeader}>Batting</Text>
                 <AttributeBar label="Contact R" value={card.contact_right || 0} />
@@ -94,7 +102,7 @@ export default function PlayerDetailsScreen() {
               </>
             )}
 
-            {/* Fielding (Everyone) */}
+            {/* Fielding  */}
              <Text style={styles.subHeader}>Fielding</Text>
              <AttributeBar label="Fielding" value={card.fielding_ability || 0} />
              <AttributeBar label="Arm Strength" value={card.arm_strength || 0} />
@@ -115,7 +123,6 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   backText: { color: 'white', fontSize: 16, fontWeight: '600' },
   scrollContent: { paddingHorizontal: 16, paddingBottom: 50 },
-  
   glassCard: {
     backgroundColor: 'rgba(2, 6, 23, 0.7)',
     borderRadius: 16,
@@ -124,20 +131,18 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
     marginBottom: 24,
   },
-  
   topRow: { flexDirection: 'row', gap: 16 },
-  cardArt: { width: 100, height: 140, borderRadius: 8 },
+  cardArt: { width: 130, height: 182, borderRadius: 8 },
   bioColumn: { flex: 1, justifyContent: 'center' },
   playerName: { color: 'white', fontSize: 22, fontWeight: 'bold', marginBottom: 4 },
   teamText: { color: theme.colors.muted, fontSize: 14, fontWeight: '600' },
   divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 12 },
   statBadge: { 
-    backgroundColor: 'rgba(59, 130, 246, 0.15)', 
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
     padding: 10, borderRadius: 8, alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#3b82f6'
   },
   statLabel: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
   statValue: { color: '#3b82f6', fontSize: 24, fontWeight: '900' },
-
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
   subHeader: { color: '#3b82f6', fontSize: 14, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase' },
 });

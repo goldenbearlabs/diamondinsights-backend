@@ -79,6 +79,14 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      {/* hiding the details screen from navbar */}
+      <Tabs.Screen
+        name="predictions/[id]" 
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
