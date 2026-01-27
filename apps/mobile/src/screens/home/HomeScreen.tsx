@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Linking} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons, FontAwesome5 } from '@expo/vector-icons'; 
 import { apiGet } from "../../lib/api";
 import { theme } from "../../theme/colors";
 import { FloatingBackground } from "../../homescreencomponents/FloatingBackground";
@@ -9,6 +8,7 @@ import { PredictionCarousel } from "../../homescreencomponents/PredictionCarouse
 import { TrustStats } from "../../homescreencomponents/TrustStats"; 
 import { HowItWorks } from "../../homescreencomponents/HowItWorks"; 
 import { ContactCard } from "../../homescreencomponents/ContactCard";
+
 
 
 
@@ -41,11 +41,7 @@ export default function HomeScreen() {
         <FloatingBackground />
       </View>
 
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        <TouchableOpacity style={styles.proBadge}>
-          <FontAwesome5 name="crown" size={12} color="#fbbf24" style={{ marginRight: 6 }} />
-          <Text style={styles.proText}>PRO</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={{ flex: 1 }} edges={["left", "right"]}>
 
         <ScrollView 
           contentContainerStyle={styles.scrollContent} 
@@ -86,7 +82,6 @@ export default function HomeScreen() {
           <ContactCard />
 
           
-          
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -99,15 +94,14 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background 
   },
   backgroundLayer: { 
-    ...StyleSheet.absoluteFillObject
-    
+    ...StyleSheet.absoluteFillObject 
   },
   
  
   scrollContent: {
-    paddingTop: 80,
+    paddingTop: theme.spacing.l,
     paddingHorizontal: 12,
-    paddingBottom: 140,
+    paddingBottom: 0,
   },
   
 
@@ -126,9 +120,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 20,
   },
-
-  proBadge: { position: 'absolute', top: 60, right: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: '#fbbf24', zIndex: 20 },
-  proText: { color: '#fbbf24', fontWeight: '800', fontSize: 12 },
   headerContainer: { marginBottom: 24, alignItems: 'center' },
   titleMain: { fontSize: 38, fontWeight: '800', color: theme.colors.text, textAlign: 'center', lineHeight: 42 },
   titleHighlight: { color: theme.colors.primary },

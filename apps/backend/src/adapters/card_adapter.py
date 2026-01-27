@@ -1,6 +1,13 @@
 from typing import List, Dict
 from src.database.models import Card, Pitch
 from src.adapters.base import BaseAdapter
+import unicodedata
+
+def _normalize_search(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return s
 
 class CardAdapter(BaseAdapter):
     
@@ -26,6 +33,7 @@ class CardAdapter(BaseAdapter):
             card.source_uuid = source_uuid
             card.year = self._json_get(item, "year", 0)
             card.name = self._json_get(item, "name", "Unknown")
+            card.search_name = _normalize_search(card.name)
             card.ovr = self._json_get(item, "ovr", 0) or 0
             card.type = self._json_get(item, "type", "")
             card.img = self._json_get(item, "img", "")

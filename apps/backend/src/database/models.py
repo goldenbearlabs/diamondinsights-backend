@@ -1,6 +1,20 @@
 from typing import List, Optional
 import datetime
 from sqlalchemy import Column, ForeignKey, Table, Date, ForeignKeyConstraint, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    BigInteger,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.database.database import Base
 
@@ -29,6 +43,7 @@ class Card(Base):
     img: Mapped[str] = mapped_column()
     baked_img: Mapped[Optional[str]] = mapped_column()
     name: Mapped[str] = mapped_column(index=True)
+    search_name: Mapped[str] = mapped_column(index=True)
     short_description: Mapped[Optional[str]] = mapped_column()
     rarity: Mapped[str] = mapped_column()
     team: Mapped[str] = mapped_column()
@@ -110,6 +125,9 @@ class Card(Base):
         uselist=False, 
         cascade="all, delete-orphan"
     )
+    predictions: Mapped[List["CardPrediction"]] = relationship(back_populates="card", passive_deletes=True)
+    votes: Mapped[List["CardVote"]] = relationship(back_populates="card", passive_deletes=True)
+    portfolio_holdings: Mapped[List["PortfolioHolding"]] = relationship(back_populates="card", passive_deletes=True)
     
     def __repr__(self) -> str:
         return f"CARD (id={self.id}, name={self.name}, series={self.series_name}, ovr={self.ovr})"
@@ -594,3 +612,293 @@ class MLBGameFieldingStats(Base):
 
     def __repr__(self) -> str:
         return f"MLB_GAME_FIELDING_STATS (game_id={self.game_id}, player_id={self.player_id}, put_outs={self.put_outs})"
+    
+class Users(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    firebase_id: Mapped[str] = mapped_column(unique=True)
+    email: Mapped[str] = mapped_column(unique=True)
+    display_name: Mapped[str] = mapped_column()
+    search_display_name: Mapped[str] = mapped_column(index=True)
+    profile_img_url: Mapped[str] = mapped_column()
+    portfolios: Mapped[List["Portfolio"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    card_votes: Mapped[List["CardVote"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    update_scores: Mapped[List["UserUpdateScore"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    show_profile: Mapped[Optional["ShowProfile"]] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"USERS (id={self.id}, firebase_id={self.firebase_id}, email={self.email})"
+    
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+class PredictionRun(Base):
+    __tablename__ = "prediction_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    run_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    scope: Mapped[str] = mapped_column()
+    model_version: Mapped[str] = mapped_column()
+    status: Mapped[str] = mapped_column(default="success")
+    notes: Mapped[Optional[str]] = mapped_column()
+
+    card_predictions: Mapped[List["CardPrediction"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("scope in ('standard','fielding')", name="ck_prediction_runs_scope"),
+    )
+
+class CardPrediction(Base):
+    __tablename__ = "card_predictions"
+
+    run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("prediction_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    card_id: Mapped[str] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    predicted_ovr: Mapped[Optional[int]] = mapped_column(Integer)
+    predicted_attributes: Mapped[dict] = mapped_column(JSONB, default=dict)
+    predicted_rarity: Mapped[Optional[str]] = mapped_column()
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    run: Mapped["PredictionRun"] = relationship(back_populates="card_predictions")
+    card: Mapped["Card"] = relationship(back_populates="predictions")
+
+    __table_args__ = (
+        Index("ix_card_predictions_card_run_desc", "card_id", "run_id"),
+    )
+    
+class UpdateSchedule(Base):
+    __tablename__ = "update_schedule"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    next_update_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+class Portfolio(Base):
+    __tablename__ = "portfolios"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    user: Mapped["Users"] = relationship(back_populates="portfolios")
+    holdings: Mapped[List["PortfolioHolding"]] = relationship(
+        back_populates="portfolio", cascade="all, delete-orphan"
+    )
+    transactions: Mapped[List["PortfolioTransaction"]] = relationship(
+        back_populates="portfolio", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_portfolios_user_name"),
+    )
+
+class PortfolioHolding(Base):
+    __tablename__ = "portfolio_holdings"
+
+    portfolio_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True
+    )
+    card_id: Mapped[str] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    avg_price: Mapped[Optional[int]] = mapped_column(Integer)
+    user_predicted_ovr: Mapped[Optional[int]] = mapped_column(Integer)
+    notes: Mapped[Optional[str]] = mapped_column()
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    portfolio: Mapped["Portfolio"] = relationship(back_populates="holdings")
+    card: Mapped["Card"] = relationship(back_populates="portfolio_holdings")
+
+    __table_args__ = (
+        Index("ix_portfolio_holdings_portfolio", "portfolio_id"),
+        Index("ix_portfolio_holdings_card", "card_id"),
+    )
+
+class PortfolioTransaction(Base):
+    __tablename__ = "portfolio_transactions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    portfolio_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("portfolios.id", ondelete="CASCADE"), index=True
+    )
+    card_id: Mapped[str] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), index=True
+    )
+
+    qty_delta: Mapped[int] = mapped_column(Integer)
+    price: Mapped[int] = mapped_column(Integer)
+    occurred_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    notes: Mapped[Optional[str]] = mapped_column()
+
+    portfolio: Mapped["Portfolio"] = relationship(back_populates="transactions")
+    card: Mapped["Card"] = relationship()
+
+class CardVote(Base):
+    __tablename__ = "card_votes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), index=True)
+
+    update_id: Mapped[int] = mapped_column(Integer)
+    update_date: Mapped[datetime.date] = mapped_column(Date)
+
+    vote_value: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    user: Mapped["Users"] = relationship(back_populates="card_votes")
+    card: Mapped["Card"] = relationship(back_populates="votes")
+    result: Mapped[Optional["VoteResult"]] = relationship(
+        back_populates="vote", uselist=False, cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["update_id", "update_date"],
+            ["roster_updates.id", "roster_updates.date"],
+            name="fk_card_votes_roster_update",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "user_id", "card_id", "update_id", "update_date", name="uq_card_votes_unique_vote"
+        ),
+        CheckConstraint("vote_value >= -100 AND vote_value <= 100", name="ck_card_votes_vote_value"),
+        Index("ix_card_votes_update_card", "update_id", "update_date", "card_id"),
+        Index("ix_card_votes_user_update", "user_id", "update_id", "update_date"),
+    )
+
+class CardVoteAggregate(Base):
+    __tablename__ = "card_vote_aggregates"
+
+    update_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    update_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    card_id: Mapped[str] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    count_total: Mapped[int] = mapped_column(Integer, default=0)
+    sum_votes: Mapped[int] = mapped_column(Integer, default=0)
+    count_pos: Mapped[int] = mapped_column(Integer, default=0)
+    count_neg: Mapped[int] = mapped_column(Integer, default=0)
+    count_zero: Mapped[int] = mapped_column(Integer, default=0)
+
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    card: Mapped["Card"] = relationship()
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["update_id", "update_date"],
+            ["roster_updates.id", "roster_updates.date"],
+            name="fk_card_vote_aggs_roster_update",
+            ondelete="CASCADE",
+        ),
+        Index("ix_card_vote_aggs_update_card", "update_id", "update_date", "card_id"),
+    )
+
+
+class VoteResult(Base):
+    __tablename__ = "vote_results"
+
+    vote_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("card_votes.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    did_update: Mapped[bool] = mapped_column(Boolean, default=False)
+    actual_old_ovr: Mapped[Optional[int]] = mapped_column(Integer)
+    actual_new_ovr: Mapped[Optional[int]] = mapped_column(Integer)
+    actual_delta_ovr: Mapped[Optional[int]] = mapped_column(Integer)
+
+    correct: Mapped[Optional[bool]] = mapped_column(Boolean)
+    points_awarded: Mapped[int] = mapped_column(Integer, default=0)
+    computed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    vote: Mapped["CardVote"] = relationship(back_populates="result")
+
+
+class UserUpdateScore(Base):
+    __tablename__ = "user_update_scores"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    update_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    update_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+
+    votes_count: Mapped[int] = mapped_column(Integer, default=0)
+    correct_count: Mapped[int] = mapped_column(Integer, default=0)
+    points_total: Mapped[int] = mapped_column(Integer, default=0)
+    computed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    user: Mapped["Users"] = relationship(back_populates="update_scores")
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["update_id", "update_date"],
+            ["roster_updates.id", "roster_updates.date"],
+            name="fk_user_update_scores_roster_update",
+            ondelete="CASCADE",
+        ),
+        Index("ix_user_update_scores_user_recent", "user_id", "computed_at"),
+    )
+
+
+class ShowProfile(Base):
+    __tablename__ = "show_profiles"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+
+    username: Mapped[str] = mapped_column(unique=True, index=True)
+    display_level: Mapped[Optional[int]] = mapped_column(Integer)
+    games_played: Mapped[Optional[int]] = mapped_column(Integer)
+    nameplate_equipped: Mapped[Optional[str]] = mapped_column()
+    icon_equipped: Mapped[Optional[str]] = mapped_column()
+
+    raw_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+    linked_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_refreshed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    user: Mapped["Users"] = relationship(back_populates="show_profile")
+    online_stats: Mapped[List["ShowProfileOnlineStats"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
+
+
+class ShowProfileOnlineStats(Base):
+    __tablename__ = "show_profile_online_stats"
+
+    profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("show_profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    year: Mapped[str] = mapped_column(primary_key=True)
+
+    wins: Mapped[Optional[int]] = mapped_column(Integer)
+    losses: Mapped[Optional[int]] = mapped_column(Integer)
+    hr: Mapped[Optional[int]] = mapped_column(Integer)
+    runs_per_game: Mapped[Optional[float]] = mapped_column(Float)
+    stolen_bases: Mapped[Optional[int]] = mapped_column(Integer)
+    batting_average: Mapped[Optional[float]] = mapped_column(Float)
+    era: Mapped[Optional[float]] = mapped_column(Float)
+    k_per_9: Mapped[Optional[float]] = mapped_column(Float)
+    whip: Mapped[Optional[float]] = mapped_column(Float)
+
+    profile: Mapped["ShowProfile"] = relationship(back_populates="online_stats")

@@ -1,9 +1,11 @@
 
 import time
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
+from src.core.firebase_admin import init_firebase_admin
 from src.api.routes import (
     cards,
     completed_orders,
@@ -12,11 +14,19 @@ from src.api.routes import (
     mlb_game_batting_stats,
     players,
     quirks,
+    users,
+    show_profiles,
+    search
 )
 
 load_dotenv()
 
-app = FastAPI(title="DiamondInsights API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_firebase_admin()
+    yield
+
+app = FastAPI(title="DiamondInsights API", lifespan=lifespan)
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -39,6 +49,10 @@ app.include_router(quirks.router)
 app.include_router(market_candles.router)
 app.include_router(mlb_game_batting_stats.router)
 app.include_router(players.router)
+app.include_router(users.router)
+app.include_router(show_profiles.router)
+app.include_router(show_profiles.public_router)
+app.include_router(search.router)
 
 @app.get("/")
 def health_check():

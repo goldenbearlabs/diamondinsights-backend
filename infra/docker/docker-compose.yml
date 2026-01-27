@@ -30,6 +30,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH}
       TZ: America/Vancouver
     depends_on:
       - db
@@ -38,6 +39,8 @@ services:
     command: bash -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
+    secrets:
+      - firebase_service_key
 
 networks:
   app_network:
@@ -46,3 +49,7 @@ networks:
 volumes:
   postgres_data:
   portainer_data:
+
+secrets:
+  firebase_service_key:
+    file: ../../secrets/firebase_service_key.json

@@ -112,3 +112,4 @@ build/
 # ------------------------------------------------------------
 coverage/
 .cache/
+firebase_service_key.json

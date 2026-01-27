@@ -1,0 +1,924 @@
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  DeviceEventEmitter,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import { getDownloadURL, ref } from "firebase/storage";
+import { sendPasswordResetEmail } from "firebase/auth";
+
+import { ApiError, apiGetAuth, apiPostAuth, apiPutAuth } from "../../src/lib/api";
+import { auth, storage } from "../../src/lib/firebase";
+import { withCacheBuster } from "../../src/lib/profileImage";
+import { uploadProfileImage } from "../../src/lib/storage";
+import { theme } from "../../src/theme/colors";
+
+const DEFAULT_PROFILE = require("../../assets/images/default_profile.png");
+
+type UserProfile = {
+  id: number;
+  firebase_id?: string | null;
+  email?: string | null;
+  display_name: string;
+  profile_img_path: string;
+  is_me: boolean;
+};
+
+type ShowProfile = {
+  username: string;
+  display_level?: number | null;
+  games_played?: number | null;
+  linked_at: string;
+  last_refreshed_at: string;
+  online_stats: Array<{
+    year: string;
+    wins?: number | null;
+    losses?: number | null;
+    hr?: number | null;
+    runs_per_game?: number | null;
+    stolen_bases?: number | null;
+    batting_average?: number | null;
+    era?: number | null;
+    k_per_9?: number | null;
+    whip?: number | null;
+  }>;
+};
+
+export default function AccountScreen() {
+  const params = useLocalSearchParams<{ userId?: string | string[] }>();
+  const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState<ShowProfile | null>(null);
+  const [showLoading, setShowLoading] = useState(false);
+  const [showError, setShowError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"Investing" | "Gameplay">("Gameplay");
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [newPhotoUri, setNewPhotoUri] = useState<string | null>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUsername, setLinkUsername] = useState("");
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadProfile = async () => {
+      setLoading(true);
+      setPageError(null);
+      try {
+        const path = userId ? `/users/${userId}` : "/users/me";
+        const data = await apiGetAuth<UserProfile>(path);
+        if (!active) return;
+        setProfile(data);
+        setEditName(data.display_name);
+        setEditEmail(data.email ?? "");
+      } catch (err: any) {
+        if (!active) return;
+        setPageError(err?.message ?? "Failed to load profile");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadImage = async () => {
+      if (!profile?.profile_img_path) {
+        setProfileImageUri(null);
+        return;
+      }
+      try {
+        const url = await getDownloadURL(ref(storage, profile.profile_img_path));
+        if (active) setProfileImageUri(withCacheBuster(url));
+      } catch {
+        if (active) setProfileImageUri(null);
+      }
+    };
+
+    loadImage();
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.profile_img_path]);
+
+  useEffect(() => {
+    if (!profile) return;
+    let active = true;
+
+    const loadShowProfile = async () => {
+      setShowLoading(true);
+      setShowError(null);
+      setShowProfile(null);
+      try {
+        const path = profile.is_me ? "/users/me/show" : `/users/${profile.id}/show`;
+        const data = await apiGetAuth<ShowProfile>(path);
+        if (!active) return;
+        setShowProfile(data);
+      } catch (err: any) {
+        if (!active) return;
+        if (err instanceof ApiError && err.status === 404) {
+          setShowProfile(null);
+          setShowError(null);
+        } else {
+          setShowError(err?.message ?? "Failed to load The Show profile");
+        }
+      } finally {
+        if (active) setShowLoading(false);
+      }
+    };
+
+    loadShowProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.id, profile?.is_me]);
+
+  const openSettings = () => {
+    if (!profile) return;
+    setEditName(profile.display_name);
+    setEditEmail(profile.email ?? "");
+    setNewPhotoUri(null);
+    setNotice(null);
+    setModalError(null);
+    setSettingsOpen(true);
+  };
+
+  const pickProfilePhoto = async () => {
+    setNotice(null);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      setNotice("Photo permission denied.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled) setNewPhotoUri(result.assets[0].uri);
+  };
+
+  const openLinkModal = () => {
+    setLinkUsername("");
+    setLinkNotice(null);
+    setLinkError(null);
+    setLinkOpen(true);
+  };
+
+  const linkShowProfile = async () => {
+    const username = linkUsername.trim();
+    if (!username) {
+      setLinkError("Username is required.");
+      return;
+    }
+    setLinkError(null);
+    setLinkNotice(null);
+    setLinking(true);
+    try {
+      const data = await apiPostAuth<ShowProfile>("/users/me/show/link", { username });
+      setShowProfile(data);
+      setLinkOpen(false);
+      setLinkUsername("");
+      setLinkNotice("Account linked.");
+    } catch (err: any) {
+      if (err instanceof ApiError) {
+        if (err.status === 404) {
+          setLinkError("No MLB The Show account found for that username.");
+        } else if (err.status === 409) {
+          setLinkError("That MLB The Show username is already linked.");
+        } else {
+          setLinkError(err.body || "Failed to link account");
+        }
+      } else {
+        setLinkError(err?.message ?? "Failed to link account");
+      }
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const saveProfile = async () => {
+    if (!profile) return;
+    setSaving(true);
+    setNotice(null);
+    setModalError(null);
+    try {
+      const updates: Record<string, string> = {};
+      const nextName = editName.trim();
+      const nextEmail = editEmail.trim();
+
+      if (nextName && nextName !== profile.display_name) {
+        updates.display_name = nextName;
+      }
+      if (nextEmail && nextEmail !== (profile.email ?? "")) {
+        updates.email = nextEmail;
+      }
+
+      let profileImgPath = profile.profile_img_path;
+      if (newPhotoUri) {
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error("Not authenticated");
+        profileImgPath = await uploadProfileImage(newPhotoUri, uid);
+        updates.profile_img_path = profileImgPath;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        setSettingsOpen(false);
+        return;
+      }
+
+      const updated = await apiPutAuth<UserProfile>("/users/me", updates);
+      setProfile(updated);
+      if (newPhotoUri) {
+        try {
+          const url = await getDownloadURL(ref(storage, updated.profile_img_path));
+          setProfileImageUri(withCacheBuster(url));
+        } catch {
+          setProfileImageUri(newPhotoUri);
+        }
+        DeviceEventEmitter.emit("profile-image-updated");
+      }
+      setSettingsOpen(false);
+      setNewPhotoUri(null);
+      setNotice("Profile updated.");
+    } catch (err: any) {
+      setModalError(err?.message ?? "Failed to update profile");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetPassword = async () => {
+    const email = profile?.email ?? editEmail.trim();
+    if (!email) {
+      setNotice("Email is required to reset password.");
+      return;
+    }
+    setSaving(true);
+    setNotice(null);
+    setModalError(null);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setNotice("Password reset email sent.");
+    } catch (err: any) {
+      setModalError(err?.message ?? "Failed to send reset email");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const summaryStats =
+    showProfile?.online_stats?.find((row) => row.year === "Total") ??
+    showProfile?.online_stats?.[0];
+  const formatStat = (value?: number | null) =>
+    value === null || value === undefined ? "-" : String(value);
+  const formatFloat = (value?: number | null, digits = 2) =>
+    value === null || value === undefined ? "-" : value.toFixed(digits);
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Account</Text>
+          {profile?.is_me ? (
+            <TouchableOpacity style={styles.settingsButton} onPress={openSettings}>
+              <Ionicons name="settings-outline" size={20} color={theme.colors.text} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color={theme.colors.text} />
+          </View>
+        ) : pageError ? (
+          <View style={styles.loadingState}>
+            <Text style={styles.errorText}>{pageError}</Text>
+          </View>
+        ) : profile ? (
+          <>
+            <View style={styles.profileHeader}>
+              <View style={styles.avatarFrame}>
+                <Image
+                  source={profileImageUri ? { uri: profileImageUri } : DEFAULT_PROFILE}
+                  style={styles.avatarLarge}
+                  onError={() => setProfileImageUri(null)}
+                />
+              </View>
+              <View style={styles.profileInfo}>
+                <Text style={styles.nameLarge}>{profile.display_name}</Text>
+                <View style={styles.summaryRow}>
+                  <View style={styles.summaryItem}>
+                    <Text style={[styles.summaryValue, styles.summaryValueAccent]}>100</Text>
+                    <Text style={styles.summaryLabel}>Rating</Text>
+                  </View>
+                  <View style={styles.summaryItem}>
+                    <Text style={styles.summaryValue}>
+                      {summaryStats
+                        ? `${formatStat(summaryStats.wins)}-${formatStat(summaryStats.losses)}`
+                        : "-"}
+                    </Text>
+                    <Text style={styles.summaryLabel}>Record</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.tabRow}>
+              <TouchableOpacity
+                style={[
+                  styles.tabButton,
+                  activeTab === "Investing" && styles.tabButtonActive,
+                ]}
+                onPress={() => setActiveTab("Investing")}
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === "Investing" && styles.tabTextActive,
+                  ]}
+                >
+                  Investing
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.tabButton,
+                  activeTab === "Gameplay" && styles.tabButtonActive,
+                ]}
+                onPress={() => setActiveTab("Gameplay")}
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === "Gameplay" && styles.tabTextActive,
+                  ]}
+                >
+                  Gameplay
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.tabCard}>
+              {activeTab === "Investing" ? (
+                <Text style={styles.sectionText}>Coming soon.</Text>
+              ) : showLoading ? (
+                <View style={styles.loadingInline}>
+                  <ActivityIndicator color={theme.colors.text} />
+                </View>
+              ) : showError ? (
+                <Text style={styles.errorText}>{showError}</Text>
+              ) : showProfile ? (
+                <>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>MLB The Show</Text>
+                    <Text style={styles.sectionMeta}>{showProfile.username}</Text>
+                  </View>
+
+                  <View style={styles.detailGrid}>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>Level</Text>
+                      <Text style={styles.detailValue}>
+                        {formatStat(showProfile.display_level)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>Games Played</Text>
+                      <Text style={styles.detailValue}>
+                        {formatStat(showProfile.games_played)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.onlineRow}>
+                    <View style={styles.onlineLine} />
+                    <Text style={styles.onlineText}>Online</Text>
+                    <View style={styles.onlineLine} />
+                  </View>
+
+                  <View style={styles.detailGrid}>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>Wins</Text>
+                      <Text style={styles.detailValue}>
+                        {formatStat(summaryStats?.wins)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>Losses</Text>
+                      <Text style={styles.detailValue}>
+                        {formatStat(summaryStats?.losses)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>ER</Text>
+                      <Text style={styles.detailValue}>
+                        {formatFloat(summaryStats?.runs_per_game, 2)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>ERA</Text>
+                      <Text style={styles.detailValue}>
+                        {formatFloat(summaryStats?.era, 2)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>AVG</Text>
+                      <Text style={styles.detailValue}>
+                        {formatFloat(summaryStats?.batting_average, 3)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>K/9</Text>
+                      <Text style={styles.detailValue}>
+                        {formatFloat(summaryStats?.k_per_9, 2)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>HR</Text>
+                      <Text style={styles.detailValue}>{formatStat(summaryStats?.hr)}</Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>WHIP</Text>
+                      <Text style={styles.detailValue}>
+                        {formatFloat(summaryStats?.whip, 2)}
+                      </Text>
+                    </View>
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>SB</Text>
+                      <Text style={styles.detailValue}>
+                        {formatStat(summaryStats?.stolen_bases)}
+                      </Text>
+                    </View>
+                  </View>
+                </>
+              ) : profile.is_me ? (
+                <>
+                  <Text style={styles.sectionText}>
+                    Link your MLB The Show account to show gameplay stats.
+                  </Text>
+                  <TouchableOpacity style={styles.linkButton} onPress={openLinkModal}>
+                    <Text style={styles.linkButtonText}>Link MLB The Show account</Text>
+                  </TouchableOpacity>
+                  {linkNotice ? <Text style={styles.noticeText}>{linkNotice}</Text> : null}
+                </>
+              ) : (
+                <Text style={styles.sectionText}>No linked The Show profile.</Text>
+              )}
+            </View>
+          </>
+        ) : null}
+      </ScrollView>
+
+      <Modal transparent visible={settingsOpen} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setSettingsOpen(false)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Account</Text>
+              <TouchableOpacity onPress={() => setSettingsOpen(false)}>
+                <Ionicons name="close" size={22} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={styles.photoButton} onPress={pickProfilePhoto}>
+              <Ionicons name="image-outline" size={18} color={theme.colors.text} />
+              <Text style={styles.photoButtonText}>
+                {newPhotoUri ? "Change selected photo" : "Change profile photo"}
+              </Text>
+            </TouchableOpacity>
+
+            {newPhotoUri ? (
+              <Image source={{ uri: newPhotoUri }} style={styles.photoPreview} />
+            ) : null}
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Display name</Text>
+              <TextInput
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Display name"
+                placeholderTextColor={theme.colors.muted}
+                style={styles.input}
+              />
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                value={editEmail}
+                onChangeText={setEditEmail}
+                placeholder="Email address"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.input}
+              />
+            </View>
+
+            {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
+            {modalError ? <Text style={styles.errorText}>{modalError}</Text> : null}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.resetButton} onPress={resetPassword} disabled={saving}>
+                <Text style={styles.resetText}>Reset password</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={saving}>
+                <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal transparent visible={linkOpen} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setLinkOpen(false)} />
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Link MLB The Show</Text>
+              <TouchableOpacity onPress={() => setLinkOpen(false)}>
+                <Ionicons name="close" size={22} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Username</Text>
+              <TextInput
+                value={linkUsername}
+                onChangeText={setLinkUsername}
+                placeholder="MLB The Show username"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                style={styles.input}
+              />
+            </View>
+
+            {linkError ? <Text style={styles.errorText}>{linkError}</Text> : null}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.resetButton} onPress={() => setLinkOpen(false)}>
+                <Text style={styles.resetText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveButton} onPress={linkShowProfile} disabled={linking}>
+                <Text style={styles.saveText}>{linking ? "Linking..." : "Link account"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  container: {
+    paddingHorizontal: theme.spacing.l,
+    paddingTop: theme.spacing.l,
+    paddingBottom: theme.spacing.xl,
+    gap: theme.spacing.l,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  title: {
+    color: theme.colors.text,
+    fontSize: 28,
+    fontWeight: "700",
+  },
+  settingsButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  loadingState: {
+    minHeight: 200,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileHeader: {
+    flexDirection: "row",
+    gap: theme.spacing.m,
+    padding: theme.spacing.m,
+    borderRadius: 20,
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "stretch",
+  },
+  avatarFrame: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    overflow: "hidden",
+  },
+  avatarLarge: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  profileInfo: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  nameLarge: {
+    color: theme.colors.text,
+    fontSize: 26,
+    fontWeight: "800",
+  },
+  summaryRow: {
+    flexDirection: "row",
+    gap: theme.spacing.m,
+  },
+  summaryItem: {
+    flex: 1,
+    alignItems: "flex-start",
+  },
+  summaryLabel: {
+    color: theme.colors.muted,
+    fontSize: 10,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.9,
+    marginTop: 4,
+  },
+  summaryValue: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  summaryValueAccent: {
+    color: "#fbbf24",
+  },
+  tabRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(15, 23, 42, 0.35)",
+    alignItems: "center",
+  },
+  tabButtonActive: {
+    backgroundColor: "rgba(59, 130, 246, 0.2)",
+    borderColor: "rgba(59, 130, 246, 0.6)",
+  },
+  tabText: {
+    color: theme.colors.muted,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  tabTextActive: {
+    color: theme.colors.text,
+    fontWeight: "700",
+  },
+  tabCard: {
+    padding: theme.spacing.l,
+    borderRadius: 16,
+    backgroundColor: "rgba(15, 23, 42, 0.4)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    gap: theme.spacing.m,
+  },
+  sectionTitle: {
+    color: theme.colors.text,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: theme.spacing.s,
+  },
+  sectionMeta: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  sectionText: {
+    marginTop: theme.spacing.s,
+    color: theme.colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  onlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  onlineLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  onlineText: {
+    color: theme.colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  loadingInline: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: theme.spacing.s,
+  },
+  detailGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: theme.spacing.m,
+  },
+  detailItem: {
+    width: "48%",
+    paddingVertical: theme.spacing.s,
+    paddingHorizontal: theme.spacing.m,
+    borderRadius: 12,
+    backgroundColor: "rgba(15, 23, 42, 0.5)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  detailLabel: {
+    color: theme.colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  detailValue: {
+    marginTop: 6,
+    color: theme.colors.text,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  linkButton: {
+    marginTop: theme.spacing.m,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: theme.colors.primary,
+    alignItems: "center",
+  },
+  linkButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  errorText: {
+    color: theme.colors.error,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  noticeText: {
+    color: theme.colors.primary,
+    fontSize: 13,
+    textAlign: "center",
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2, 6, 23, 0.75)",
+  },
+  modalCard: {
+    width: "88%",
+    borderRadius: 20,
+    backgroundColor: theme.colors.card,
+    padding: theme.spacing.l,
+    gap: theme.spacing.m,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modalTitle: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  photoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
+  },
+  photoButtonText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  photoPreview: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignSelf: "center",
+  },
+  fieldGroup: {
+    gap: 6,
+  },
+  label: {
+    color: theme.colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    color: theme.colors.text,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    fontSize: 15,
+  },
+  modalActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  resetButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    alignItems: "center",
+  },
+  resetText: {
+    color: theme.colors.text,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  saveButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: theme.colors.primary,
+    alignItems: "center",
+  },
+  saveText: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+});

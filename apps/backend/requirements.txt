@@ -21,3 +21,5 @@ tzdata==2025.3
 tzlocal==5.3.1
 urllib3==2.6.1
 uvicorn==0.38.0
+firebase-admin==7.1.0
+pydantic[email]==2.12.5
