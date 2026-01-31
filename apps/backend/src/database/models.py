@@ -628,6 +628,7 @@ class Users(Base):
     show_profile: Mapped[Optional["ShowProfile"]] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    messages: Mapped[List["Message"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"USERS (id={self.id}, firebase_id={self.firebase_id}, email={self.email})"
@@ -902,3 +903,21 @@ class ShowProfileOnlineStats(Base):
     whip: Mapped[Optional[float]] = mapped_column(Float)
 
     profile: Mapped["ShowProfile"] = relationship(back_populates="online_stats")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    content: Mapped[str] = mapped_column()
+    timestamp: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    user: Mapped["Users"] = relationship(back_populates="messages")
+
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+    parent: Mapped[Optional["Message"]] = relationship(remote_side=[id])
+    edited_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"MESSAGE (id={self.id}, user={self.user_id})"
