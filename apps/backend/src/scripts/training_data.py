@@ -2,7 +2,7 @@ import re
 import pandas as pd
 from datetime import timedelta
 from sqlalchemy import text
-from src.database.database import engine
+from shared.db.database import engine
 
 OUTPUT_PATH = "src/training_data.csv"
 

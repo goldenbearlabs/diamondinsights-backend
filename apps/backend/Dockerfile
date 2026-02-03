@@ -2,32 +2,15 @@ FROM python:3.13
 WORKDIR /app
 ENV PYTHONPATH=/app
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates util-linux \
-  && rm -rf /var/lib/apt/lists/*
+COPY requirements/backend.txt /tmp/requirements.txt
+COPY requirements/base.txt /tmp/base.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-ARG TARGETARCH
-ARG TARGETPLATFORM
-ENV SUPERCRONIC_VERSION=v0.2.40
-
-RUN echo "Building for TARGETPLATFORM=${TARGETPLATFORM} TARGETARCH=${TARGETARCH}" \
-  && case "${TARGETARCH}" in \
-      amd64) BIN="supercronic-linux-amd64" ;; \
-      arm64) BIN="supercronic-linux-arm64" ;; \
-      arm)   BIN="supercronic-linux-arm" ;; \
-      *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
-    esac \
-  && curl -fsSL "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/${BIN}" -o /usr/local/bin/supercronic \
-  && chmod +x /usr/local/bin/supercronic
-
-COPY alembic.ini .
-COPY alembic ./alembic
-COPY src ./src
-COPY cron/crontab ./crontab
-
-RUN useradd app
-USER app
+COPY apps/backend/src /app/src
+COPY apps/backend/alembic /app/alembic
+COPY apps/backend/alembic.ini /app/alembic.ini
+COPY shared /app/shared
 
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

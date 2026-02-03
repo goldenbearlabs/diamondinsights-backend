@@ -1,0 +1,54 @@
+{
+  "attr": "VEL",
+  "role": "pit",
+  "best_model": "xgb",
+  "coarse_results": [
+    {
+      "model": "xgb",
+      "rmse": 5.338749111144481,
+      "params": {
+        "n_estimators": 984,
+        "learning_rate": 0.029177920707994742,
+        "max_depth": 2,
+        "min_child_weight": 1.0019617074349045,
+        "subsample": 0.7474202038063273,
+        "colsample_bytree": 0.8124159276690213,
+        "reg_lambda": 5.650877963806951,
+        "reg_alpha": 4.078649186547715,
+        "gamma": 1.3983343011466753
+      }
+    },
+    {
+      "model": "lgb",
+      "rmse": 5.408846015735181,
+      "params": {
+        "n_estimators": 768,
+        "learning_rate": 0.017001754132211097,
+        "num_leaves": 26,
+        "min_child_samples": 39,
+        "subsample": 0.7554709158757928,
+        "colsample_bytree": 0.7085396127095583,
+        "reg_lambda": 0.5106371777919967,
+        "reg_alpha": 1.7837666334679465,
+        "max_depth": 2,
+        "min_data_in_leaf": 46,
+        "min_sum_hessian_in_leaf": 0.0036618192203924276,
+        "feature_fraction": 0.9208787923016158,
+        "bagging_fraction": 0.6298202574719083,
+        "bagging_freq": 10
+      }
+    },
+    {
+      "model": "hgb",
+      "rmse": 5.499755784916256,
+      "params": {
+        "max_iter": 429,
+        "learning_rate": 0.02030486943305827,
+        "max_leaf_nodes": 215,
+        "min_samples_leaf": 48,
+        "l2_regularization": 11.574962148854073,
+        "max_bins": 216
+      }
+    }
+  ]
+}
