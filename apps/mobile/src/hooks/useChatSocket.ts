@@ -1,76 +1,133 @@
-import { useEffect, useRef, useState } from "react";
+// apps/mobile/src/hooks/useChatSocket.ts
+import { useEffect, useRef, useState, useCallback } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import { auth } from "../lib/firebase"; 
 import { ChatMessage, WebSocketMessage } from "../types/chat";
 
 const getWsUrl = () => {
-  const apiUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.1.127:8000"; // Fallback
+  // Make sure this is your REAL IP address
+  const apiUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.1.127:8000"; 
   return apiUrl.replace(/^http/, "ws") + "/ws/chat";
 };
 
 export const useChatSocket = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  
   const ws = useRef<WebSocket | null>(null);
+  const appState = useRef(AppState.currentState);
 
-  useEffect(() => {
-    let active = true;
+  const connect = useCallback(async () => {
+    if (ws.current?.readyState === WebSocket.OPEN || ws.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
 
-    const connect = async () => {
-      // 1. Get Token
+    try {
       const user = auth.currentUser;
       if (!user) return;
-      const token = await user.getIdToken();
+      
+      const token = await user.getIdToken(true);
 
-      // 2. Open Connection
       const url = `${getWsUrl()}?token=${token}`;
+      console.log("Connecting to Chat:", url);
+      
       const socket = new WebSocket(url);
       ws.current = socket;
 
       socket.onopen = () => {
-        if (active) setIsConnected(true);
+        setIsConnected(true);
         console.log("Chat Connected");
       };
 
       socket.onmessage = (e) => {
-        if (!active) return;
-        
         try {
           const data = JSON.parse(e.data) as WebSocketMessage;
+          const currentUserUid = auth.currentUser?.uid;
+
+          const fixIsMe = (msg: any) => {
+            if (currentUserUid && msg.userFirebaseId === currentUserUid) {
+              return { ...msg, isMe: true };
+            }
+            return msg;
+          };
           
+
           if (data.type === "history_item") {
-            // Append to end (list is inverted, so 'end' is top of history)
-            setMessages((prev) => [...prev, data.payload]);
+            setMessages((prev) => {
+              if (prev.some((msg) => msg.id === data.payload.id)) {
+                return prev; // Ignore it
+              }
+              return [fixIsMe(data.payload), ...prev];
+            });
           } 
           else if (data.type === "new_message") {
-            // Add to start (bottom of screen)
-            setMessages((prev) => [data.payload, ...prev]);
+            setMessages((prev) => {
+              if (prev.some((msg) => msg.id === data.payload.id)) {
+                return prev; 
+              }
+              return [fixIsMe(data.payload), ...prev];
+            });
           } 
           else if (data.type === "update_message") {
-            // Find and swap text
             setMessages((prev) =>
               prev.map((msg) =>
                 msg.id === data.payload.id ? { ...msg, ...data.payload } : msg
               )
             );
           }
+          else if (data.type === "delete_message"){
+            setMessages((prev) => prev.filter((msg) => msg.id !== data.payload.id));
+          }
         } catch (err) {
           console.error("Chat Parse Error:", err);
         }
       };
 
-      socket.onclose = () => {
-        if (active) setIsConnected(false);
-        console.log("Chat Disconnected");
-      };
-    };
+      
 
+      socket.onclose = (e) => {
+        setIsConnected(false);
+        console.log("Chat Disconnected", e.reason);
+      };
+
+      socket.onerror = (e) => {
+        console.log("Chat Error", e);
+      };
+
+    } catch (err) {
+      console.error("Auth Token Error:", err);
+      setIsConnected(false);
+    }
+  }, []);
+
+  const disconnect = useCallback(() => {
+    if (ws.current) {
+      ws.current.close();
+      ws.current = null;
+    }
+    setIsConnected(false);
+  }, []);
+
+  useEffect(() => {
     connect();
 
+    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      if (
+        appState.current.match(/inactive|background/) &&
+        nextAppState === "active"
+      ) {
+        console.log("App has come to the foreground! Reconnecting chat...");
+        connect();
+      }
+
+      appState.current = nextAppState;
+    });
+
     return () => {
-      active = false;
-      ws.current?.close();
+      disconnect();
+      subscription.remove();
     };
-  }, []);
+  }, [connect, disconnect]);
 
   const sendMessage = (text: string, replyToId?: number) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -81,6 +138,9 @@ export const useChatSocket = () => {
           parentId: replyToId,
         })
       );
+    } else {
+        console.warn("Cannot send: Chat not connected");
+        connect(); 
     }
   };
 
@@ -96,5 +156,27 @@ export const useChatSocket = () => {
     }
   };
 
-  return { messages, isConnected, sendMessage, editMessage };
+  const deleteMessage = (id: number) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(
+        JSON.stringify({
+          type: "delete_message",
+          id,
+        })
+      );
+    }
+  };
+
+  const toggleLike = (id: number) => {
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(
+        JSON.stringify({
+          type: "toggle_like",
+          id,
+        })
+      );
+    }
+  };
+
+  return { messages, isConnected, sendMessage, editMessage, deleteMessage, toggleLike };
 };

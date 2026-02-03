@@ -16,15 +16,22 @@ export interface ChatUser {
     id: number;
     text: string;
     userId: number;
+    userFirebaseId?: string;
     userName: string;
     userImage?: string;
-    createdAt: string; 
+    createdAt: string;
     editedAt?: string | null;
-    isMe: boolean;
-    replyTo?: ReplyPreview | null;
+    isMe?: boolean;
+    
+    likedByFirebaseIds: string[];  
+    replyTo?: {
+      id: number;
+      userName: string;
+      text: string;
+    };
   }
   
   export interface WebSocketMessage {
-    type: "history_item" | "new_message" | "update_message";
-    payload: ChatMessage;
+    type: "new_message" | "history_item" | "update_message" | "delete_message";
+    payload: any;
   }

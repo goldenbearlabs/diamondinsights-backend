@@ -904,6 +904,12 @@ class ShowProfileOnlineStats(Base):
 
     profile: Mapped["ShowProfile"] = relationship(back_populates="online_stats")
 
+message_likes = Table(
+    "message_likes",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("message_id", ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True),
+)
 
 class Message(Base):
     __tablename__ = "messages"
@@ -918,6 +924,10 @@ class Message(Base):
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     parent: Mapped[Optional["Message"]] = relationship(remote_side=[id])
     edited_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    liked_by_users: Mapped[List["Users"]] = relationship(
+        secondary=message_likes, backref="liked_messages"
+    )
 
     def __repr__(self) -> str:
         return f"MESSAGE (id={self.id}, user={self.user_id})"
