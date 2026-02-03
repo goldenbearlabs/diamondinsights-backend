@@ -3,7 +3,7 @@ from shared.core.config import THE_SHOW_YEARS
 from shared.db.models import Series, Quirk, Location, Card, Pitch
 
 from typing import List, Dict, Optional
-from sqlalchemy import select, text, inspect as sa_inspect
+from sqlalchemy import select, text, inspect as sa_inspect, delete
 from sqlalchemy.dialects.postgresql import insert
 import unicodedata
 
@@ -53,6 +53,7 @@ class CardSync(Job):
         self.logger.info("cards prepared count=%s", len(cards_to_process))
 
         self._upsert_cards(db_session, cards_to_process, chunk_size=5000)
+        self._upsert_pitches(db_session, cards_to_process, chunk_size=5000)
         self._log_end(cards_upserted=len(cards_to_process))
 
     def _upsert_cards(self, session: Session, cards: List[Card], chunk_size: int = 5000) -> None:
@@ -74,6 +75,53 @@ class CardSync(Job):
                 set_=update_cols,
             )
             session.execute(stmt)
+            session.commit()
+
+    def _upsert_pitches(self, session: Session, cards: List[Card], chunk_size: int = 5000) -> None:
+        total = len(cards)
+
+        set_cols = {
+            "speed": insert(Pitch).excluded.speed,
+            "control": insert(Pitch).excluded.control,
+            "movement": insert(Pitch).excluded.movement,
+        }
+
+        for start in range(0, total, chunk_size):
+            chunk = cards[start : start + chunk_size]
+            card_ids = [c.id for c in chunk if c.id]
+
+            session.execute(text("SET LOCAL synchronous_commit TO OFF"))
+
+            if card_ids:
+                session.execute(delete(Pitch).where(Pitch.card_id.in_(card_ids)))
+
+            pitch_rows = []
+            for c in chunk:
+                for p in (getattr(c, "pitches", None) or []):
+                    name = (p.name or "").strip()
+                    if not (c.id and name):
+                        continue
+                    pitch_rows.append(
+                        {
+                            "card_id": c.id,
+                            "name": name,
+                            "speed": int(p.speed or 0),
+                            "control": int(p.control or 0),
+                            "movement": int(p.movement or 0),
+                        }
+                    )
+
+            if pitch_rows:
+                stmt = (
+                    insert(Pitch)
+                    .values(pitch_rows)
+                    .on_conflict_do_update(
+                        index_elements=["card_id", "name"],
+                        set_=set_cols,
+                    )
+                )
+                session.execute(stmt)
+
             session.commit()
 
     def _sync_series(self, session: Session, raw_data) -> Dict[str, Series]:
