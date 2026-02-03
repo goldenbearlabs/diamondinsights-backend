@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from src.database.database import get_db
-from src.database.models import MarketCandle, Card
+from shared.db.database import get_db
+from shared.db.models import MarketCandle, Card
 from src.schemas.market_candle import MarketCandleResponse
 
 

@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from src.database.database import get_db
-from src.database.models import Card, Users
+from shared.db.database import get_db
+from shared.db.models import Card, Users
 
 router = APIRouter(prefix="/search", tags=["search"])
 

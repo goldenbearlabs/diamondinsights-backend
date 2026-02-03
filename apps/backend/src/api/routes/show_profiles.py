@@ -11,8 +11,8 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from src.database.database import get_db
-from src.database.models import Users, ShowProfile, ShowProfileOnlineStats
+from shared.db.database import get_db
+from shared.db.models import Users, ShowProfile, ShowProfileOnlineStats
 from src.api.routes.users import firebase_claims
 
 
@@ -71,7 +71,7 @@ class LinkShowBody(BaseModel):
 
 
 class OnlineStatsOut(BaseModel):
-    year: str
+    year: int
     wins: Optional[int] = None
     losses: Optional[int] = None
     hr: Optional[int] = None
@@ -104,26 +104,22 @@ class ShowProfileOut(BaseModel):
     games_played: Optional[int] = None
     nameplate_equipped: Optional[str] = None
     icon_equipped: Optional[str] = None
-    linked_at: datetime.datetime
+    first_seen_at: datetime.datetime
+    claimed_at: Optional[datetime.datetime] = None
     last_refreshed_at: datetime.datetime
     online_stats: List[OnlineStatsOut] = Field(default_factory=list)
 
     @staticmethod
     def from_orm_profile(p: ShowProfile) -> "ShowProfileOut":
-        def _sort_key(s: ShowProfileOnlineStats):
-            if s.year == "Total":
-                return (0, 10**9)
-            y = _to_int(s.year)
-            return (1, y if y is not None else 0)
-
-        stats = sorted(p.online_stats or [], key=_sort_key)
+        stats = sorted(p.online_stats or [], key=lambda s: s.year)
         return ShowProfileOut(
             username=p.username,
             display_level=p.display_level,
             games_played=p.games_played,
             nameplate_equipped=p.nameplate_equipped,
             icon_equipped=p.icon_equipped,
-            linked_at=p.linked_at,
+            first_seen_at=p.first_seen_at,
+            claimed_at=p.claimed_at,
             last_refreshed_at=p.last_refreshed_at,
             online_stats=[OnlineStatsOut.from_orm_row(s) for s in stats],
         )
@@ -153,17 +149,16 @@ def _ensure_username_unclaimed(db: Session, username: str, current_user_id: int)
     existing = db.scalar(
         select(ShowProfile).where(func.lower(ShowProfile.username) == func.lower(username))
     )
-    if existing and existing.user_id != current_user_id:
+    if existing and existing.user_id not in (None, current_user_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already linked by another user")
 
 
-def _parsed_online_stats(profile_payload: dict) -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
+def _parsed_online_stats(profile_payload: dict) -> Dict[int, Dict[str, Any]]:
+    out: Dict[int, Dict[str, Any]] = {}
     for row in (profile_payload.get("online_data") or []):
-        yr = row.get("year")
-        if not yr:
+        yr = _to_int(row.get("year"))
+        if yr is None:
             continue
-        yr = str(yr)
 
         losses_val = row.get("losses")
         if losses_val is None:
@@ -183,7 +178,7 @@ def _parsed_online_stats(profile_payload: dict) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _apply_online_stats(sp: ShowProfile, incoming: Dict[str, Dict[str, Any]]) -> None:
+def _apply_online_stats(sp: ShowProfile, incoming: Dict[int, Dict[str, Any]]) -> None:
     existing_by_year = {s.year: s for s in (sp.online_stats or [])}
     keep_years = set(incoming.keys())
 
@@ -209,30 +204,46 @@ def _upsert_show_profile(db: Session, user: Users, username: str, profile_payloa
     vanity = profile_payload.get("vanity") or {}
     now = _utcnow()
 
-    sp = _get_profile_for_user(db, user.id)
+    existing_for_user = _get_profile_for_user(db, user.id)
+    existing_by_username = db.scalar(
+        select(ShowProfile).where(func.lower(ShowProfile.username) == func.lower(username))
+    )
+
+    if existing_for_user and existing_for_user.username.lower() != username.lower():
+        existing_for_user.user_id = None
+        existing_for_user.claimed_at = None
+        existing_for_user = None
+
+    sp = existing_by_username or existing_for_user
 
     if not sp:
         sp = ShowProfile(
             user_id=user.id,
             username=username,
+            first_seen_at=now,
+            claimed_at=now,
             display_level=_to_int(profile_payload.get("display_level")),
             games_played=_to_int(profile_payload.get("games_played")),
             nameplate_equipped=vanity.get("nameplate_equipped"),
             icon_equipped=vanity.get("icon_equipped"),
             raw_json=raw,
-            linked_at=now,
             last_refreshed_at=now,
         )
         db.add(sp)
         _apply_online_stats(sp, _parsed_online_stats(profile_payload))
         return sp
 
-    sp.username = username
+    if sp.user_id is None:
+        sp.user_id = user.id
+        sp.claimed_at = now
+
     sp.display_level = _to_int(profile_payload.get("display_level"))
     sp.games_played = _to_int(profile_payload.get("games_played"))
     sp.nameplate_equipped = vanity.get("nameplate_equipped")
     sp.icon_equipped = vanity.get("icon_equipped")
     sp.raw_json = raw
+    if sp.first_seen_at is None:
+        sp.first_seen_at = now
     sp.last_refreshed_at = now
     _apply_online_stats(sp, _parsed_online_stats(profile_payload))
     return sp
@@ -261,7 +272,7 @@ def link_show_username(
         existing = db.scalar(
             select(ShowProfile).where(func.lower(ShowProfile.username) == func.lower(username))
         )
-        if existing and existing.user_id != user.id:
+        if existing and existing.user_id not in (None, user.id):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already linked by another user")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to link username")
 

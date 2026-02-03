@@ -1,0 +1,112 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [app_network]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [app_network]
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks: [app_network]
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+    networks: [app_network]
+    restart: unless-stopped
+
+  heartbeat_exporter:
+    build:
+      context: ../..
+      dockerfile: apps/heartbeat_exporter/Dockerfile
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      EXPORTER_PORT: 9188
+      RUNNER_STATUS_KEY_PREFIX: "runner:status:"
+      JOB_PROCESSING_ZSET: jobs:processing:lease
+      HEARTBEAT_STALE_SECONDS: 90
+      QUEUE_KEYS: "jobs:pending,jobs:processing,jobs:dead"
+      QUEUE_SCAN_MAX: 2000
+    ports:
+      - "127.0.0.1:9188:9188"
+    networks: [app_network]
+    restart: unless-stopped
+
+  redis_exporter:
+    image: oliver006/redis_exporter:latest
+    environment:
+      REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_EXPORTER_CHECK_SINGLE_KEYS: "jobs:pending,jobs:processing,jobs:dead,jobs:processing:lease,jobs:processing:raw"
+    ports:
+      - "127.0.0.1:9121:9121"
+    networks: [app_network]
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [app_network]
+    restart: unless-stopped
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "127.0.0.1:9100:9100"
+    networks: [app_network]
+    restart: unless-stopped
+
+networks:
+  app_network:
+    external: true
+    name: app_network
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:

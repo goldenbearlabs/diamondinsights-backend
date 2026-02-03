@@ -10,8 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from src.database.database import get_db
-from src.database.models import Users
+from shared.db.database import get_db
+from shared.db.models import Users
 
 
 def _normalize_search(s: str) -> str:

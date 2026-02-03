@@ -1,8 +1,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from src.database.database import get_db
-from src.database.models import Player
+from shared.db.database import get_db
+from shared.db.models import Player
 from src.schemas.player import PlayerResponse
 
 router = APIRouter(prefix="/players", tags=["players"])
