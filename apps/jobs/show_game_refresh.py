@@ -295,9 +295,9 @@ class ShowGameRefresh(Job):
             username = (username or "").strip()
 
             # DEBUG ME
-            if username != "wizzy47911779":
-                self.logger.debug("show game refresh skip username=%s reason=debug_filter", username)
-                continue
+            #if username != "wizzy47911779":
+                #self.logger.debug("show game refresh skip username=%s reason=debug_filter", username)
+                #continue
 
             if not username:
                 self.logger.debug("show game refresh skip username=%s reason=blank", username)
@@ -1834,6 +1834,24 @@ class ShowGameRefresh(Job):
             "9": "RF",
         }
         return pos_map.get(match.group(1))
+    
+    def _last_name_variants(self, last_name: str) -> list[str]:
+        _SUFFIX_RE = re.compile(r"(?:,?\s+)(jr|sr|ii|iii|iv|v|vi|vii|viii|ix|x)\s*$", re.IGNORECASE)
+        s = self._norm_last(last_name)
+        if not s:
+            return []
+
+        base = s
+        while True:
+            m = _SUFFIX_RE.search(base)
+            if not m:
+                break
+            stripped = base[:m.start()].strip().rstrip(",")
+            if not stripped:
+                break
+            base = stripped
+
+        return list({s, base})
 
     def _resolve_batter_mlb_id(
         self,
@@ -1842,6 +1860,7 @@ class ShowGameRefresh(Job):
         batter_pos_code: Optional[str],
         year: int = MLB_THE_SHOW_YEAR,
     ) -> Optional[int]:
+        
         last = self._norm_last(batter_last_name)
         if not last:
             return None
@@ -1863,21 +1882,22 @@ class ShowGameRefresh(Job):
             .subquery()
         )
 
+        lasts = self._last_name_variants(batter_last_name)
+        if not lasts:
+            return None
         # Helper: get candidate mlb_ids by last name (can be multiple)
         cand_stmt = (
             select(Player.mlb_id)
             .where(Player.mlb_id.in_(select(base_pool.c.mlb_id)))
-            .where(func.lower(Player.last_name) == last)
+            .where(func.lower(Player.last_name).in_(lasts))
         )
         cand_ids = list(db_session.scalars(cand_stmt))
 
         if len(cand_ids) == 0:
-            # If last_name isn't matching exactly (hyphens, spaces, etc.), fall back to normalized compare
-            # (still within the same base pool)
             cand_stmt = (
                 select(Player.mlb_id)
                 .where(Player.mlb_id.in_(select(base_pool.c.mlb_id)))
-                .where(func.lower(func.replace(Player.last_name, ".", "")) == last)
+                .where(func.lower(func.replace(Player.last_name, ".", "")).in_(lasts))
             )
             cand_ids = list(db_session.scalars(cand_stmt))
 
@@ -1999,20 +2019,22 @@ class ShowGameRefresh(Job):
         return (s or "").strip().upper()
     
     def _resolve_pitcher_mlb_id(self, db: Session, pitcher_last_name: str) -> int | None:
-        ln = (pitcher_last_name or "").strip().lower()
-        if not ln:
+        lasts = self._last_name_variants(pitcher_last_name)
+        if not lasts:
             return None
+
+        year = MLB_THE_SHOW_YEAR
 
         base_q = (
             select(Player.mlb_id)
             .join(MLBPosition, MLBPosition.id == Player.position_id)
             .where(MLBPosition.abbreviation == "P")
-            .where(func.lower(Player.last_name) == ln)
+            .where(func.lower(Player.last_name).in_(lasts))
             .where(
                 exists(
                     select(1).where(
                         (Card.mlb_id == Player.mlb_id) &
-                        (Card.year == 25)
+                        (Card.year == year)
                     )
                 )
             )
@@ -2034,8 +2056,8 @@ class ShowGameRefresh(Job):
             .join(MLBPosition, MLBPosition.id == Player.position_id)
             .join(Card, Card.mlb_id == Player.mlb_id)
             .where(MLBPosition.abbreviation == "P")
-            .where(func.lower(Player.last_name) == ln)
-            .where(Card.year == MLB_THE_SHOW_YEAR)
+            .where(func.lower(Player.last_name).in_(lasts))
+            .where(Card.year == year)
             .group_by(Player.mlb_id)
             .order_by(
                 func.count(Card.id).desc(),
