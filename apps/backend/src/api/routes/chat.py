@@ -5,9 +5,9 @@ from datetime import datetime
 import json
 import logging
 
-from src.database.database import get_db 
-from src.database.models import Message, Users
-from src.websockets import manager
+from shared.db.database import get_db 
+from shared.db.models import Message, Users
+from src.chat_websockets import manager
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn")

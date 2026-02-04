@@ -1,0 +1,5 @@
+-r scheduler.txt
+-r jobs.txt
+pytest
+fakeredis
+pytest-cov

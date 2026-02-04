@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
-from src.core.firebase_admin import init_firebase_admin
+from shared.core.firebase_admin import init_firebase_admin
 from src.api.routes import (
     cards,
     completed_orders,

@@ -1,0 +1,54 @@
+{
+  "attr": "STEAL",
+  "role": "hit",
+  "best_model": "lgb",
+  "coarse_results": [
+    {
+      "model": "lgb",
+      "rmse": 2.874081282143928,
+      "params": {
+        "n_estimators": 1521,
+        "learning_rate": 0.010147990299358927,
+        "num_leaves": 231,
+        "min_child_samples": 36,
+        "subsample": 0.9936194453591464,
+        "colsample_bytree": 0.8828777914265405,
+        "reg_lambda": 2.1547594249153407e-05,
+        "reg_alpha": 2.3407192990116523,
+        "max_depth": 4,
+        "min_data_in_leaf": 16,
+        "min_sum_hessian_in_leaf": 0.23042375640181845,
+        "feature_fraction": 0.8505915654206465,
+        "bagging_fraction": 0.9820366612609279,
+        "bagging_freq": 1
+      }
+    },
+    {
+      "model": "hgb",
+      "rmse": 2.953067185359439,
+      "params": {
+        "max_iter": 887,
+        "learning_rate": 0.05541364364853521,
+        "max_leaf_nodes": 113,
+        "min_samples_leaf": 10,
+        "l2_regularization": 9.587008923252455,
+        "max_bins": 218
+      }
+    },
+    {
+      "model": "xgb",
+      "rmse": 3.422678645487495,
+      "params": {
+        "n_estimators": 1197,
+        "learning_rate": 0.05755120913768578,
+        "max_depth": 3,
+        "min_child_weight": 10.92312678969632,
+        "subsample": 0.8236086130224007,
+        "colsample_bytree": 0.8810796931031993,
+        "reg_lambda": 17.27015630537001,
+        "reg_alpha": 2.871347026384219,
+        "gamma": 1.3872056119462577
+      }
+    }
+  ]
+}

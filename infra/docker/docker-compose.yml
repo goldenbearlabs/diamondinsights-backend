@@ -12,11 +12,16 @@ services:
       - app_network
     ports:
       - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
 
   backend:
     build: 
-      context: ../../apps/backend
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/backend/Dockerfile
     working_dir: /app
     image: mlb_backend_image
     restart: unless-stopped
@@ -24,16 +29,22 @@ services:
       - ../../apps/backend/src:/app/src
       - ../../apps/backend/alembic:/app/alembic
       - ../../apps/backend/alembic.ini:/app/alembic.ini
+      - ../../shared:/app/shared
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH}
+      FIREBASE_SERVICE_ACCOUNT_PATH: /run/secrets/firebase_service_key
       TZ: America/Vancouver
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PYTHONPATH: /app/src:/app/shared
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - app_network
     command: bash -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload"
@@ -42,13 +53,65 @@ services:
     secrets:
       - firebase_service_key
 
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: apps/scheduler/Dockerfile
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      TZ: America/Vancouver
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PYTHONPATH: /app/shared:/app/apps/scheduler
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - app_network
+
+  jobs:
+    build:
+      context: ../..
+      dockerfile: apps/jobs/Dockerfile
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      TZ: America/Vancouver
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PYTHONPATH: /app/shared:/app/apps/jobs
+      RUNNER_NAME: jobs-runner-1
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - app_network
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - app_network
+    
 networks:
   app_network:
+    name: app_network
     driver: bridge
 
 volumes:
   postgres_data:
   portainer_data:
+  redis_data:
 
 secrets:
   firebase_service_key:

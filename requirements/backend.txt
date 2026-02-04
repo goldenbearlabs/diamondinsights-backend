@@ -1,0 +1,7 @@
+-r base.txt
+
+alembic==1.17.2
+fastapi==0.125.0
+pydantic[email]==2.12.5
+uvicorn==0.38.0
+websockets>=10.4

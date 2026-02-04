@@ -1,0 +1,926 @@
+{
+  "away_key": "monarchs",
+  "ball_park": [
+    "Coors Field",
+    5280
+  ],
+  "difficulty": "All-Star",
+  "game_events": [
+    {
+      "event_text": "Beltran grounded out to Lindor (6-3).",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz lined out to Carter (L7).",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith struck out chasing a slider low and away.",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz tripled to center.",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Grich hit a sacrifice fly to Beltran (SF8).",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz scores.* Marte grounded out to Neto (4-3).",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Soto struck out chasing a splitter low and in.",
+      "event_type": "pa",
+      "inning": 1,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ohtani homered to center (417 feet).",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Hodges grounded out to Lindor (6-3).",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ramirez walked.",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter was called out on strikes looking on an inside sinker.",
+      "event_type": "play",
+      "inning": 2,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Neto lined out to Carter (L7).",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith lined to left for a single.",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Lindor struck out swinging late at a fastball high and away.",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter reached first on fielder's choice (4-6 FC).",
+      "event_type": "play",
+      "inning": 2,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith out.",
+      "event_type": "play",
+      "inning": 2,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter stole 2nd.",
+      "event_type": "steal",
+      "inning": 2,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo struck out chasing an inside slider.",
+      "event_type": "pa",
+      "inning": 2,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo popped out to Lindor (P6).",
+      "event_type": "pa",
+      "inning": 3,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Beltran grounded out to Marte (4-3).",
+      "event_type": "pa",
+      "inning": 3,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz struck out swinging late at a low curveball.",
+      "event_type": "pa",
+      "inning": 3,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Kurtz was called out on strikes looking on a sinker high and in.",
+      "event_type": "play",
+      "inning": 3,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz grounded out to Hodges (3U).",
+      "event_type": "pa",
+      "inning": 3,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Grich grounded out to Ramirez (5-3).",
+      "event_type": "pa",
+      "inning": 3,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith grounded to left for a single.",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ohtani homered to left (430 feet).",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith scores.* Hodges doubled to center.",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Ramirez doubled to center. Hodges scores.",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Brown",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Morejon pitching.",
+      "event_type": "pitching_change",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter grounded out to Lindor (6-3). Ramirez advances to 3rd.",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Neto hit a sacrifice fly to Verdugo (SF8). Ramirez scores.",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Verdugo grounded out to Kurtz (3U).",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Marte was called out on strikes looking on a fastball low and away.",
+      "event_type": "play",
+      "inning": 4,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Soto lined out to Verdugo (L9).",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith flied out to Beltran (F8).",
+      "event_type": "pa",
+      "inning": 4,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Beltran lined to right for a single.",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Beltran stole 2nd.",
+      "event_type": "steal",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz homered to center (463 feet). Beltran scores.",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Smith doubled to right.",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ohtani grounded out to Marte (4-3). Smith advances to 3rd.",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Hodges grounded out to Morejon (1-3).",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ramirez flied out to Verdugo (F8).",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Lindor flied out to Beltran (F8).",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter flied out to Beltran (F8).",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo reached first on a fielding error by Hodges (E3).",
+      "event_type": "play",
+      "inning": 5,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Kurtz struck out chasing a slider low and in.",
+      "event_type": "pa",
+      "inning": 5,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter flied out to Marte (F4).",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Neto doubled to left.",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo grounded out to Morejon (1-3).",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Morejon",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Clase pitching.",
+      "event_type": "pitching_change",
+      "inning": 6,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Beltran popped out to De La Cruz (P5).",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz flied out to Beltran (F8).",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Grich homered to right (445 feet).",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Marte struck out chasing a high fastball.",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Soto lined to center for a single.",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith grounded out to Hodges (3U).",
+      "event_type": "pa",
+      "inning": 6,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz struck out chasing a fastball high and in.",
+      "event_type": "pa",
+      "inning": 7,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith grounded out to Marte (4-3).",
+      "event_type": "pa",
+      "inning": 7,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ohtani flied out to Soto (F9).",
+      "event_type": "pa",
+      "inning": 7,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Lindor homered to center (491 feet).",
+      "event_type": "pa",
+      "inning": 7,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clemens",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Leiter pitching.",
+      "event_type": "pitching_change",
+      "inning": 7,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter struck out chasing a sinker high and in.",
+      "event_type": "pa",
+      "inning": 7,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo struck out swinging early at an inside sinker.",
+      "event_type": "pa",
+      "inning": 7,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Kurtz was called out on strikes looking on a fastball low and away.",
+      "event_type": "play",
+      "inning": 7,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Hodges flied out to Verdugo (F8).",
+      "event_type": "pa",
+      "inning": 8,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Ramirez lined out to Verdugo (L8).",
+      "event_type": "pa",
+      "inning": 8,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter struck out chasing a slider low and in.",
+      "event_type": "pa",
+      "inning": 8,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "De La Cruz struck out swinging early at a changeup down the middle.",
+      "event_type": "pa",
+      "inning": 8,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Grich popped out to Hodges (P3).",
+      "event_type": "pa",
+      "inning": 8,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Marte struck out swinging early at a changeup low and away.",
+      "event_type": "pa",
+      "inning": 8,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Leiter",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Neto flied out to Verdugo (F8).",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": false,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo lined to center for a single.",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Clase",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Chapman pitching.",
+      "event_type": "pitching_change",
+      "inning": 9,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Beltran grounded into a double play (6-4-3 DP).",
+      "event_type": "play",
+      "inning": 9,
+      "is_home_batting": false,
+      "outs_delta": 2,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Verdugo out.",
+      "event_type": "play",
+      "inning": 9,
+      "is_home_batting": false,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Soto struck out swinging early at a slider low and away.",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Smith struck out swinging early at a slider low and in.",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Lindor lined to center for a single.",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Carter tripled to center. Lindor scores.",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Larkin pinch hit for Verdugo.",
+      "event_type": "play",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    },
+    {
+      "event_text": "Larkin lined to center for a single. Carter scores.",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 0,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 1
+    },
+    {
+      "event_text": "Kurtz flied out to Beltran (F8).",
+      "event_type": "pa",
+      "inning": 9,
+      "is_home_batting": true,
+      "outs_delta": 1,
+      "pitcher_name_raw": "Chapman",
+      "runs_delta": 0
+    }
+  ],
+  "half_innings": [
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 1,
+      "is_home_batting": false,
+      "pitches": 15,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 1,
+      "inning": 1,
+      "is_home_batting": true,
+      "pitches": 6,
+      "runners_left_on": 0,
+      "runs": 1,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 1,
+      "inning": 2,
+      "is_home_batting": false,
+      "pitches": 18,
+      "runners_left_on": 1,
+      "runs": 1,
+      "walks": 1
+    },
+    {
+      "errors": 0,
+      "hits": 1,
+      "inning": 2,
+      "is_home_batting": true,
+      "pitches": 14,
+      "runners_left_on": 1,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 3,
+      "is_home_batting": false,
+      "pitches": 11,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 3,
+      "is_home_batting": true,
+      "pitches": 7,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 4,
+      "inning": 4,
+      "is_home_batting": false,
+      "pitches": 23,
+      "runners_left_on": 0,
+      "runs": 4,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 4,
+      "is_home_batting": true,
+      "pitches": 10,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 3,
+      "inning": 5,
+      "is_home_batting": false,
+      "pitches": 22,
+      "runners_left_on": 1,
+      "runs": 2,
+      "walks": 0
+    },
+    {
+      "errors": 1,
+      "hits": 0,
+      "inning": 5,
+      "is_home_batting": true,
+      "pitches": 9,
+      "runners_left_on": 1,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 1,
+      "inning": 6,
+      "is_home_batting": false,
+      "pitches": 6,
+      "runners_left_on": 1,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 2,
+      "inning": 6,
+      "is_home_batting": true,
+      "pitches": 16,
+      "runners_left_on": 1,
+      "runs": 1,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 7,
+      "is_home_batting": false,
+      "pitches": 7,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 1,
+      "inning": 7,
+      "is_home_batting": true,
+      "pitches": 17,
+      "runners_left_on": 0,
+      "runs": 1,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 8,
+      "is_home_batting": false,
+      "pitches": 6,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 0,
+      "inning": 8,
+      "is_home_batting": true,
+      "pitches": 17,
+      "runners_left_on": 0,
+      "runs": 0,
+      "walks": 0
+    },
+    {
+      "errors": 0,
+      "hits": 1,
+      "inning": 9,
+      "is_home_batting": false,
+      "pitches": 12,
+      "runners_left_on": 1,
+      "runs": 0,
+      "walks": 0
+    }
+  ],
+  "home_key": "blacks",
+  "weather": [
+    68,
+    "Overcast",
+    "No Wind"
+  ]
+}
