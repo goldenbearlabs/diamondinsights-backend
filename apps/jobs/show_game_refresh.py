@@ -291,7 +291,7 @@ class ShowGameRefresh(Job):
         self.logger.info("show game refresh start usernames=%s", len(usernames))
         errors = 0
         
-        for username in usernames:
+        for username in usernames[:1]:
             username = (username or "").strip()
 
             # DEBUG ME
@@ -312,7 +312,7 @@ class ShowGameRefresh(Job):
                 len(unprocessed_games),
             )
 
-            for game in unprocessed_games:
+            for game in unprocessed_games[:1]:
 
                 self.logger.info("show game refresh processing game_id=%s username=%s", game.id, username)
                 self._process_game(db_session, username, game)
@@ -1153,21 +1153,34 @@ class ShowGameRefresh(Job):
         if not moves:
             return 0
 
+        base_state = {
+            1: bool(getattr(event_row, "pre_on_1b", False)),
+            2: bool(getattr(event_row, "pre_on_2b", False)),
+            3: bool(getattr(event_row, "pre_on_3b", False)),
+        }
+
         inserted = 0
         for runner_name, from_base, to_base, move_type, note in moves:
             runner_id = self._resolve_batter_mlb_id(db_session, runner_name, None)
+            inferred_from = from_base or self._infer_runner_from_base(
+                move_type=move_type,
+                to_base=to_base,
+                note=note,
+                base_state=base_state,
+            )
 
             row = ShowEventRunnerMove(
                 event_id=event_row.id,
                 runner_name_raw=runner_name,
                 runner_mlb_id=runner_id,
-                from_base=from_base,
+                from_base=inferred_from,
                 to_base=to_base,
                 move_type=move_type,
                 note=note[:128] if note else None,
             )
             db_session.add(row)
             inserted += 1
+            self._apply_runner_move_state(base_state, inferred_from, to_base)
 
         self.logger.debug(
             "show runner moves upserted event_id=%s count=%s",
@@ -1175,6 +1188,68 @@ class ShowGameRefresh(Job):
             inserted,
         )
         return inserted
+
+    def _infer_runner_from_base(
+        self,
+        *,
+        move_type: str,
+        to_base: Optional[int],
+        note: Optional[str],
+        base_state: Dict[int, bool],
+    ) -> Optional[int]:
+        def _pick_scoring_base() -> Optional[int]:
+            if base_state.get(3):
+                return 3
+            if base_state.get(2):
+                return 2
+            if base_state.get(1):
+                return 1
+            return None
+
+        dest = to_base
+        if dest in (None, -1):
+            dest = self._dest_base_from_note(note)
+
+        if move_type == "score":
+            return _pick_scoring_base()
+
+        if dest == 2:
+            return 1 if base_state.get(1) else None
+
+        if dest == 3:
+            if base_state.get(2) and not base_state.get(1):
+                return 2
+            if base_state.get(1) and not base_state.get(2):
+                return 1
+            if base_state.get(2):
+                return 2
+            if base_state.get(1):
+                return 1
+            return None
+
+        if dest == 4:
+            return _pick_scoring_base()
+
+        return None
+
+    def _dest_base_from_note(self, note: Optional[str]) -> Optional[int]:
+        if not note:
+            return None
+        m = re.search(r"\b(2nd|3rd|home)\b", note, re.IGNORECASE)
+        if not m:
+            return None
+        return {"2nd": 2, "3rd": 3, "home": 4}.get(m.group(1).lower())
+
+    def _apply_runner_move_state(
+        self,
+        base_state: Dict[int, bool],
+        from_base: Optional[int],
+        to_base: Optional[int],
+    ) -> None:
+        if from_base in (1, 2, 3):
+            base_state[from_base] = False
+        if to_base in (1, 2, 3):
+            base_state[to_base] = True
     
     def _upsert_batter_boxscores(self, db_session: Session, game: GameHistory, game_log: GameLog) -> int:
         inserted = 0
@@ -1885,6 +1960,11 @@ class ShowGameRefresh(Job):
         lasts = self._last_name_variants(batter_last_name)
         if not lasts:
             return None
+        
+        #hardcode for shohei ohtani 2 way player
+        if "ohtani" in lasts:
+            return 660271
+    
         # Helper: get candidate mlb_ids by last name (can be multiple)
         cand_stmt = (
             select(Player.mlb_id)

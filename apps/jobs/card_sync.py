@@ -61,7 +61,12 @@ class CardSync(Job):
         col_names = [c.key for c in mapper.column_attrs]
         cols = Card.__table__.columns
 
-        update_cols = {c.name: insert(Card).excluded[c.name] for c in cols if c.name != "id"}
+        # Preserve existing mlb_id links; card_sync should not unlink players.
+        update_cols = {
+            c.name: insert(Card).excluded[c.name]
+            for c in cols
+            if c.name not in {"id", "mlb_id"}
+        }
 
         total = len(cards)
         for start in range(0, total, chunk_size):
