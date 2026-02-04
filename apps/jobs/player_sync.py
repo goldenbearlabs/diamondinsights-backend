@@ -20,6 +20,9 @@ PITCHER_ABBRS = {"P", "SP", "RP", "CP"}
 MAX_WORKERS = 6
 JITTER_RANGE_S = (0.05, 0.45)
 
+FALLBACK_ENABLED = True
+FALLBACK_MAX_CANDIDATES_PER_NAME = 75
+
 
 class PlayerSync(Job):
     def __init__(self, rerun_all_cards: bool = False, flush_every: int = 200):
@@ -27,19 +30,12 @@ class PlayerSync(Job):
         self.rerun_all_cards = rerun_all_cards
         self.flush_every = flush_every
         self._group_cache: Dict[Tuple[str, str], Optional[Dict[str, Any]]] = {}
+        self._sports_cache: Optional[List[Dict[str, Any]]] = None
+        self._fallback_name_index: Optional[Dict[str, List[Dict[str, Any]]]] = None
 
     def run(self, db_session):
-
         self._log_start(rerun_all_cards=self.rerun_all_cards, flush_every=self.flush_every)
-
         self._ensure_unknown_position(db_session)
-
-        stmt = select(Card.name, Card.born).where(Card.name.is_not(None))
-        if not self.rerun_all_cards:
-            stmt = stmt.where(Card.mlb_id.is_(None))
-        stmt = stmt.distinct()
-
-        rows = db_session.execute(stmt).yield_per(500)
 
         processed = 0
         upserted_players = 0
@@ -48,18 +44,25 @@ class PlayerSync(Job):
         no_match = 0
         skipped = 0
 
+        stmt = select(Card.name, Card.born).where(Card.name.is_not(None))
+        if not self.rerun_all_cards:
+            stmt = stmt.where(Card.mlb_id.is_(None))
+        stmt = stmt.distinct()
+
+        rows = db_session.execute(stmt).yield_per(500)
+
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            pending: Dict[Any, Tuple[str, str, Dict[str, Any], Tuple[str, str]]] = {}
+            pending: Dict[Any, Tuple[Any, Any, str, Dict[str, Any], Tuple[str, str]]] = {}
 
             def drain(done_futs):
                 nonlocal processed, upserted_players, linked_cards, no_results, no_match, skipped
 
                 for fut in done_futs:
-                    name, born, profile, group_key = pending.pop(fut)
+                    raw_name, raw_born, query_name, profile, group_key = pending.pop(fut)
 
                     try:
                         people = fut.result()
-                    except Exception as e:
+                    except Exception:
                         skipped += 1
                         continue
 
@@ -68,14 +71,14 @@ class PlayerSync(Job):
                         no_results += 1
                         continue
 
-                    scored = self._score_all_candidates(name, people, profile)
+                    scored = self._score_all_candidates(query_name, people, profile)
                     scored.sort(key=lambda x: x[0], reverse=True)
                     if not scored:
                         self._group_cache[group_key] = None
                         no_match += 1
                         continue
 
-                    person = self._pick_best_person(name, born, profile, scored)
+                    person = self._pick_best_person(query_name, profile.get("born") or "", profile, scored)
                     if not person:
                         self._group_cache[group_key] = None
                         no_match += 1
@@ -97,11 +100,10 @@ class PlayerSync(Job):
 
                     res = db_session.execute(
                         update(Card)
-                        .where(Card.name == name, Card.born == born, Card.mlb_id.is_(None))
+                        .where(*self._card_key_filter(raw_name, raw_born), Card.mlb_id.is_(None))
                         .values(mlb_id=mlb_id)
                     )
-                    updated_rows = int(res.rowcount or 0)
-                    linked_cards += updated_rows
+                    linked_cards += int(res.rowcount or 0)
 
                     if processed % self.flush_every == 0:
                         db_session.flush()
@@ -109,13 +111,21 @@ class PlayerSync(Job):
             for (raw_name, raw_born) in rows:
                 processed += 1
 
-                name = (raw_name or "").strip()
-                born = (raw_born or "").strip()
-                if not name:
+                if raw_name is None:
                     skipped += 1
                     continue
 
-                group_key = (self._norm_name(name), self._norm(born))
+                query_name = str(raw_name).strip()
+                if not query_name:
+                    skipped += 1
+                    continue
+
+                born_for_key = ""
+                if raw_born is not None:
+                    born_for_key = str(raw_born).strip()
+
+                group_key = (self._norm_name(query_name), self._norm(born_for_key))
+
                 if group_key in self._group_cache:
                     cached = self._group_cache[group_key]
                     if cached is None:
@@ -134,7 +144,7 @@ class PlayerSync(Job):
 
                         res = db_session.execute(
                             update(Card)
-                            .where(Card.name == name, Card.born == born, Card.mlb_id.is_(None))
+                            .where(*self._card_key_filter(raw_name, raw_born), Card.mlb_id.is_(None))
                             .values(mlb_id=mlb_id)
                         )
                         linked_cards += int(res.rowcount or 0)
@@ -143,9 +153,9 @@ class PlayerSync(Job):
                         db_session.flush()
                     continue
 
-                profile = self._load_card_profile(db_session, name, born)
-                fut = pool.submit(self._search_people_worker, name)
-                pending[fut] = (name, born, profile, group_key)
+                profile = self._load_card_profile(db_session, raw_name, raw_born)
+                fut = pool.submit(self._search_people_worker, query_name)
+                pending[fut] = (raw_name, raw_born, query_name, profile, group_key)
 
                 if len(pending) >= MAX_WORKERS:
                     done, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
@@ -157,6 +167,105 @@ class PlayerSync(Job):
 
         db_session.flush()
         db_session.commit()
+
+        fallback_processed = 0
+        fallback_upserted_players = 0
+        fallback_linked_cards = 0
+        fallback_no_results = 0
+        fallback_no_match = 0
+        fallback_skipped = 0
+
+        if FALLBACK_ENABLED:
+            stmt2 = select(Card.name, Card.born).where(Card.name.is_not(None), Card.mlb_id.is_(None)).distinct()
+            remaining = db_session.execute(stmt2).all()
+
+            if remaining:
+                client = APIClient()
+                self._ensure_fallback_name_index(client)
+
+                for (raw_name, raw_born) in remaining:
+                    fallback_processed += 1
+
+                    if raw_name is None:
+                        fallback_skipped += 1
+                        continue
+
+                    query_name = str(raw_name).strip()
+                    if not query_name:
+                        fallback_skipped += 1
+                        continue
+
+                    born_for_key = ""
+                    if raw_born is not None:
+                        born_for_key = str(raw_born).strip()
+
+                    group_key = (self._norm_name(query_name), self._norm(born_for_key))
+
+                    cached = self._group_cache.get(group_key)
+                    person: Optional[Dict[str, Any]] = None
+
+                    if cached is not None:
+                        if cached is None:
+                            person = None
+                        else:
+                            person = cached
+
+                    if person is None:
+                        if not self._fallback_name_index:
+                            fallback_no_results += 1
+                            self._group_cache[group_key] = None
+                            continue
+
+                        people = self._fallback_name_index.get(self._norm_name(query_name), [])
+                        if not people:
+                            fallback_no_results += 1
+                            self._group_cache[group_key] = None
+                            continue
+
+                        profile = self._load_card_profile(db_session, raw_name, raw_born)
+
+                        scored = self._score_all_candidates(query_name, people, profile)
+                        scored.sort(key=lambda x: x[0], reverse=True)
+                        if not scored:
+                            fallback_no_match += 1
+                            self._group_cache[group_key] = None
+                            continue
+
+                        person = self._pick_best_person(query_name, profile.get("born") or "", profile, scored)
+                        if not person:
+                            fallback_no_match += 1
+                            self._group_cache[group_key] = None
+                            continue
+
+                    mlb_id = person.get("id")
+                    if mlb_id is None:
+                        fallback_skipped += 1
+                        self._group_cache[group_key] = None
+                        continue
+                    mlb_id = int(mlb_id)
+
+                    profile = self._load_card_profile(db_session, raw_name, raw_born)
+                    person["_profile"] = profile
+                    self._group_cache[group_key] = person
+
+                    if self._upsert_player(db_session, person):
+                        fallback_upserted_players += 1
+
+                    db_session.flush()
+
+                    res = db_session.execute(
+                        update(Card)
+                        .where(*self._card_key_filter(raw_name, raw_born), Card.mlb_id.is_(None))
+                        .values(mlb_id=mlb_id)
+                    )
+                    fallback_linked_cards += int(res.rowcount or 0)
+
+                    if fallback_processed % self.flush_every == 0:
+                        db_session.flush()
+
+                db_session.flush()
+                db_session.commit()
+
         self._log_end(
             processed=processed,
             upserted_players=upserted_players,
@@ -164,16 +273,101 @@ class PlayerSync(Job):
             no_results=no_results,
             no_match=no_match,
             skipped=skipped,
+            fallback_processed=fallback_processed,
+            fallback_upserted_players=fallback_upserted_players,
+            fallback_linked_cards=fallback_linked_cards,
+            fallback_no_results=fallback_no_results,
+            fallback_no_match=fallback_no_match,
+            fallback_skipped=fallback_skipped,
         )
+
+    def _card_key_filter(self, raw_name: Any, raw_born: Any):
+        conds = [Card.name == raw_name]
+        if raw_born is None:
+            conds.append(Card.born.is_(None))
+        else:
+            conds.append(Card.born == raw_born)
+        return conds
 
     def _search_people_worker(self, name: str) -> List[Dict[str, Any]]:
         time.sleep(random.uniform(*JITTER_RANGE_S))
         client = APIClient()
         url = "https://statsapi.mlb.com/api/v1/people/search"
-        params = {"names": [name], "limit": 10, "accent": False}
+
+        search_name = self._api_search_name(name)
+        params = {"names": [search_name], "limit": 10, "accent": False}
+
         res = client.get(url, params)
         people = self._json_get(res, "people", default=[]) or []
         return people
+
+    def _api_search_name(self, s: str) -> str:
+        if not s:
+            return ""
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        s = s.strip()
+        s = re.sub(r"[^\w\s]", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        if not s:
+            return ""
+
+        tokens = s.split()
+        buf = []
+        i = 0
+        while i < len(tokens) and len(tokens[i]) == 1 and tokens[i].isalpha():
+            buf.append(tokens[i])
+            i += 1
+
+        if len(buf) >= 2:
+            tokens = ["".join(buf)] + tokens[i:]
+
+        return " ".join(tokens)
+
+    def _ensure_fallback_name_index(self, client: APIClient) -> None:
+        if self._fallback_name_index is not None:
+            return
+
+        sports = self._get_sports(client)
+
+        idx: Dict[str, List[Dict[str, Any]]] = {}
+        for s in sports:
+            sid = s.get("id")
+            if sid is None:
+                continue
+            try:
+                league_id = int(sid)
+            except Exception:
+                continue
+
+            time.sleep(random.uniform(*JITTER_RANGE_S))
+            url = f"https://statsapi.mlb.com/api/v1/sports/{league_id}/players"
+            res = client.get(url, params={})
+            people = self._json_get(res, "people", default=[]) or []
+
+            for p in people:
+                full = self._norm_name(p.get("fullName") or "")
+                if not full:
+                    continue
+                lst = idx.get(full)
+                if lst is None:
+                    idx[full] = [p]
+                else:
+                    if FALLBACK_MAX_CANDIDATES_PER_NAME and len(lst) >= FALLBACK_MAX_CANDIDATES_PER_NAME:
+                        continue
+                    lst.append(p)
+
+        self._fallback_name_index = idx
+
+    def _get_sports(self, client: APIClient) -> List[Dict[str, Any]]:
+        if self._sports_cache is not None:
+            return self._sports_cache
+
+        time.sleep(random.uniform(*JITTER_RANGE_S))
+        res = client.get("https://statsapi.mlb.com/api/v1/sports", params={})
+        sports = self._json_get(res, "sports", default=[]) or []
+        self._sports_cache = sports
+        return sports
 
     def _pick_best_person(
         self,
@@ -190,10 +384,7 @@ class PlayerSync(Job):
             if not role_filtered:
                 return None
 
-            exact_role = [
-                (s, p) for (s, p) in role_filtered
-                if self._norm_name(p.get("fullName") or "") == name_norm
-            ]
+            exact_role = [(s, p) for (s, p) in role_filtered if self._norm_name(p.get("fullName") or "") == name_norm]
             if exact_role:
                 return exact_role[0][1]
             return role_filtered[0][1]
@@ -202,11 +393,13 @@ class PlayerSync(Job):
             return None
         return scored[0][1]
 
-    def _load_card_profile(self, session, name: str, born: str) -> Dict[str, Any]:
+    def _load_card_profile(self, session, raw_name: Any, raw_born: Any) -> Dict[str, Any]:
         rows = session.execute(
-            select(Card.is_hitter, Card.height, Card.weight, Card.born)
-            .where(Card.name == name, Card.born == born)
+            select(Card.is_hitter, Card.height, Card.weight, Card.born).where(*self._card_key_filter(raw_name, raw_born))
         ).all()
+
+        name_str = str(raw_name).strip() if raw_name is not None else ""
+        born_str = str(raw_born).strip() if raw_born is not None else ""
 
         has_hitter = any(bool(r[0]) for r in rows if r[0] is not None)
         has_pitcher = any((r[0] is not None) and (not bool(r[0])) for r in rows)
@@ -234,9 +427,9 @@ class PlayerSync(Job):
                 expected_is_hitter = False
 
         return {
-            "name": name,
-            "born": born,
-            "born_norm": self._norm(born),
+            "name": name_str,
+            "born": born_str,
+            "born_norm": self._norm(born_str),
             "two_way_mode": two_way_mode,
             "expected_is_hitter": expected_is_hitter,
             "card_height_in": height_in,
@@ -366,9 +559,6 @@ class PlayerSync(Job):
         strike_zone_top = person.get("strikeZoneTop")
         strike_zone_bottom = person.get("strikeZoneBottom")
 
-        existing = session.get(Player, mlb_id)
-        is_new = existing is None
-
         player = Player(
             mlb_id=mlb_id,
             full_name=(person.get("fullName") or ""),
@@ -393,7 +583,6 @@ class PlayerSync(Job):
         )
 
         session.merge(player)
-
         return True
 
     def _upsert_position(self, session, pos: Dict[str, Any]) -> int:
@@ -427,10 +616,7 @@ class PlayerSync(Job):
         if not city or not country:
             return None
 
-        stmt = select(BirthLocation).where(
-            BirthLocation.city == city,
-            BirthLocation.country == country,
-        )
+        stmt = select(BirthLocation).where(BirthLocation.city == city, BirthLocation.country == country)
         if state is None:
             stmt = stmt.where(BirthLocation.state_province.is_(None))
         else:
@@ -471,25 +657,26 @@ class PlayerSync(Job):
             return ""
 
         tokens = base.split()
-        joined: List[str] = []
+        out: List[str] = []
         i = 0
+
         while i < len(tokens):
-            if len(tokens[i]) == 1:
+            if len(tokens[i]) == 1 and tokens[i].isalpha():
                 j = i
-                buf = []
-                while j < len(tokens) and len(tokens[j]) == 1:
+                buf: List[str] = []
+                while j < len(tokens) and len(tokens[j]) == 1 and tokens[j].isalpha():
                     buf.append(tokens[j])
                     j += 1
                 if len(buf) >= 2:
-                    joined.append("".join(buf))
+                    out.append("".join(buf))
                 else:
-                    joined.append(buf[0])
+                    out.append(buf[0])
                 i = j
             else:
-                joined.append(tokens[i])
+                out.append(tokens[i])
                 i += 1
 
-        return " ".join(joined)
+        return " ".join(out)
 
     def _height_to_inches(self, h: Any) -> Optional[int]:
         if not h:

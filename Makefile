@@ -58,6 +58,9 @@ migrate:
 revision:
 	$(COMPOSE_BASE) exec backend alembic revision --autogenerate -m "$(REV_MSG)"
 
+fix-alembic:
+	$(COMPOSE_BASE) exec backend alembic upgrade head
+
 run-job: up
 	$(COMPOSE_BASE) exec jobs python -c "from shared.core.logging_config import configure_logging; configure_logging(service_name='run-job'); from shared.db.database import SessionLocal; from $(JOB_MODULE) import $(JOB_CLASS); s=SessionLocal(); $(JOB_CLASS)($(JOB_ARGS)).run(s); s.close()"
 
