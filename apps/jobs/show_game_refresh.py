@@ -1,14 +1,12 @@
 
 import os
-import random
 import re
-import time
 import unicodedata
 from datetime import datetime, timezone
-from typing import Iterable, Optional, Set, Tuple, List, Dict, Any, Mapping
+from typing import Optional, Set, Tuple, List, Dict, Any, Mapping
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, or_, select, exists, and_, delete, case
+from sqlalchemy import func, or_, select, exists, and_, case
 from sqlalchemy.orm import Session
 
 from apps.jobs.job import Job
@@ -17,21 +15,18 @@ from shared.db.models import (
     MLBPosition,
     Player,
     ShowBallParks,
-    ShowGameEvent,
-    ShowGameHalfInning,
-    ShowGamePlateAppearance,
     ShowProfile,
     ShowGameSummary,
-    ShowGamePitcherGameScore,
-    ShowGameSubstitution,
-    ShowEventRunnerMove,
-    ShowEventCardCandidate,
-    ShowGamePitchingChange,
-    ShowPitcherBoxscore,
-    ShowBatterBoxscore
 )
 from shared.core.config import CURRENT_SHOW_YEAR
 from shared.core.game_log_text_regex import GameLogTextRegexHandler
+from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
+from shared.storage.game_files import (
+    write_game_dataset_jsonl,
+    write_game_manifest,
+    EventRow, PlateAppearanceRow, RunnerMoveRow, HalfInningRow,
+    BatterBoxscoreRow, PitcherBoxscoreRow, PitcherGameScoreRow,
+)
 
 GAME_HISTORY_URL = os.getenv("GAME_HISTORY_URL", "https://mlb25.theshow.com/apis/game_history.json")
 GAME_LOG_URL = os.getenv("GAME_LOG_URL", "https://mlb25.theshow.com/apis/game_log.json")
@@ -284,14 +279,14 @@ class ShowGameRefresh(Job):
 
     def __init__(self):
         super().__init__()
+        self.spaces = SpacesConnector(SpacesConfig.from_env())
 
     def run(self, db_session: Session):
         usernames = [u for u in db_session.scalars(select(ShowProfile.username)) if u]
         self._log_start(total_usernames=len(usernames))
         self.logger.info("show game refresh start usernames=%s", len(usernames))
-        errors = 0
         
-        for username in usernames[:1]:
+        for username in usernames:
             username = (username or "").strip()
 
             # DEBUG ME
@@ -312,18 +307,25 @@ class ShowGameRefresh(Job):
                 len(unprocessed_games),
             )
 
-            for game in unprocessed_games[:1]:
+            for game in unprocessed_games:
 
                 self.logger.info("show game refresh processing game_id=%s username=%s", game.id, username)
-                self._process_game(db_session, username, game)
+                files = self._process_game(db_session, username, game)
+                if files is None:
+                    db_session.rollback()
+                    continue
 
-        try:
-            db_session.commit()
-            self.logger.info("show game refresh commit succeeded")
-        except Exception as e:
-            errors += 1
-            db_session.rollback()
-            self.logger.exception("show game refresh final commit failed err=%s", e)
+                try:
+                    db_session.commit()
+                    self.logger.info("show game refresh commit succeeded game_id=%s", game.id)
+                except Exception as e:
+                    db_session.rollback()
+                    self.logger.exception(
+                        "show game refresh commit failed game_id=%s err=%s",
+                        game.id,
+                        e,
+                    )
+                    self._cleanup_game_files(files)
 
     def _fetch_unprocessed_games(self, db_session: Session, username: str) -> List[GameHistory]:
         '''
@@ -419,68 +421,166 @@ class ShowGameRefresh(Job):
         self.logger.debug("show game refresh fetched game log username=%s game_id=%s", username, game_id)
         return game_log
 
-    def _process_game(self, db_session: Session, username: str, game: GameHistory) -> Optional[dict]:
+    def _process_game(
+        self,
+        db_session: Session,
+        username: str,
+        game: GameHistory,
+    ) -> Optional[dict[str, dict[str, Any]]]:
         self.logger.info("show game refresh process game start game_id=%s username=%s", game.id, username)
-        game_log = self._fetch_game_log(username, game.id)
 
+        game_log = self._fetch_game_log(username, game.id)
         if not game_log:
             self.logger.warning("show game refresh missing game log game_id=%s username=%s", game.id, username)
             return None
+
         game_log_text_regex = GameLogTextRegexHandler(game_log.game_log_string)
 
-        home_username, away_username = self._ensure_profiles(db_session, username, game)
-        if not home_username or not away_username:
-            self.logger.warning(
-                "show game refresh missing usernames game_id=%s username=%s home=%s away=%s",
-                game.id,
-                username,
-                home_username,
-                away_username,
-            )
+        try:
+            with db_session.begin_nested():
+                home_username, away_username = self._ensure_profiles(db_session, username, game)
+                if not home_username or not away_username:
+                    self.logger.warning(
+                        "show game refresh missing usernames game_id=%s username=%s home=%s away=%s",
+                        game.id,
+                        username,
+                        home_username,
+                        away_username,
+                    )
+                    return None
+
+                db_session.flush()
+
+                ball_park = self._ensure_ball_park(db_session, game_log_text_regex)
+                if ball_park:
+                    self.logger.debug(
+                        "show game refresh ball park game_id=%s name=%s elevation=%s",
+                        game.id,
+                        ball_park.name,
+                        ball_park.elevation,
+                    )
+                else:
+                    self.logger.debug("show game refresh ball park missing game_id=%s", game.id)
+
+                rows_by_name = self._build_game_rows(
+                    db_session=db_session,
+                    game=game,
+                    game_log=game_log,
+                    game_log_text_regex=game_log_text_regex,
+                )
+                files = self._write_game_files(game_id=game.id, rows_by_name=rows_by_name)
+
+                summary = self._upsert_game_summary(
+                    db_session,
+                    game=game,
+                    game_log=game_log,
+                    ball_park=ball_park,
+                    home_username=home_username,
+                    away_username=away_username,
+                    game_log_text_regex=game_log_text_regex,
+                )
+                if summary is not None:
+                    db_session.flush([summary])
+
+            self.logger.info("show game refresh process game done game_id=%s", game.id)
+            return files
+
+        except Exception as e:
+            self.logger.exception("show game refresh process game failed game_id=%s err=%s", game.id, e)
             return None
 
-        # Ensure profiles exist before inserting game summary (FK constraint).
-        db_session.flush()
-        
-        ball_park = self._ensure_ball_park(db_session, game_log_text_regex)
-        if ball_park:
-            self.logger.debug(
-                "show game refresh ball park game_id=%s name=%s elevation=%s",
-                game.id,
-                ball_park.name,
-                ball_park.elevation,
-            )
-        else:
-            self.logger.debug("show game refresh ball park missing game_id=%s", game.id)
-
-        summary = self._upsert_game_summary(
-            db_session,
+    def _build_game_rows(
+        self,
+        *,
+        db_session: Session,
+        game: GameHistory,
+        game_log: GameLog,
+        game_log_text_regex: GameLogTextRegexHandler,
+    ) -> dict[str, list[dict[str, Any]]]:
+        batter_boxscores = self._build_batter_boxscores_rows(db_session, game=game, game_log=game_log)
+        pitcher_boxscores = self._build_pitcher_boxscores_rows(db_session, game=game, game_log=game_log)
+        half_innings = self._build_half_innings_rows(game=game, game_log_text_regex=game_log_text_regex)
+        event_rows = self._build_event_rows(game=game, game_log_text_regex=game_log_text_regex)
+        plate_appearances = self._build_plate_appearance_rows(
+            db_session=db_session,
             game=game,
             game_log=game_log,
-            ball_park=ball_park,
-            home_username=home_username,
-            away_username=away_username,
+            event_rows=event_rows,
+            game_log_text_regex=game_log_text_regex,
+        )
+        runner_moves = self._build_runner_moves_rows(
+            db_session=db_session,
+            game=game,
+            event_rows=event_rows,
+            game_log_text_regex=game_log_text_regex,
+        )
+        pitcher_game_scores = self._build_pitcher_game_scores_rows(
+            db_session=db_session,
+            game=game,
             game_log_text_regex=game_log_text_regex,
         )
 
-        if summary is not None:
-            # Ensure the parent row exists before inserting dependent rows.
-            db_session.flush([summary])
+        return {
+            "batter_boxscores": batter_boxscores,
+            "pitcher_boxscores": pitcher_boxscores,
+            "half_innings": half_innings,
+            "events": event_rows,
+            "plate_appearances": plate_appearances,
+            "runner_moves": runner_moves,
+            "pitcher_game_scores": pitcher_game_scores,
+        }
 
-        self._upsert_batter_boxscores(db_session, game=game, game_log=game_log)
+    def _write_game_files(
+        self,
+        *,
+        game_id: str,
+        rows_by_name: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, dict[str, Any]]:
+        files: dict[str, dict[str, Any]] = {}
 
-        self._upsert_pitcher_boxscores(db_session, game=game, game_log=game_log)
+        datasets = (
+            ("batter_boxscores", "batter_boxscores.jsonl", BatterBoxscoreRow.validate),
+            ("pitcher_boxscores", "pitcher_boxscores.jsonl", PitcherBoxscoreRow.validate),
+            ("half_innings", "half_innings.jsonl", HalfInningRow.validate),
+            ("events", "events.jsonl", EventRow.validate),
+            ("plate_appearances", "plate_appearances.jsonl", PlateAppearanceRow.validate),
+            ("runner_moves", "runner_moves.jsonl", RunnerMoveRow.validate),
+            ("pitcher_game_scores", "pitcher_game_scores.jsonl", PitcherGameScoreRow.validate),
+        )
 
-        self._upsert_half_innings(db_session, game=game, game_log_text_regex=game_log_text_regex)
+        try:
+            for name, filename, validator in datasets:
+                result = write_game_dataset_jsonl(
+                    spaces=self.spaces,
+                    game_id=game_id,
+                    filename=filename,
+                    rows=rows_by_name.get(name, []),
+                    validator=validator,
+                )
+                if result is not None:
+                    files[name] = result
 
-        # Flush summary/boxscores/half-innings before events so FK constraints are satisfied.
-        db_session.flush()
+            files["manifest"] = write_game_manifest(
+                spaces=self.spaces,
+                game_id=game_id,
+                files=files,
+            )
+            return files
+        except Exception:
+            self._cleanup_game_files(files)
+            raise
 
-        self._upsert_game_event(db_session, game=game, game_log=game_log, game_log_text_regex=game_log_text_regex)
-
-        self.logger.info("show game refresh process game done game_id=%s", game.id)
-        
-        return game_log
+    def _cleanup_game_files(self, files: dict[str, dict[str, Any]]) -> None:
+        if not files:
+            return
+        for meta in files.values():
+            key = meta.get("key")
+            if not key:
+                continue
+            try:
+                self.spaces.delete(key)
+            except Exception as e:
+                self.logger.warning("show game refresh cleanup failed key=%s err=%s", key, e)
 
     def _ensure_profiles(self, db_session: Session, username: str, game: GameHistory) -> Tuple[Optional[str], Optional[str]]:
         '''
@@ -631,43 +731,26 @@ class ShowGameRefresh(Job):
         self.logger.info("show ball park created name=%s elevation=%s", name, elevation)
         return ball_park
 
-    def _upsert_half_innings(self, db_session: Session, game: GameHistory, game_log_text_regex: GameLogTextRegexHandler) -> int:
-        '''
-            Upserts the half game summary object into the db
-            params:
-                db_session -> current db_session
-                game -> the current game object
-                game_log_text_regex -> the current game_log_text_regex object
-            returns:
-                the number of inserted rows
-        '''
+    def _build_half_innings_rows(
+        self,
+        game: GameHistory,
+        game_log_text_regex: GameLogTextRegexHandler,
+    ) -> list[dict[str, Any]]:
         half_innings = game_log_text_regex.extract_half_innings(game.home_name, game.away_name)
         if not half_innings:
             self.logger.debug("show half innings none game_id=%s", game.id)
-            return 0
+            return []
 
-        stmt = select(ShowGameHalfInning).where(ShowGameHalfInning.game_id == game.id)
-        existing_rows = list(db_session.scalars(stmt))
-        existing_by_key = {(row.inning, row.is_home_batting): row for row in existing_rows}
-
-        inserted = 0
+        rows: list[dict[str, Any]] = []
         for row_data in half_innings:
-            key = (row_data["inning"], row_data["is_home_batting"])
-            existing = existing_by_key.get(key)
-            if existing is None:
-                db_session.add(ShowGameHalfInning(game_id=game.id, **row_data))
-                inserted += 1
-                continue
-            for field, value in row_data.items():
-                setattr(existing, field, value)
+            rows.append({"game_id": game.id, **row_data})
 
         self.logger.info(
-            "show half innings upserted game_id=%s total=%s inserted=%s",
+            "show half innings built game_id=%s total=%s",
             game.id,
-            len(half_innings),
-            inserted,
+            len(rows),
         )
-        return inserted
+        return rows
 
     def _upsert_game_summary(
         self,
@@ -739,456 +822,6 @@ class ShowGameRefresh(Job):
         self.logger.info("show game summary updated game_id=%s", game_id)
         return existing
 
-    def _upsert_game_event(
-        self,
-        db_session: Session,
-        game: GameHistory,
-        game_log: GameLog,
-        game_log_text_regex: GameLogTextRegexHandler,
-    ) -> int:
-        events = game_log_text_regex.extract_game_events(game.home_name, game.away_name)
-        if not events:
-            self.logger.debug("show game events none game_id=%s", game.id)
-            return 0
-
-        self.logger.info("show game events extracted game_id=%s count=%s", game.id, len(events))
-        stmt = select(ShowGameHalfInning).where(ShowGameHalfInning.game_id == game.id)
-        half_rows = list(db_session.scalars(stmt))
-        half_by_key = {(row.inning, row.is_home_batting): row for row in half_rows}
-
-        stmt = select(ShowGameEvent).where(ShowGameEvent.game_id == game.id)
-        existing_events = list(db_session.scalars(stmt))
-        existing_by_seq = {row.seq: row for row in existing_events}
-
-        inserted = 0
-        home_score = 0
-        away_score = 0
-        half_outs = 0
-        bases = (False, False, False)
-        current_half_key = None
-        event_seq_in_half = 0
-
-        for seq, event_data in enumerate(events, start=1):
-            inning = event_data["inning"]
-            is_home = event_data["is_home_batting"]
-            event_text = event_data["event_text"]
-            event_type = event_data.get("event_type") or "play"
-            outs_delta = int(event_data.get("outs_delta") or 0)
-            runs_delta = int(event_data.get("runs_delta") or 0)
-
-            half_key = (inning, is_home)
-            if half_key != current_half_key:
-                current_half_key = half_key
-                half_outs = 0
-                bases = (False, inning >= 10, False)
-                event_seq_in_half = 0
-
-            outs_before = half_outs
-            outs_after = min(3, outs_before + outs_delta)
-            half_outs = outs_after
-            event_seq_in_half += 1
-
-            half_row = half_by_key.get(half_key)
-            half_id = half_row.id if half_row is not None else None
-
-            pre_on_1b, pre_on_2b, pre_on_3b = bases
-            post_on_1b, post_on_2b, post_on_3b = self._apply_bases_from_event(
-                bases,
-                inning=inning,
-                outs_after=outs_after,
-                event_type=event_type,
-                event_text=event_text,
-            )
-            bases = (post_on_1b, post_on_2b, post_on_3b)
-
-            home_before = home_score
-            away_before = away_score
-            if is_home:
-                home_score += runs_delta
-            else:
-                away_score += runs_delta
-            home_after = home_score
-            away_after = away_score
-
-            event_fields = {
-                "game_id": game.id,
-                "half_inning_id": half_id,
-                "seq": seq,
-                "inning": inning,
-                "is_home_batting": is_home,
-                "event_text": event_text,
-                "event_type": event_type,
-                "outs_before": outs_before,
-                "outs_after": outs_after,
-                "home_score_before": home_before,
-                "away_score_before": away_before,
-                "home_score_after": home_after,
-                "away_score_after": away_after,
-                "pre_on_1b": pre_on_1b,
-                "pre_on_2b": pre_on_2b,
-                "pre_on_3b": pre_on_3b,
-                "post_on_1b": post_on_1b,
-                "post_on_2b": post_on_2b,
-                "post_on_3b": post_on_3b,
-                "event_seq_in_half": event_seq_in_half,
-            }
-
-            existing = existing_by_seq.get(seq)
-            if existing is None:
-                event_row = ShowGameEvent(**event_fields)
-                db_session.add(event_row)
-                inserted += 1
-                existing_by_seq[seq] = event_row
-            else:
-                event_row = existing
-                for k, v in event_fields.items():
-                    if v is None:
-                        continue
-                    setattr(event_row, k, v)
-
-            if event_row.id is None:
-                db_session.flush([event_row])
-
-            if event_type == "pa":
-                self._upsert_plate_appearance(
-                    db_session,
-                    game,
-                    game_log,
-                    event_row,
-                    events,
-                    game_log_text_regex,
-                )
-
-            self._upsert_pitching_change(db_session, game, event_row, events, game_log_text_regex)
-
-            self._upsert_substitution(db_session, game, game_log, event_row, game_log_text_regex)
-
-            self._upsert_runner_moves(db_session, game, game_log, event_row, events, game_log_text_regex)
-
-            self._upsert_event_card_candidates(db_session, game, event_row)
-
-        self._upsert_pitcher_game_scores(db_session, game, game_log, events, game_log_text_regex)
-
-        self.logger.info(
-            "show game events upserted game_id=%s inserted=%s total=%s",
-            game.id,
-            inserted,
-            len(events),
-        )
-        return inserted
-
-    def _upsert_plate_appearance(
-        self,
-        db_session: Session,
-        game: GameHistory,
-        game_log: GameLog,
-        event_row: ShowGameEvent,
-        events: List[dict],
-        game_log_text_regex: GameLogTextRegexHandler
-    ) -> int:
-        if (event_row.event_text or "").strip() == "":
-            self.logger.debug("show plate appearance skip empty event event_id=%s", event_row.id)
-            return 0
-
-        text = (event_row.event_text or "").strip()
-        event_type = (getattr(event_row, "event_type", None) or "play").lower()
-        if event_type != "pa":
-            return 0
-        
-        batter_name = game_log_text_regex.extract_batter_name(text)
-        if not batter_name:
-            self.logger.debug("show plate appearance missing batter event_id=%s", event_row.id)
-            return 0
-        batting_boxscores = (
-            game_log.home_batting_boxscores
-            if event_row.is_home_batting
-            else game_log.away_batting_boxscores
-        )
-
-        batter_box = next(
-            (bs for bs in batting_boxscores if self._matches_batter(batter_name, bs.player_name)),
-            None,
-        )
-
-        batter_pos_code = self._extract_pos_code(batter_box.player_name) if batter_box else None
-
-        batter_mlb_id = self._resolve_batter_mlb_id(db_session, batter_name, batter_pos_code)
-
-        pitcher_name = None
-        target_is_home_batting = event_row.is_home_batting
-
-        scan_idx = event_row.seq - 2
-        while scan_idx >= 0:
-            e = events[scan_idx]
-            if (e.get("event_type") or "").lower() == "pitching_change" and e.get("is_home_batting") == target_is_home_batting:
-                pitcher_name = game_log_text_regex.extract_pitcher_name(e.get("event_text") or "")
-                if pitcher_name:
-                    break
-            scan_idx -= 1
-
-        pitcher_mlb_id = self._resolve_pitcher_mlb_id(db_session, pitcher_name)
-
-        player_ids = [pid for pid in (batter_mlb_id, pitcher_mlb_id) if pid is not None]
-        players_by_id = {}
-        if player_ids:
-            rows = db_session.scalars(select(Player).where(Player.mlb_id.in_(player_ids))).all()
-            players_by_id = {p.mlb_id: p for p in rows}
-
-        pitcher_throws = None
-        pitcher = players_by_id.get(pitcher_mlb_id)
-        if pitcher is not None:
-            ph = self._norm_hand(pitcher.pitch_hand_code)
-            pitcher_throws = ph if ph in ("L", "R") else None
-
-        batter_side = None
-        batter = players_by_id.get(batter_mlb_id)
-        if batter is not None:
-            batter_side = self._batter_side_vs_pitcher(batter.bat_side_code, pitcher_throws)
-
-
-        fields = game_log_text_regex._parse_pa_outcome_fields(event_row.event_text or "")
-        runs_scored = game_log_text_regex.extract_runs_scored(event_row.event_text or "")
-        rbi = game_log_text_regex.extract_rbi(event_row.event_text or "")
-
-        is_pp, exit_vel = self._apply_perfect_perfect_to_pa(game_log_text_regex, text)
-        k = self.parse_strikeout_extras(event_row.event_text or "", batter_side=batter_side)
-
-        pa_fields = {
-            "event_id": event_row.id,
-            "batter_name_raw": batter_name,
-            "pitcher_name_raw": pitcher_name,
-
-            "batter_mlb_id": batter_mlb_id,
-            "pitcher_mlb_id": pitcher_mlb_id,
-
-            "result": fields["result"],
-            "batted_ball_type": fields["batted_ball_type"],
-            "fielder_pos": fields["fielder_pos"],
-            "putout_code": fields["putout_code"],
-
-            "is_out": fields["is_out"],
-            "is_double_play": fields["is_double_play"],
-            "is_sac_fly": fields["is_sac_fly"],
-            "is_sac_bunt": fields["is_sac_bunt"],
-
-            "runs_scored": runs_scored,
-            "rbi": rbi,
-
-            "hr_distance_ft": fields["hr_distance_ft"],
-            "is_perfect_perfect": is_pp,
-            "exit_vel_mph": exit_vel,
-
-            "hit_direction": fields["hit_direction"],
-            "is_error": fields["is_error"],
-            "error_pos": fields["error_pos"],
-
-            "is_strikeout": k["is_strikeout"],
-            "k_pitch_type": k["k_pitch_type"],
-            "k_loc_height": k["k_loc_height"],
-            "k_loc_width": k["k_loc_width"],
-            "k_is_chase": k["k_is_chase"],
-            "k_is_looking": k["k_is_looking"],
-            "k_timing": k["k_timing"],
-
-            "batter_side": batter_side,
-            "pitcher_throws": pitcher_throws,
-
-        }
-        
-        pitcher_name_raw = pitcher_name or "Unknown"
-        pa_fields["pitcher_name_raw"] = pitcher_name_raw
-
-        row = db_session.get(ShowGamePlateAppearance, event_row.id)
-
-        if row is None:
-            db_session.add(ShowGamePlateAppearance(**pa_fields))
-            self.logger.debug(
-                "show plate appearance created event_id=%s batter=%s pitcher=%s",
-                event_row.id,
-                batter_name,
-                pitcher_name_raw,
-            )
-            return 1
-
-        update_fields = dict(pa_fields)
-        update_fields.pop("event_id", None)
-        for k, v in update_fields.items():
-            setattr(row, k, v)
-
-        self.logger.debug(
-            "show plate appearance updated event_id=%s batter=%s pitcher=%s",
-            event_row.id,
-            batter_name,
-            pitcher_name_raw,
-        )
-        return 0
-    
-    def _upsert_pitcher_game_scores(
-        self,
-        db_session: Session,
-        game: GameHistory,
-        game_log: GameLog,
-        events: list[dict],
-        game_log_text_regex: GameLogTextRegexHandler,
-    ) -> int:
-        items = game_log_text_regex.extract_pitcher_game_scores()
-        if not items:
-            self.logger.debug("show pitcher game scores none game_id=%s", game.id)
-            return 0
-
-        inserted = 0
-        for it in items:
-            name = it["pitcher_name_raw"]
-            is_home = it["is_home"]
-            gs = it["game_score"]
-
-            mlb_id = self._resolve_pitcher_mlb_id(db_session, name)
-
-            row = db_session.get(ShowGamePitcherGameScore, (game.id, name, is_home))
-            if row is None:
-                row = ShowGamePitcherGameScore(game_id=game.id, pitcher_name_raw=name, is_home=is_home, game_score=gs)
-                db_session.add(row)
-            else:
-                row.game_score = gs
-
-            row.pitcher_mlb_id = mlb_id
-            inserted += 1
-
-        self.logger.info(
-            "show pitcher game scores upserted game_id=%s count=%s",
-            game.id,
-            inserted,
-        )
-        return inserted
-    
-    def _upsert_event_card_candidates(self, db_session: Session, game: GameHistory, event_row: ShowGameEvent) -> int:
-        inserted = 0
-
-        if (event_row.event_type or "").lower() == "pa":
-            pa = db_session.get(ShowGamePlateAppearance, event_row.id)
-            if pa is None:
-                return 0
-
-            inserted += self._add_candidates_for_player(db_session, event_row.id, "batter", pa.batter_mlb_id)
-            inserted += self._add_candidates_for_player(db_session, event_row.id, "pitcher", pa.pitcher_mlb_id)
-
-        if inserted:
-            self.logger.debug("show event card candidates inserted event_id=%s count=%s", event_row.id, inserted)
-        return inserted
-
-    def _add_candidates_for_player(self, db_session: Session, event_id: int, role: str, mlb_id: Optional[int]) -> int:
-        if not mlb_id:
-            return 0
-
-        card_ids = db_session.scalars(
-            select(Card.id).where(Card.mlb_id == mlb_id, Card.year == 25)
-        ).all()
-
-        if not card_ids:
-            return 0
-
-        db_session.execute(
-            delete(ShowEventCardCandidate).where(
-                ShowEventCardCandidate.event_id == event_id,
-                ShowEventCardCandidate.role == role,
-            )
-        )
-
-        for cid in card_ids:
-            db_session.add(ShowEventCardCandidate(event_id=event_id, role=role, card_id=cid, score=None))
-        self.logger.debug(
-            "show event card candidates set event_id=%s role=%s cards=%s",
-            event_id,
-            role,
-            len(card_ids),
-        )
-        return len(card_ids)
-    
-    def _upsert_runner_moves(
-        self,
-        db_session: Session,
-        game: GameHistory,
-        game_log: GameLog,
-        event_row: ShowGameEvent,
-        events: list[dict],
-        game_log_text_regex: GameLogTextRegexHandler,
-    ) -> int:
-        _ADV_RE = re.compile(r"(?P<name>[^.]+?)\s+advances to\s+(?P<base>2nd|3rd)\.", re.IGNORECASE)
-        _SCORE_RE = re.compile(r"(?P<name>[^.]+?)\s+scores\.", re.IGNORECASE)
-        _OUT_AT_RE = re.compile(r"(?P<name>[^.]+?)\s+out at\s+(?P<base>2nd|3rd|home)\.", re.IGNORECASE)
-        _STEAL_RE = re.compile(r"(?P<name>[^.]+?)\s+stole\s+(?P<base>2nd|3rd|home)\.", re.IGNORECASE)
-        _CS_RE = re.compile(r"(?P<name>[^.]+?)\s+caught stealing\s+(?P<base>2nd|3rd|home)\.", re.IGNORECASE)
-
-        _BASE_TO_NUM = {"2nd": 2, "3rd": 3, "home": 4}
-        text = (event_row.event_text or "").strip()
-        if not text:
-            return 0
-        
-        db_session.execute(delete(ShowEventRunnerMove).where(ShowEventRunnerMove.event_id == event_row.id))
-
-        moves: list[tuple[str, Optional[int], Optional[int], str, str]] = []
-
-        for m in _ADV_RE.finditer(text):
-            name = m.group("name").strip()
-            to_base = _BASE_TO_NUM[m.group("base")]
-            moves.append((name, None, to_base, "advance", m.group(0).strip()))
-
-        for m in _SCORE_RE.finditer(text):
-            name = m.group("name").strip()
-            moves.append((name, None, 4, "score", m.group(0).strip()))
-
-        for m in _OUT_AT_RE.finditer(text):
-            name = m.group("name").strip()
-            moves.append((name, None, -1, "out", m.group(0).strip()))
-
-        for m in _STEAL_RE.finditer(text):
-            name = m.group("name").strip()
-            to_base = _BASE_TO_NUM[m.group("base")]
-            moves.append((name, None, to_base, "stolen_base", m.group(0).strip()))
-
-        for m in _CS_RE.finditer(text):
-            name = m.group("name").strip()
-            moves.append((name, None, -1, "caught_stealing", m.group(0).strip()))
-
-        if not moves:
-            return 0
-
-        base_state = {
-            1: bool(getattr(event_row, "pre_on_1b", False)),
-            2: bool(getattr(event_row, "pre_on_2b", False)),
-            3: bool(getattr(event_row, "pre_on_3b", False)),
-        }
-
-        inserted = 0
-        for runner_name, from_base, to_base, move_type, note in moves:
-            runner_id = self._resolve_batter_mlb_id(db_session, runner_name, None)
-            inferred_from = from_base or self._infer_runner_from_base(
-                move_type=move_type,
-                to_base=to_base,
-                note=note,
-                base_state=base_state,
-            )
-
-            row = ShowEventRunnerMove(
-                event_id=event_row.id,
-                runner_name_raw=runner_name,
-                runner_mlb_id=runner_id,
-                from_base=inferred_from,
-                to_base=to_base,
-                move_type=move_type,
-                note=note[:128] if note else None,
-            )
-            db_session.add(row)
-            inserted += 1
-            self._apply_runner_move_state(base_state, inferred_from, to_base)
-
-        self.logger.debug(
-            "show runner moves upserted event_id=%s count=%s",
-            event_row.id,
-            inserted,
-        )
-        return inserted
-
     def _infer_runner_from_base(
         self,
         *,
@@ -1251,15 +884,20 @@ class ShowGameRefresh(Job):
         if to_base in (1, 2, 3):
             base_state[to_base] = True
     
-    def _upsert_batter_boxscores(self, db_session: Session, game: GameHistory, game_log: GameLog) -> int:
-        inserted = 0
+    def _build_batter_boxscores_rows(
+        self,
+        db_session: Session,
+        game: GameHistory,
+        game_log: GameLog,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
 
         for is_home, batting_stats in (
             (True, game_log.home_batting_boxscores),
             (False, game_log.away_batting_boxscores),
         ):
             for idx, bs in enumerate(batting_stats, start=1):
-                raw_name = (bs.player_name or "").strip()
+                raw_name = (getattr(bs, "player_name", None) or "").strip()
                 if not raw_name:
                     continue
 
@@ -1267,67 +905,66 @@ class ShowGameRefresh(Job):
                 pos_code = self._pos_code_from_boxscore(raw_name)
                 mlb_id = self._resolve_batter_mlb_id(db_session, batter_name, pos_code)
 
-                replaced_idx = bs.replaced if getattr(bs, "replaced", 0) else None
-                if replaced_idx is not None and replaced_idx <= 0:
+                replaced_idx = getattr(bs, "replaced", 0) or 0
+                replaced_idx = int(replaced_idx) if replaced_idx else 0
+                if replaced_idx <= 0:
                     replaced_idx = None
 
-                fields = {
-                    "game_id": game.id,
-                    "is_home": is_home,
-                    "appearance_idx": idx,
-                    "replaced_apperance_idx": replaced_idx,
-                    "player_name_raw": raw_name,
-                    "mlb_id": mlb_id,
-                    "ab": bs.ab,
-                    "h": bs.h,
-                    "r": bs.r,
-                    "rbi": bs.rbi,
-                    "bb": bs.bb,
-                    "so": bs.so,
-                    "doubles": bs.doubles,
-                    "triples": bs.triples,
-                    "hr": bs.hr,
-                    "sh": bs.sh,
-                    "sf": bs.sf,
-                    "gidp": bs.gidp,
-                    "e": bs.e,
-                    "pb": bs.pb,
-                    "hbp": bs.hbp,
-                    "sb": bs.sb,
-                    "cs": bs.cs,
-                    "innings": int(bs.innings) if bs.innings is not None else 0,
-                    "pos": bs.pos,
-                }
+                innings = getattr(bs, "innings", None)
+                innings_int = int(innings) if innings is not None else 0
 
-                row = db_session.get(
-                    ShowBatterBoxscore,
-                    (game.id, is_home, idx),
+                rows.append(
+                    {
+                        "game_id": game.id,
+                        "is_home": is_home,
+                        "appearance_idx": idx,
+                        "replaced_apperance_idx": replaced_idx,
+                        "player_name_raw": raw_name,
+                        "mlb_id": mlb_id,
+                        "ab": bs.ab,
+                        "h": bs.h,
+                        "r": bs.r,
+                        "rbi": bs.rbi,
+                        "bb": bs.bb,
+                        "so": bs.so,
+                        "doubles": bs.doubles,
+                        "triples": bs.triples,
+                        "hr": bs.hr,
+                        "sh": bs.sh,
+                        "sf": bs.sf,
+                        "gidp": bs.gidp,
+                        "e": bs.e,
+                        "pb": bs.pb,
+                        "hbp": bs.hbp,
+                        "sb": bs.sb,
+                        "cs": bs.cs,
+                        "innings": innings_int,
+                        "pos": bs.pos,
+                    }
                 )
 
-                if row is None:
-                    row = ShowBatterBoxscore(**fields)
-                    db_session.add(row)
-                    inserted += 1
-                else:
-                    for k, v in fields.items():
-                        setattr(row, k, v)
-
         self.logger.info(
-            "show batter boxscores upserted game_id=%s inserted=%s",
+            "show batter boxscores built game_id=%s rows=%s",
             game.id,
-            inserted,
+            len(rows),
         )
-        return inserted
-    
-    def _upsert_pitcher_boxscores(self, db_session: Session, game: GameHistory, game_log: GameLog) -> int:
-        inserted = 0
+        return rows
+
+
+    def _build_pitcher_boxscores_rows(
+        self,
+        db_session: Session,
+        game: GameHistory,
+        game_log: GameLog,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
 
         for is_home, pitching_stats in (
             (True, game_log.home_pitching_boxscores),
             (False, game_log.away_pitching_boxscores),
         ):
             for idx, ps in enumerate(pitching_stats, start=1):
-                raw_name = (ps.player_name or "").strip()
+                raw_name = (getattr(ps, "player_name", None) or "").strip()
                 if not raw_name:
                     continue
 
@@ -1336,53 +973,406 @@ class ShowGameRefresh(Job):
 
                 ip_raw, outs_pitched = self._ip_to_outs(ps.ip)
 
-                fields = {
-                    "game_id": game.id,
-                    "is_home": is_home,
-                    "appearance_idx": idx,
-                    "player_name_raw": raw_name,
-                    "mlb_id": mlb_id,
-                    "ip_raw": ip_raw,
-                    "outs_pitched": outs_pitched,
-                    "r": ps.r,
-                    "h": ps.h,
-                    "er": ps.er,
-                    "bb": ps.bb,
-                    "so": ps.so,
-                    "era": float(ps.era) if ps.era is not None else None,
-                    "wp": ps.wp,
-                    "win": ps.win,
-                    "loss": ps.loss,
-                    "save": ps.save,
-                    "b_save": ps.b_save,
-                    "hold": ps.hold,
-                    "s_wins": ps.s_wins,
-                    "s_losses": ps.s_losses,
-                    "s_saves": ps.s_saves,
-                    "s_b_saves": ps.s_b_saves,
-                    "s_holds": ps.s_holds,
-                }
+                era_val = getattr(ps, "era", None)
+                era_float = float(era_val) if era_val is not None else None
 
-                row = db_session.get(
-                    ShowPitcherBoxscore,
-                    (game.id, is_home, idx),
+                rows.append(
+                    {
+                        "game_id": game.id,
+                        "is_home": is_home,
+                        "appearance_idx": idx,
+                        "player_name_raw": raw_name,
+                        "mlb_id": mlb_id,
+                        "ip_raw": ip_raw,
+                        "outs_pitched": outs_pitched,
+                        "r": ps.r,
+                        "h": ps.h,
+                        "er": ps.er,
+                        "bb": ps.bb,
+                        "so": ps.so,
+                        "era": era_float,
+                        "wp": ps.wp,
+                        "win": ps.win,
+                        "loss": ps.loss,
+                        "save": ps.save,
+                        "b_save": ps.b_save,
+                        "hold": ps.hold,
+                        "s_wins": ps.s_wins,
+                        "s_losses": ps.s_losses,
+                        "s_saves": ps.s_saves,
+                        "s_b_saves": ps.s_b_saves,
+                        "s_holds": ps.s_holds,
+                    }
                 )
 
-                if row is None:
-                    row = ShowPitcherBoxscore(**fields)
-                    db_session.add(row)
-                    inserted += 1
-                else:
-                    for k, v in fields.items():
-                        setattr(row, k, v)
-
         self.logger.info(
-            "show pitcher boxscores upserted game_id=%s inserted=%s",
+            "show pitcher boxscores built game_id=%s rows=%s",
             game.id,
-            inserted,
+            len(rows),
         )
-        return inserted
+        return rows
 
+    def _build_event_rows(
+        self,
+        game: GameHistory,
+        game_log_text_regex: GameLogTextRegexHandler,
+    ) -> list[dict[str, Any]]:
+        events = game_log_text_regex.extract_game_events(game.home_name, game.away_name)
+        if not events:
+            self.logger.debug("show game events none game_id=%s", game.id)
+            return []
+
+        self.logger.info("show game events extracted game_id=%s count=%s", game.id, len(events))
+
+        rows: list[dict[str, Any]] = []
+        home_score = 0
+        away_score = 0
+        half_outs = 0
+        bases = (False, False, False)
+        current_half_key: Optional[tuple[int, bool]] = None
+        event_seq_in_half = 0
+
+        for seq, event_data in enumerate(events, start=1):
+            inning = int(event_data["inning"])
+            is_home = bool(event_data["is_home_batting"])
+            event_text = event_data["event_text"]
+            event_type = (event_data.get("event_type") or "play")
+            outs_delta = int(event_data.get("outs_delta") or 0)
+            runs_delta = int(event_data.get("runs_delta") or 0)
+
+            half_key = (inning, is_home)
+            if half_key != current_half_key:
+                current_half_key = half_key
+                half_outs = 0
+                bases = (False, inning >= 10, False)
+                event_seq_in_half = 0
+
+            outs_before = half_outs
+            outs_after = min(3, outs_before + outs_delta)
+            half_outs = outs_after
+            event_seq_in_half += 1
+
+            pre_on_1b, pre_on_2b, pre_on_3b = bases
+            post_on_1b, post_on_2b, post_on_3b = self._apply_bases_from_event(
+                bases,
+                inning=inning,
+                outs_after=outs_after,
+                event_type=event_type,
+                event_text=event_text,
+            )
+            bases = (post_on_1b, post_on_2b, post_on_3b)
+
+            home_before = home_score
+            away_before = away_score
+            if is_home:
+                home_score += runs_delta
+            else:
+                away_score += runs_delta
+            home_after = home_score
+            away_after = away_score
+
+            rows.append(
+                {
+                    "game_id": game.id,
+                    "seq": seq,
+                    "inning": inning,
+                    "is_home_batting": is_home,
+                    "event_text": event_text,
+                    "event_type": event_type,
+                    "outs_before": outs_before,
+                    "outs_after": outs_after,
+                    "home_score_before": home_before,
+                    "away_score_before": away_before,
+                    "home_score_after": home_after,
+                    "away_score_after": away_after,
+                    "pre_on_1b": pre_on_1b,
+                    "pre_on_2b": pre_on_2b,
+                    "pre_on_3b": pre_on_3b,
+                    "post_on_1b": post_on_1b,
+                    "post_on_2b": post_on_2b,
+                    "post_on_3b": post_on_3b,
+                    "event_seq_in_half": event_seq_in_half,
+                }
+            )
+
+        self.logger.info("show game events built game_id=%s total=%s", game.id, len(rows))
+        return rows
+
+
+    def _build_plate_appearance_rows(
+        self,
+        db_session: Session,
+        game: GameHistory,
+        game_log: GameLog,
+        event_rows: list[dict[str, Any]],
+        game_log_text_regex: GameLogTextRegexHandler,
+        event_id_by_seq: Optional[dict[int, int]] = None,
+    ) -> list[dict[str, Any]]:
+        if not event_rows:
+            return []
+
+        current_pitcher_by_side: dict[bool, str] = {}
+        base_rows: list[dict[str, Any]] = []
+
+        for idx, ev in enumerate(event_rows):
+            seq = int(ev["seq"])
+            is_home_batting = bool(ev["is_home_batting"])
+            event_type = (ev.get("event_type") or "play").lower()
+            text = (ev.get("event_text") or "").strip()
+
+            if event_type == "pitching_change":
+                pn = game_log_text_regex.extract_pitcher_name(text)
+                if pn:
+                    current_pitcher_by_side[is_home_batting] = pn
+                continue
+
+            if event_type != "pa" or not text:
+                continue
+
+            batter_name = game_log_text_regex.extract_batter_name(text)
+            if not batter_name:
+                continue
+
+            batting_boxscores = (
+                game_log.home_batting_boxscores if is_home_batting else game_log.away_batting_boxscores
+            )
+            batter_box = next(
+                (bs for bs in batting_boxscores if self._matches_batter(batter_name, bs.player_name)),
+                None,
+            )
+            batter_pos_code = self._extract_pos_code(batter_box.player_name) if batter_box else None
+            batter_mlb_id = self._resolve_batter_mlb_id(db_session, batter_name, batter_pos_code)
+
+            pitcher_name = current_pitcher_by_side.get(is_home_batting)
+            if not pitcher_name:
+                for prev in reversed(event_rows[:idx]):
+                    if (prev.get("event_type") or "").lower() != "pitching_change":
+                        continue
+                    if bool(prev.get("is_home_batting")) != is_home_batting:
+                        continue
+                    prev_text = (prev.get("event_text") or "").strip()
+                    pitcher_name = game_log_text_regex.extract_pitcher_name(prev_text)
+                    if pitcher_name:
+                        current_pitcher_by_side[is_home_batting] = pitcher_name
+                        break
+            pitcher_mlb_id = self._resolve_pitcher_mlb_id(db_session, pitcher_name)
+
+            fields = game_log_text_regex._parse_pa_outcome_fields(text)
+            runs_scored = game_log_text_regex.extract_runs_scored(text)
+            rbi = game_log_text_regex.extract_rbi(text)
+            is_pp, exit_vel = self._apply_perfect_perfect_to_pa(game_log_text_regex, text)
+
+            row: dict[str, Any] = {
+                "batter_name_raw": batter_name,
+                "pitcher_name_raw": pitcher_name or "Unknown",
+                "batter_mlb_id": batter_mlb_id,
+                "pitcher_mlb_id": pitcher_mlb_id,
+                "result": fields["result"],
+                "batted_ball_type": fields["batted_ball_type"],
+                "fielder_pos": fields["fielder_pos"],
+                "putout_code": fields["putout_code"],
+                "is_out": fields["is_out"],
+                "is_double_play": fields["is_double_play"],
+                "is_sac_fly": fields["is_sac_fly"],
+                "is_sac_bunt": fields["is_sac_bunt"],
+                "runs_scored": runs_scored,
+                "rbi": rbi,
+                "hr_distance_ft": fields["hr_distance_ft"],
+                "is_perfect_perfect": is_pp,
+                "exit_vel_mph": exit_vel,
+                "hit_direction": fields["hit_direction"],
+                "is_error": fields["is_error"],
+                "error_pos": fields["error_pos"],
+                "batter_side": None,
+                "pitcher_throws": None,
+                "is_strikeout": None,
+                "k_pitch_type": None,
+                "k_loc_height": None,
+                "k_loc_width": None,
+                "k_is_chase": None,
+                "k_is_looking": None,
+                "k_timing": None,
+                "_event_text": text,
+            }
+
+            if event_id_by_seq is not None:
+                eid = event_id_by_seq.get(seq)
+                if eid is None:
+                    continue
+                row["event_id"] = eid
+            else:
+                row["game_id"] = game.id
+                row["event_seq"] = seq
+
+            base_rows.append(row)
+
+        if not base_rows:
+            return []
+
+        player_ids = {
+            pid for r in base_rows for pid in (r.get("batter_mlb_id"), r.get("pitcher_mlb_id")) if pid is not None
+        }
+        players_by_id: dict[int, Any] = {}
+        if player_ids:
+            players = db_session.scalars(select(Player).where(Player.mlb_id.in_(player_ids))).all()
+            players_by_id = {p.mlb_id: p for p in players}
+
+        out: list[dict[str, Any]] = []
+        for r in base_rows:
+            batter = players_by_id.get(r.get("batter_mlb_id"))
+            pitcher = players_by_id.get(r.get("pitcher_mlb_id"))
+
+            pitcher_throws = None
+            if pitcher is not None:
+                ph = self._norm_hand(pitcher.pitch_hand_code)
+                pitcher_throws = ph if ph in ("L", "R") else None
+
+            batter_side = None
+            if batter is not None:
+                batter_side = self._batter_side_vs_pitcher(batter.bat_side_code, pitcher_throws)
+
+            k = self.parse_strikeout_extras(r["_event_text"], batter_side=batter_side)
+
+            r["pitcher_throws"] = pitcher_throws
+            r["batter_side"] = batter_side
+            r["is_strikeout"] = k["is_strikeout"]
+            r["k_pitch_type"] = k["k_pitch_type"]
+            r["k_loc_height"] = k["k_loc_height"]
+            r["k_loc_width"] = k["k_loc_width"]
+            r["k_is_chase"] = k["k_is_chase"]
+            r["k_is_looking"] = k["k_is_looking"]
+            r["k_timing"] = k["k_timing"]
+
+            r.pop("_event_text", None)
+            out.append(r)
+
+        self.logger.info("show plate appearances built game_id=%s total=%s", game.id, len(out))
+        return out
+
+
+    def _build_pitcher_game_scores_rows(
+        self,
+        db_session: Session,
+        game: GameHistory,
+        game_log_text_regex: GameLogTextRegexHandler,
+    ) -> list[dict[str, Any]]:
+        items = game_log_text_regex.extract_pitcher_game_scores()
+        if not items:
+            self.logger.debug("show pitcher game scores none game_id=%s", game.id)
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for it in items:
+            name = it["pitcher_name_raw"]
+            is_home = bool(it["is_home"])
+            gs = int(it["game_score"])
+
+            mlb_id = self._resolve_pitcher_mlb_id(db_session, name)
+
+            rows.append(
+                {
+                    "game_id": game.id,
+                    "pitcher_name_raw": name,
+                    "is_home": is_home,
+                    "game_score": gs,
+                    "pitcher_mlb_id": mlb_id,
+                }
+            )
+
+        self.logger.info("show pitcher game scores built game_id=%s total=%s", game.id, len(rows))
+        return rows
+
+
+    def _build_runner_moves_rows(
+        self,
+        db_session: Session,
+        game: GameHistory,
+        event_rows: list[dict[str, Any]],
+        game_log_text_regex: GameLogTextRegexHandler,
+        event_id_by_seq: Optional[dict[int, int]] = None,
+    ) -> list[dict[str, Any]]:
+        _ADV_RE = re.compile(r"(?P<name>[^.]+?)\s+advances to\s+(?P<base>2nd|3rd)\.", re.IGNORECASE)
+        _SCORE_RE = re.compile(r"(?P<name>[^.]+?)\s+scores\.", re.IGNORECASE)
+        _OUT_AT_RE = re.compile(r"(?P<name>[^.]+?)\s+out at\s+(?P<base>2nd|3rd|home)\.", re.IGNORECASE)
+        _STEAL_RE = re.compile(r"(?P<name>[^.]+?)\s+stole\s+(?P<base>2nd|3rd|home)\.", re.IGNORECASE)
+        _CS_RE = re.compile(r"(?P<name>[^.]+?)\s+caught stealing\s+(?P<base>2nd|3rd|home)\.", re.IGNORECASE)
+        _BASE_TO_NUM = {"2nd": 2, "3rd": 3, "home": 4}
+
+        out: list[dict[str, Any]] = []
+
+        for ev in event_rows:
+            seq = int(ev["seq"])
+            text = (ev.get("event_text") or "").strip()
+            if not text:
+                continue
+
+            moves: list[tuple[str, Optional[int], int, str, str]] = []
+
+            for m in _ADV_RE.finditer(text):
+                name = m.group("name").strip()
+                to_base = _BASE_TO_NUM[m.group("base")]
+                moves.append((name, None, to_base, "advance", m.group(0).strip()))
+
+            for m in _SCORE_RE.finditer(text):
+                name = m.group("name").strip()
+                moves.append((name, None, 4, "score", m.group(0).strip()))
+
+            for m in _OUT_AT_RE.finditer(text):
+                name = m.group("name").strip()
+                moves.append((name, None, -1, "out", m.group(0).strip()))
+
+            for m in _STEAL_RE.finditer(text):
+                name = m.group("name").strip()
+                to_base = _BASE_TO_NUM[m.group("base")]
+                moves.append((name, None, to_base, "stolen_base", m.group(0).strip()))
+
+            for m in _CS_RE.finditer(text):
+                name = m.group("name").strip()
+                moves.append((name, None, -1, "caught_stealing", m.group(0).strip()))
+
+            if not moves:
+                continue
+
+            base_state = {
+                1: bool(ev.get("pre_on_1b", False)),
+                2: bool(ev.get("pre_on_2b", False)),
+                3: bool(ev.get("pre_on_3b", False)),
+            }
+
+            event_key_fields: dict[str, Any]
+            if event_id_by_seq is not None:
+                eid = event_id_by_seq.get(seq)
+                if eid is None:
+                    continue
+                event_key_fields = {"event_id": eid}
+            else:
+                event_key_fields = {"game_id": game.id, "event_seq": seq}
+
+            for runner_name, from_base, to_base, move_type, note in moves:
+                runner_id = self._resolve_batter_mlb_id(db_session, runner_name, None)
+                inferred_from = from_base or self._infer_runner_from_base(
+                    move_type=move_type,
+                    to_base=to_base,
+                    note=note,
+                    base_state=base_state,
+                )
+
+                out.append(
+                    {
+                        **event_key_fields,
+                        "runner_name_raw": runner_name,
+                        "runner_mlb_id": runner_id,
+                        "from_base": inferred_from,
+                        "to_base": to_base,
+                        "move_type": move_type,
+                        "note": (note[:128] if note else None),
+                    }
+                )
+
+                self._apply_runner_move_state(base_state, inferred_from, to_base)
+
+        self.logger.info("show runner moves built game_id=%s total=%s", game.id, len(out))
+        return out
 
     def _strip_boxscore_name(self, name: str) -> str:
         if not name:
@@ -1418,95 +1408,6 @@ class ShowGameRefresh(Job):
             ip_raw = ip_str
         return ip_raw, outs
 
-    def _parse_pinch_hit(self, text: str) -> tuple[Optional[str], Optional[str]]:
-        _PINCH_HIT_RE = re.compile(
-            r"^(?P<in>.+?)\s+pinch hit for\s+(?P<out>.+?)\.$",
-            re.IGNORECASE,
-        )
-        m = _PINCH_HIT_RE.match((text or "").strip())
-        if not m:
-            return None, None
-        return m.group("in").strip(), m.group("out").strip()
-    
-    def _upsert_substitution(
-        self,
-        db_session: Session,
-        game: GameHistory,
-        game_log: GameLog,
-        event_row: ShowGameEvent,
-        game_log_text_regex: GameLogTextRegexHandler,
-    ) -> int:
-        if (event_row.event_type or "").lower() != "pinch_hit":
-            return 0
-
-        incoming, outgoing = self._parse_pinch_hit(event_row.event_text or "")
-        if not incoming:
-            return 0
-
-        incoming_id = self._resolve_batter_mlb_id(db_session, incoming, None)  # hitter pool
-        outgoing_id = self._resolve_batter_mlb_id(db_session, outgoing, None) if outgoing else None
-
-        row = db_session.get(ShowGameSubstitution, event_row.id)
-        if row is None:
-            row = ShowGameSubstitution(event_id=event_row.id)
-            db_session.add(row)
-
-        row.sub_type = "pinch_hit"
-        row.incoming_player_name_raw = incoming
-        row.outgoing_player_name_raw = outgoing
-        row.incoming_mlb_id = incoming_id
-        row.outgoing_mlb_id = outgoing_id
-        self.logger.debug(
-            "show substitution upserted event_id=%s incoming=%s outgoing=%s",
-            event_row.id,
-            incoming,
-            outgoing,
-        )
-        return 1
-    
-    def _upsert_pitching_change(
-        self,
-        db_session: Session,
-        game: GameHistory,
-        event_row: ShowGameEvent,
-        events: list[dict],
-        game_log_text_regex: GameLogTextRegexHandler,
-    ) -> int:
-        if (event_row.event_type or "").lower() != "pitching_change":
-            return 0
-
-        incoming = game_log_text_regex.extract_pitcher_name(event_row.event_text or "")
-        if not incoming:
-            return 0
-
-        replaced = None
-        scan_idx = event_row.seq - 2
-        target_is_home_batting = event_row.is_home_batting
-        while scan_idx >= 0:
-            e = events[scan_idx]
-            if (e.get("event_type") or "").lower() == "pitching_change" and e.get("is_home_batting") == target_is_home_batting:
-                replaced = game_log_text_regex.extract_pitcher_name(e.get("event_text") or "")
-                break
-            scan_idx -= 1
-
-        pitcher_mlb_id = self._resolve_pitcher_mlb_id(db_session, incoming)
-
-        row = db_session.get(ShowGamePitchingChange, event_row.id)
-        if row is None:
-            row = ShowGamePitchingChange(event_id=event_row.id)
-            db_session.add(row)
-
-        row.pitcher_name_raw = incoming
-        row.pitcher_mlb_id = pitcher_mlb_id
-        row.replaced_pitcher_name_raw = replaced
-        self.logger.debug(
-            "show pitching change upserted event_id=%s incoming=%s replaced=%s",
-            event_row.id,
-            incoming,
-            replaced,
-        )
-        return 1
-    
     def _norm_hand(self, v: str | None) -> str | None:
         if not v:
             return None
