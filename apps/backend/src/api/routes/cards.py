@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from shared.db.database import get_db
 from shared.db.models import Card
@@ -64,7 +65,13 @@ def get_cards(
         query = query.filter(Card.year == year)
 
     if rarity is not None:
-        query = query.filter(Card.rarity.ilike(rarity))
+        rarities = [r.strip() for r in rarity.split(',')]
+        if len(rarities) == 1:
+            query = query.filter(Card.rarity.ilike(rarities[0]))
+        else:
+            rarity_filters = [Card.rarity.ilike(r) for r in rarities]
+            query = query.filter(or_(*rarity_filters))
+
 
     # order by ovr desc (by default)
     if desc:

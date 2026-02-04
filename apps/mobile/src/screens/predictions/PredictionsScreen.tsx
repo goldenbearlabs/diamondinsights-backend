@@ -8,7 +8,9 @@ import {
   FlatList, 
   Image,
   ActivityIndicator,
-  RefreshControl
+  RefreshControl,
+  Modal,
+  Pressable
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
@@ -27,6 +29,7 @@ type CardData = {
   display_position: string;
   age: number;
   is_hitter: boolean;
+  rarity: string;
 };
 
 const getFakePrediction = (baseOvr: number, id: string) => {
@@ -48,6 +51,11 @@ export default function PredictionsScreen() {
   const [cards, setCards] = useState<CardData[]>([]);
   const [searchText, setSearchText] = useState('');
   
+  // Filter state
+  const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
+  const [tempSelectedRarities, setTempSelectedRarities] = useState<string[]>([]); // Add this
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
+  const [currentFilterGroup, setCurrentFilterGroup] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -65,10 +73,10 @@ export default function PredictionsScreen() {
   }, [searchText]);
 
  
-  // skip the first run because the search effect above handles initial load
+  // Reload cards when page, limit, or filters change
   useEffect(() => {
     loadCards(page, limit, searchText);
-  }, [page, limit]);
+  }, [page, limit, selectedRarities]);
 
   
   const loadCards = async (targetPage: number, targetLimit: number, query: string) => {
@@ -80,10 +88,14 @@ export default function PredictionsScreen() {
       if (query.trim().length > 0) {
         url += `&name=${encodeURIComponent(query)}`;
       }
+      
+      // Add rarity filter to URL if any are selected (server-side filtering)
+      if (selectedRarities.length > 0) {
+        url += `&rarity=${selectedRarities.join(',')}`;
+      }
 
       const newCards = await apiGet<CardData[]>(url); 
       setCards(newCards);
-
       
       setHasMore(newCards.length === targetLimit);
 
@@ -201,10 +213,129 @@ export default function PredictionsScreen() {
                 autoCapitalize="none"
               />
             </View>
-            <TouchableOpacity style={styles.filterBtn}>
+            <TouchableOpacity 
+              style={styles.filterBtn} 
+              onPress={() => {
+                setTempSelectedRarities(selectedRarities);
+                setFilterModalOpen(true);
+              }}
+            >
               <Ionicons name="options" size={20} color="white" />
+              {selectedRarities.length > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{selectedRarities.length}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
+
+          {/* Filter Modal */}
+          <Modal
+            visible={filterModalOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setFilterModalOpen(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <Pressable 
+                style={styles.modalBackdrop} 
+                onPress={() => {
+                  setFilterModalOpen(false);
+                  setCurrentFilterGroup(null);
+                }}
+              />
+              <View style={styles.modalCard}>
+                {currentFilterGroup === null ? (
+                  // Filter Groups List
+                  <>
+                    <View style={styles.modalHeader}>
+                      <Text style={styles.modalTitle}>Filters</Text>
+                      <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity 
+                      style={styles.filterGroupRow}
+                      onPress={() => setCurrentFilterGroup('rarity')}
+                    >
+                      <View style={styles.filterGroupLeft}>
+                        <Text style={styles.filterGroupLabel}>Rarity</Text>
+                      </View>
+                      <View style={styles.filterGroupRight}>
+                        {selectedRarities.length > 0 && (
+                          <View style={styles.filterCountBadge}>
+                            <Text style={styles.filterCountText}>{selectedRarities.length}</Text>
+                          </View>
+                        )}
+                        <Ionicons name="chevron-forward" size={20} color={theme.colors.muted} />
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  // Rarity Options
+                  <>
+                    <View style={styles.modalHeader}>
+                      <TouchableOpacity 
+                        style={styles.backButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Ionicons name="chevron-back" size={24} color="white" />
+                        <Text style={styles.backText}>Back</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.modalSubtitle}>Select Rarities</Text>
+                    {['common', 'bronze', 'silver', 'gold', 'diamond'].map((rarity) => (
+                      <TouchableOpacity
+                        key={rarity}
+                        style={styles.checkboxRow}
+                        onPress={() => {
+                          setTempSelectedRarities(prev => 
+                            prev.includes(rarity)
+                              ? prev.filter(r => r !== rarity)
+                              : [...prev, rarity]
+                          );
+                        }}
+                      >
+                        <View style={[
+                          styles.checkbox,
+                          tempSelectedRarities.includes(rarity) && styles.checkboxChecked
+                        ]}>
+                          {tempSelectedRarities.includes(rarity) && (
+                            <Ionicons name="checkmark" size={16} color="white" />
+                          )}
+                        </View>
+                        <Text style={styles.checkboxLabel}>
+                          {rarity.charAt(0).toUpperCase() + rarity.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={styles.clearButton}
+                        onPress={() => setTempSelectedRarities([])}
+                      >
+                        <Text style={styles.clearButtonText}>Clear All</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.applyButton}
+                        onPress={() => {
+                          setSelectedRarities(tempSelectedRarities);
+                          setFilterModalOpen(false);
+                          setCurrentFilterGroup(null);
+                          setPage(1);
+                        }}
+                      >
+                        <Text style={styles.applyButtonText}>Apply</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+          </Modal>
 
           {loading ? (
             <View style={{ marginTop: 50 }}><ActivityIndicator size="large" color="#fbbf24" /></View>
@@ -217,7 +348,21 @@ export default function PredictionsScreen() {
               showsVerticalScrollIndicator={false}
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
               ListFooterComponent={cards.length > 0 ? renderFooter : null} // Only show footer if we have data
-              ListEmptyComponent={<Text style={styles.emptyText}>No players found.</Text>}
+              ListEmptyComponent={
+                selectedRarities.length > 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No cards match your filters.</Text>
+                    <TouchableOpacity 
+                      style={styles.clearFiltersButton}
+                      onPress={() => setTempSelectedRarities([])}
+                    >
+                      <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <Text style={styles.emptyText}>No players found.</Text>
+                )
+              }
             />
           )}
         </View>
@@ -324,5 +469,186 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     minWidth: 40,
     textAlign: 'center',
+  },
+  // Filter Badge
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#fbbf24',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.background,
+  },
+  filterBadgeText: {
+    color: theme.colors.background,
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  // Filter Modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  modalCard: {
+    width: '85%',
+    maxHeight: '70%',
+    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.muted,
+    marginBottom: 16,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  backText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  filterGroupRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 12,
+  },
+  filterGroupLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  filterGroupLabel: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  filterGroupRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  filterCountBadge: {
+    backgroundColor: '#fbbf24',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  filterCountText: {
+    color: theme.colors.background,
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkboxLabel: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  clearButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  applyButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // Empty State
+  emptyContainer: {
+    alignItems: 'center',
+    marginTop: 40,
+  },
+  clearFiltersButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#3b82f6',
+    borderRadius: 12,
+  },
+  clearFiltersButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
