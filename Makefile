@@ -168,3 +168,6 @@ monitoring-ps:
 
 monitoring-logs:
 	$(COMPOSE_MONITORING) logs -f
+
+
+

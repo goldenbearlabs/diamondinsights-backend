@@ -16,7 +16,8 @@ from src.api.routes import (
     quirks,
     users,
     show_profiles,
-    search
+    search,
+    chat
 )
 
 load_dotenv()
@@ -53,6 +54,7 @@ app.include_router(users.router)
 app.include_router(show_profiles.router)
 app.include_router(show_profiles.public_router)
 app.include_router(search.router)
+app.include_router(chat.router)
 
 @app.get("/")
 def health_check():

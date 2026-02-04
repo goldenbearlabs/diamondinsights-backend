@@ -14,7 +14,12 @@ export const theme = {
     blobs: {
       left: "rgba(37, 99, 235, 0.15)",
       right: "rgba(49, 46, 129, 0.3)",
-    }
+    },
+
+    // Chat Specific (New)
+    bubbleMe: "#3b82f6",      // Blue 500 (Matches Primary)
+    bubbleThem: "#1e293b",    // Slate 800 (Solid contrast against Slate 950)
+    inputBackground: "#0f172a" // Slate 900
   },
   spacing: {
     s: 8,

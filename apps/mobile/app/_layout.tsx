@@ -1,8 +1,9 @@
-import { Slot, useRouter, useSegments } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "../src/lib/firebase";
+import { theme } from "../src/theme/colors"; // Optional: for background color
 
 export default function RootLayout() {
   const router = useRouter();
@@ -37,5 +38,22 @@ export default function RootLayout() {
     );
   }
 
-  return <Slot />;
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
+    
+      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+
+      
+      <Stack.Screen name="(app)" options={{ headerShown: false }} />
+
+      
+      <Stack.Screen 
+        name="predictions/[id]" 
+        options={{ 
+          presentation: 'card',
+          headerShown: false, 
+        }} 
+      />
+    </Stack>
+  );
 }

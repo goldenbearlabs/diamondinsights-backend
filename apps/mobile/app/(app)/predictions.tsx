@@ -1,14 +1,1 @@
-import { View, Text, StyleSheet } from 'react-native';
-
-export default function Predictions() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Predictions Screen Coming Soon</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center' },
-  text: { color: 'white', fontSize: 20, fontWeight: 'bold' }
-});
+export { default } from '../../src/screens/predictions/PredictionsScreen';

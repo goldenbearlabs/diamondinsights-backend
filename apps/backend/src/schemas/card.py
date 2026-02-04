@@ -19,6 +19,7 @@ class CardResponse(BaseModel):
     born: str
     is_hitter: bool
     series_name: str
+    baked_img: str
     img: str
     hit_rank_image: Optional[str] = None
     fielding_rank_image: Optional[str] = None

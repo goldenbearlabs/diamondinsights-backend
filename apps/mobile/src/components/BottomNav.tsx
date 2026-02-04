@@ -28,7 +28,7 @@ type MenuKey = Exclude<MenuType, null> | "community";
 
 const MARKET_ROUTES = ["/predictions", "/flipping", "/portfolio", "/leaderboard"];
 const GAMEPLAY_ROUTES = ["/rankings", "/overall", "/team-builder"];
-const COMMUNITY_ROUTES = ["/trending", "/blogs"];
+const COMMUNITY_ROUTES = ["/trending", "/blogs", "/chat"];
 
 const MARKET_ITEMS: MenuItem[] = [
   { label: "Predictions", route: "/(app)/predictions", icon: "chart-line" },
@@ -95,7 +95,6 @@ export const BottomNav = () => {
     () => COMMUNITY_ROUTES.some((route) => pathname.includes(route)),
     [pathname]
   );
-  const isChatActive = useMemo(() => pathname.includes("/chat"), [pathname]);
 
   const activeMenuType = menuType ?? menuContent;
   const menuItems =
@@ -106,6 +105,7 @@ export const BottomNav = () => {
         : activeMenuType === "community"
           ? COMMUNITY_ITEMS
           : [];
+          
   const menuLeft = useMemo(() => {
     const minLeft = BAR_PADDING;
     const maxLeft = Math.max(minLeft, width - MENU_WIDTH - minLeft);
@@ -212,22 +212,6 @@ export const BottomNav = () => {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.navButton, isChatActive && styles.navButtonActive]}
-          onPress={() => {
-            setMenuType(null);
-            router.push("/(app)/chat");
-          }}
-        >
-          <FontAwesome5
-            name="comment-dots"
-            size={18}
-            color={isChatActive ? ACCENT : ACCENT_DIM}
-          />
-          <Text style={[styles.navLabel, isChatActive && styles.navLabelActive]}>
-            Chat
-          </Text>
-        </TouchableOpacity>
 
         <TouchableOpacity
           style={[

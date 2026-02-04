@@ -1,14 +1,4 @@
-import { View, Text, StyleSheet } from 'react-native';
+// apps/mobile/app/(app)/chat.tsx
+import ChatScreen from "../../src/screens/chat/ChatScreen";
 
-export default function Chat() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Chat Room Coming Soon</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center' },
-  text: { color: 'white', fontSize: 20, fontWeight: 'bold' }
-});
+export default ChatScreen;
