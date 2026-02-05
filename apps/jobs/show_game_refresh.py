@@ -2,7 +2,7 @@
 import os
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional, Set, Tuple, List, Dict, Any, Mapping
 from dataclasses import dataclass, field
 
@@ -405,18 +405,26 @@ class ShowGameRefresh(Job):
         self.logger.info("show game refresh game history fetched username=%s count=%s", username, len(games))
         return games
     
-    def _fetch_game_log(self, username: str, game_id: str) -> GameLog:
+    def _fetch_game_log(self, username: str, game_id: str) -> Optional[GameLog]:
         '''
             Gets all game_log objects from the mlb the show api
             params:
                 username -> the current mlb the show username
                 game_id -> the current game id
             returns:
-                the game_log object from the mlb the show api
+                the game_log object from the mlb the show api, or None on retriable 404s
         '''
         params = {"username": username, "id": game_id}
         self.logger.debug("show game refresh fetch game log username=%s game_id=%s", username, game_id)
-        game_obj = self._api_client.get(GAME_LOG_URL, params)
+        game_obj = self._api_client.get(
+            GAME_LOG_URL,
+            params,
+            retry_statuses={429, 404},
+            return_none_on_statuses={404},
+            retry_count=6,
+        )
+        if not game_obj:
+            return None
         game_log = GameLog.from_json(game_obj, game_id)
         self.logger.debug("show game refresh fetched game log username=%s game_id=%s", username, game_id)
         return game_log
@@ -1378,17 +1386,34 @@ class ShowGameRefresh(Job):
         if not name:
             return ""
         cleaned = re.sub(r"\s*\([^)]*\)\s*$", "", name).strip()
+        cleaned = re.sub(r"\s*(\.\.\.|…)\s*$", "", cleaned).strip()
+        cleaned = re.sub(r"^[a-zA-Z]-", "", cleaned).strip()
         if "," in cleaned:
             cleaned = cleaned.split(",", 1)[0].strip()
+            cleaned = re.sub(r"^[a-zA-Z]-", "", cleaned).strip()
         return cleaned
     
     def _pos_code_from_boxscore(self, player_name: str) -> Optional[str]:
         if not player_name:
             return None
         m = re.search(r"\(([^)]+)\)\s*$", player_name)
-        if not m:
+        if m:
+            code = m.group(1).strip().upper()
+            if "-" in code:
+                parts = [p for p in code.split("-") if p]
+                code = parts[-1] if parts else code
+            return code or None
+
+        if "," not in player_name:
             return None
-        return m.group(1).strip().upper() or None
+        right = player_name.split(",", 1)[1].strip()
+        if not right:
+            return None
+        code = right.split()[0].strip("()").upper()
+        if "-" in code:
+            parts = [p for p in code.split("-") if p]
+            code = parts[-1] if parts else code
+        return code or None
 
     def _ip_to_outs(self, ip: float) -> tuple[str, int]:
         ip_str = str(ip)
@@ -1541,6 +1566,7 @@ class ShowGameRefresh(Job):
             base = base.split("(", 1)[0].strip()
         if "," in base:
             base = base.split(",", 1)[0].strip()
+        base = re.sub(r"^[a-zA-Z]-", "", base).strip()
         return self._norm_name(base)
 
     def _matches_batter(self, batter_name: str, boxscore_player_name: str) -> bool:
@@ -2124,7 +2150,13 @@ class ShowGameRefresh(Job):
             on_1b, on_2b, on_3b = False, False, True
         elif "doubled" in text:
             on_1b, on_2b, on_3b = False, True, False
-        elif "singled" in text or "reached on error" in text or "reached on a fielder" in text or "reached on fielder" in text:
+        elif (
+            "singled" in text
+            or re.search(r"\bsingle\b", text)
+            or "reached on error" in text
+            or "reached on a fielder" in text
+            or "reached on fielder" in text
+        ):
             on_1b = True
 
         if ("hit by pitch" in text) or re.search(r"\bintentionally walked\b|\bwalked\b|\bwalks\b(?!:)", text):

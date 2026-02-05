@@ -5,7 +5,7 @@
 	monitoring-up monitoring-down monitoring-ps monitoring-logs \
 	card_sync card_sync_above card_sync_below card_synce_below \
 	game_boxscore_sync market_candle_sync market_price_sync market_sync player_sync roster_update_sync prediction_sync \
-	show_profile_stats_updater show_game_refresh
+	show_profile_stats_updater show_game_refresh show_game_agg
 
 ENV_FILE ?= .env
 RUNNER_ENV ?= .env
@@ -23,7 +23,7 @@ help:
 	@printf "  make up|down|ps|logs|build\n"
 	@printf "  make migrate | revision REV_MSG='desc'\n"
 	@printf "  make run-job JOB_MODULE=apps.jobs.card_sync JOB_CLASS=CardSync [JOB_ARGS='reload_all_years=True']\n"
-	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|show_profile_stats_updater|show_game_refresh\n"
+	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|show_profile_stats_updater|show_game_refresh|show_game_agg\n"
 	@printf "  make runner-up|runner-down|runner-ps|runner-logs\n"
 	@printf "  make server-up|server-down|server-ps|server-logs\n"
 	@printf "  make monitoring-up|monitoring-down|monitoring-ps|monitoring-logs\n"
@@ -119,6 +119,10 @@ show_game_refresh: JOB_MODULE=apps.jobs.show_game_refresh
 show_game_refresh: JOB_CLASS=ShowGameRefresh
 show_game_refresh: run-job
 
+show_game_agg: JOB_MODULE=apps.jobs.show_game_agg
+show_game_agg: JOB_CLASS=ShowGameAgg
+show_game_agg: run-job
+
 runner-up:
 	$(COMPOSE_RUNNER) up -d --build
 
@@ -171,6 +175,5 @@ monitoring-ps:
 
 monitoring-logs:
 	$(COMPOSE_MONITORING) logs -f
-
 
 
