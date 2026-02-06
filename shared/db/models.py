@@ -129,6 +129,7 @@ class Card(Base):
         uselist=False, 
         cascade="all, delete-orphan"
     )
+    comments: Mapped[List["Comment"]] = relationship(back_populates="card", cascade="all, delete-orphan")
     predictions: Mapped[List["CardPrediction"]] = relationship(back_populates="card", passive_deletes=True)
     votes: Mapped[List["CardVote"]] = relationship(back_populates="card", passive_deletes=True)
     portfolio_holdings: Mapped[List["PortfolioHolding"]] = relationship(back_populates="card", passive_deletes=True)
@@ -633,6 +634,8 @@ class Users(Base):
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     messages: Mapped[List["Message"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    comments: Mapped[List["Comment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    comment_likes: Mapped[List["CommentLike"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"USERS (id={self.id}, firebase_id={self.firebase_id}, email={self.email})"
@@ -1401,3 +1404,48 @@ class ShowGamePitcherGameScore(Base):
     is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
     game_score: Mapped[int] = mapped_column(Integer, nullable=False)
     pitcher_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+class UserPrediction(Base):
+    __tablename__ = "user_predictions"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id"), primary_key=True)
+    predicted_ovr: Mapped[int] = mapped_column(Integer) 
+
+    def __repr__(self) -> str:
+        return f"USER_PREDICTION (user_id={self.user_id}, card_id={self.card_id}, predicted_ovr={self.predicted_ovr})"
+    
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), onupdate=_utcnow)
+    content: Mapped[str] = mapped_column(Text)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user: Mapped["Users"] = relationship(back_populates="comments")
+    
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), index=True)
+    card: Mapped["Card"] = relationship(back_populates="comments")
+    
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True)
+    replicas: Mapped[List["Comment"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
+    parent: Mapped[Optional["Comment"]] = relationship(back_populates="replicas", remote_side=[id])
+
+    likes: Mapped[List["CommentLike"]] = relationship(back_populates="comment", cascade="all, delete-orphan")
+
+    def __repr__(self) -> str:
+        return f"COMMENT(id={self.id}, user_id={self.user_id}, card_id={self.card_id})"
+
+class CommentLike(Base):
+    __tablename__ = "comment_likes"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    comment_id: Mapped[int] = mapped_column(ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    user: Mapped["Users"] = relationship(back_populates="comment_likes")
+    comment: Mapped["Comment"] = relationship(back_populates="likes")
