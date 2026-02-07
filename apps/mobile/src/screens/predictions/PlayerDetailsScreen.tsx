@@ -10,6 +10,8 @@ import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
 import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
+import { MarketSpreadChart } from '../../components/playerdetails/MarketSpreadChart';
+import { MarketVolumeChart } from '../../components/playerdetails/MarketVolumeChart';
 
 const TWO_WAY_PLAYERS = [
   "Shohei Ohtani",
@@ -37,8 +39,13 @@ export default function PlayerDetailsScreen() {
   const [loadingPred, setLoadingPred] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [activeTab, setActiveTab] = useState<'attributes' | 'market'>('attributes');
+  
   const [buyPrice, setBuyPrice] = useState<number | null>(null);
   const [sellPrice, setSellPrice] = useState<number | null>(null);
+  const [buyVolume, setBuyVolume] = useState<number | null>(null);
+  const [sellVolume, setSellVolume] = useState<number | null>(null);
+  // 2. New State for Candles
+  const [marketCandles, setMarketCandles] = useState<any[]>([]);
   const [loadingMarket, setLoadingMarket] = useState(false);
 
   useEffect(() => {
@@ -72,22 +79,31 @@ export default function PlayerDetailsScreen() {
     }
   };
 
+  // 3. Updated Market Fetcher (Added Candles)
   useEffect(() => {
     const fetchMarket = async () => {
       if (!card?.id) return;
       setLoadingMarket(true);
 
       try {
-        const [buyRes, sellRes] = await Promise.all([
+        const [buyRes, sellRes, candlesRes, volumeRes] = await Promise.all([
           apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=true&limit=1`),
-          apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=false&limit=1`)
+          apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=false&limit=1`),
+          apiGet<any[]>(`/completed_orders/${card.id}/history?limit=500`),
+          apiGet<any[]>(`/market_candles/?card_id=${card.id}&series=live&limit=1`)
         ]);
 
         setBuyPrice(buyRes?.[0]?.price ?? null);
         setSellPrice(sellRes?.[0]?.price ?? null);
+        setMarketCandles(candlesRes || []);
+        setBuyVolume(volumeRes?.[0]?.buy_volume ?? null);
+        setSellVolume(volumeRes?.[0]?.sell_volume ?? null);
       } catch (err) {
         setBuyPrice(null);
         setSellPrice(null);
+        setBuyVolume(null);
+        setSellVolume(null);
+        setMarketCandles([]);
       } finally {
         setLoadingMarket(false);
       }
@@ -96,12 +112,27 @@ export default function PlayerDetailsScreen() {
     fetchMarket();
   }, [card?.id]);
 
+  // 4. Restored Original Alert Text
   const handleInfoPress = () => {
     Alert.alert(
       "Prediction Info",
       "These are your personal predictions based on what overall you think this player will go up/down to after the next roster update. Your predictions will be scored after the next roster update.\n\nNote: All predictions are locked and finalized 48 hours before the next roster update.",
       [{ text: "Got it" }]
     );
+  };
+
+  const getSellNowPrice = (ovr: number): number => {
+    if (ovr >= 95) return 10000;
+    if (ovr >= 92) return 10000;
+    const table: Record<number, number> = {
+      91: 9000, 90: 8000, 89: 7000, 88: 5500, 87: 4500,
+      86: 3750, 85: 3000, 84: 1500, 83: 1200, 82: 900,
+      81: 600, 80: 400, 79: 150, 78: 125, 77: 100,
+      76: 75, 75: 50,
+    };
+    if (table[ovr] !== undefined) return table[ovr];
+    if (ovr >= 65) return 25;
+    return 5;
   };
 
   return (
@@ -309,18 +340,19 @@ export default function PlayerDetailsScreen() {
               </View>
             </>
           ) : (
+            // 5. Updated Market Tab (Kept your exact layout + Added Chart)
             <>
               <Text style={styles.sectionTitle}>Market</Text>
               <View style={styles.glassCard}>
                 <View style={styles.marketGrid}>
                   <View style={styles.marketColumn}>
-                    <Text style={styles.marketLabel}>Buy Order Price</Text>
+                    <Text style={styles.marketLabel}>Buy Order</Text>
                     {loadingMarket ? (
                       <Text style={[styles.marketValue, styles.marketValueText]}>Loading...</Text>
                     ) : buyPrice !== null ? (
                       <View style={styles.marketValueRow}>
                         <Image source={STUB_ICON} style={styles.marketIcon} />
-                        <Text style={styles.marketValue}>{buyPrice}</Text>
+                        <Text style={styles.marketValue}>{buyPrice.toLocaleString()}</Text>
                       </View>
                     ) : (
                       <Text style={[styles.marketValue, styles.marketValueText]}>N/A</Text>
@@ -328,13 +360,21 @@ export default function PlayerDetailsScreen() {
                   </View>
 
                   <View style={styles.marketColumn}>
-                    <Text style={styles.marketLabel}>Sell Order Price</Text>
+                    <Text style={styles.marketLabel}>Quick Sell</Text>
+                    <View style={styles.marketValueRow}>
+                      <Image source={STUB_ICON} style={styles.marketIcon} />
+                      <Text style={styles.marketValue}>{getSellNowPrice(card.ovr).toLocaleString()}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.marketColumn}>
+                    <Text style={styles.marketLabel}>Sell Order</Text>
                     {loadingMarket ? (
                       <Text style={[styles.marketValue, styles.marketValueText]}>Loading...</Text>
                     ) : sellPrice !== null ? (
                       <View style={styles.marketValueRow}>
                         <Image source={STUB_ICON} style={styles.marketIcon} />
-                        <Text style={styles.marketValue}>{sellPrice}</Text>
+                        <Text style={styles.marketValue}>{sellPrice.toLocaleString()}</Text>
                       </View>
                     ) : (
                       <Text style={[styles.marketValue, styles.marketValueText]}>N/A</Text>
@@ -342,6 +382,10 @@ export default function PlayerDetailsScreen() {
                   </View>
                 </View>
               </View>
+
+              {/* NEW CHART ADDED HERE */}
+              <MarketSpreadChart data={marketCandles} loading={loadingMarket} />
+              <MarketVolumeChart buyVolume={buyVolume} sellVolume={sellVolume} loading={loadingMarket} />
             </>
           )}
 

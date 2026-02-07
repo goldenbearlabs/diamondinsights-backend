@@ -8,6 +8,28 @@ from src.schemas.market_candle import MarketCandleResponse
 
 router = APIRouter(prefix="/market_candles", tags=["market_candles"])
 
+@router.get("/{card_id}/history", response_model=List[MarketCandleResponse])
+def get_card_price_history(
+    card_id: str, 
+    limit: int = 100, 
+    db: Session = Depends(get_db)
+):
+    """
+    Returns a list of candles for a graph (Time Series).
+    Ordered by Oldest -> Newest so the graph draws left-to-right.
+    """
+    candles = (
+        db.query(MarketCandle)
+        .filter(MarketCandle.card_id == card_id)
+        .order_by(MarketCandle.start_time.asc()) # Critical for graphs
+        .limit(limit)
+        .all()
+    )
+    
+    if not candles:
+        return []
+
+    return candles
 @router.get("/", response_model=List[MarketCandleResponse])
 def get_market_candles(
     sort_by: str = Query("buy_volume"),

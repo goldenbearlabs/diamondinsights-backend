@@ -108,3 +108,25 @@ def get_latest_completed_orders(
     return query.limit(limit).offset(offset).all()
 
     
+@router.get("/{card_id}/history", response_model=List[CompletedOrderRow])
+def get_card_order_history(
+    card_id: str,
+    limit: int = Query(500, le=1000), 
+    db: Session = Depends(get_db)
+):
+    """
+    Gets raw transaction history for a specific card.
+    Ordered by Oldest -> Newest for graphing.
+    """
+    orders = (
+        db.query(CompletedOrder)
+        .filter(CompletedOrder.card_id == card_id)
+        .order_by(CompletedOrder.date.asc()) # Critical for graphs
+        .limit(limit)
+        .all()
+    )
+    
+    if not orders:
+        return []
+
+    return orders
