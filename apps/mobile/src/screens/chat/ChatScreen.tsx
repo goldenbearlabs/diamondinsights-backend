@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     color: theme.colors.muted,
-    fontSize: 13,
+    fontSize: 12,
     fontStyle: "italic",
     lineHeight: 18,
   },

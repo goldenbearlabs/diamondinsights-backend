@@ -8,12 +8,14 @@ import { AttributeBar } from '../../predictionscomponents/AttributeBar';
 import { theme } from '../../theme/colors';
 import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
-import { getUserPrediction, saveUserPrediction } from '../../lib/api';
+import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
 import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
 
 const TWO_WAY_PLAYERS = [
   "Shohei Ohtani",
 ];
+
+const STUB_ICON = require('../../../assets/images/stub.png');
 
 export default function PlayerDetailsScreen() {
   const router = useRouter();
@@ -26,10 +28,18 @@ export default function PlayerDetailsScreen() {
 
   const showPitching = card.is_hitter === false || isTwoWay;
   const showBatting = card.is_hitter === true || isTwoWay;
+
+  const BATTING_COLOR = '#3b82f6';
+  const PITCHING_COLOR = '#fbbf24';
+  const FIELDING_COLOR = '#22c55e';
  
   const [userPrediction, setUserPrediction] = useState<string>('');
   const [loadingPred, setLoadingPred] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'attributes' | 'market'>('attributes');
+  const [buyPrice, setBuyPrice] = useState<number | null>(null);
+  const [sellPrice, setSellPrice] = useState<number | null>(null);
+  const [loadingMarket, setLoadingMarket] = useState(false);
 
   useEffect(() => {
     if (card?.id) {
@@ -62,6 +72,30 @@ export default function PlayerDetailsScreen() {
     }
   };
 
+  useEffect(() => {
+    const fetchMarket = async () => {
+      if (!card?.id) return;
+      setLoadingMarket(true);
+
+      try {
+        const [buyRes, sellRes] = await Promise.all([
+          apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=true&limit=1`),
+          apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=false&limit=1`)
+        ]);
+
+        setBuyPrice(buyRes?.[0]?.price ?? null);
+        setSellPrice(sellRes?.[0]?.price ?? null);
+      } catch (err) {
+        setBuyPrice(null);
+        setSellPrice(null);
+      } finally {
+        setLoadingMarket(false);
+      }
+    };
+
+    fetchMarket();
+  }, [card?.id]);
+
   const handleInfoPress = () => {
     Alert.alert(
       "Prediction Info",
@@ -93,7 +127,11 @@ export default function PlayerDetailsScreen() {
           style={{ flex: 1 }}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
         >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           
           {/* bio section */}
           <View style={styles.glassCard}>
@@ -208,46 +246,104 @@ export default function PlayerDetailsScreen() {
             )}
           </View>
 
-          {/* attribute section */}
-          <Text style={styles.sectionTitle}>Attributes</Text>
-          <View style={styles.glassCard}>
-            
-            {/* pitching attributes */}
-            {showPitching && (
-              <>
-                <Text style={styles.subHeader}>Pitching</Text>
-                <AttributeBar label="Stamina" value={card.stamina || 0} />
-                <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} />
-                <AttributeBar label="H/9" value={card.hits_per_bf || 0} /> 
-                <AttributeBar label="K/9" value={card.k_per_bf || 0} />
-                <AttributeBar label="BB/9" value={card.bb_per_bf || 0} />
-                <AttributeBar label="HR/9" value={card.hr_per_bf || 0} />
-                {/* Add a spacer if we are about to show batting stats below */}
-                {showBatting && <View style={{ height: 24 }} />}
-              </>
-            )}
-
-            {/* batting */}
-            {showBatting && (
-               <>
-                <Text style={styles.subHeader}>Batting</Text>
-                <AttributeBar label="Contact R" value={card.contact_right || 0} />
-                <AttributeBar label="Contact L" value={card.contact_left || 0} />
-                <AttributeBar label="Power R" value={card.power_right || 0} />
-                <AttributeBar label="Power L" value={card.power_left || 0} />
-                <AttributeBar label="Vision" value={card.plate_vision || 0} />
-                <AttributeBar label="Clutch" value={card.batting_clutch || 0} />
-                <View style={{ height: 16 }} />
-              </>
-            )}
-
-            {/* Fielding  */}
-             <Text style={styles.subHeader}>Fielding</Text>
-             <AttributeBar label="Fielding" value={card.fielding_ability || 0} />
-             <AttributeBar label="Arm Strength" value={card.arm_strength || 0} />
-             <AttributeBar label="Reaction" value={card.reaction_time || 0} />
-
+          {/* attribute / market tabs */}
+          <View style={styles.tabsContainer}>
+            <TouchableOpacity
+              onPress={() => setActiveTab('attributes')}
+              style={[styles.tabButton, activeTab === 'attributes' && styles.tabButtonActive]}
+            >
+              <Text style={[styles.tabText, activeTab === 'attributes' && styles.tabTextActive]}>Attributes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveTab('market')}
+              style={[styles.tabButton, activeTab === 'market' && styles.tabButtonActive]}
+            >
+              <Text style={[styles.tabText, activeTab === 'market' && styles.tabTextActive]}>Market</Text>
+            </TouchableOpacity>
           </View>
+
+          {activeTab === 'attributes' ? (
+            <>
+              <Text style={styles.sectionTitle}>Attributes</Text>
+              <View style={styles.glassCard}>
+                
+                {/* pitching attributes */}
+                {showPitching && (
+                  <>
+                    <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                    <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                    <AttributeBar label="Stamina" value={card.stamina || 0} barColor={PITCHING_COLOR} />
+                    <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} barColor={PITCHING_COLOR} />
+                    <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} /> 
+                    <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
+                    <AttributeBar label="BB/9" value={card.bb_per_bf || 0} barColor={PITCHING_COLOR} />
+                    {showBatting && <View style={{ height: 24 }} />}
+                  </>
+                )}
+
+                {/* batting */}
+                {showBatting && (
+                   <>
+                  <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                  <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                    <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Contact</Text>
+                    <AttributeBar label="Contact R" value={card.contact_right || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Contact L" value={card.contact_left || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Vision" value={card.plate_vision || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Clutch" value={card.batting_clutch || 0} barColor={BATTING_COLOR} />
+                    <View style={{ height: 12 }} />
+                    <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Power</Text>
+                    <AttributeBar label="Power R" value={card.power_right || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Power L" value={card.power_left || 0} barColor={BATTING_COLOR} />
+                    <View style={{ height: 16 }} />
+                  </>
+                )}
+
+                {/* Fielding  */}
+                 <Text style={[styles.subHeader, { color: FIELDING_COLOR }]}>Fielding</Text>
+                 <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
+                 <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Reaction" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
+
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>Market</Text>
+              <View style={styles.glassCard}>
+                <View style={styles.marketGrid}>
+                  <View style={styles.marketColumn}>
+                    <Text style={styles.marketLabel}>Buy Order Price</Text>
+                    {loadingMarket ? (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>Loading...</Text>
+                    ) : buyPrice !== null ? (
+                      <View style={styles.marketValueRow}>
+                        <Image source={STUB_ICON} style={styles.marketIcon} />
+                        <Text style={styles.marketValue}>{buyPrice}</Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>N/A</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.marketColumn}>
+                    <Text style={styles.marketLabel}>Sell Order Price</Text>
+                    {loadingMarket ? (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>Loading...</Text>
+                    ) : sellPrice !== null ? (
+                      <View style={styles.marketValueRow}>
+                        <Image source={STUB_ICON} style={styles.marketIcon} />
+                        <Text style={styles.marketValue}>{sellPrice}</Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>N/A</Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+            </>
+          )}
 
         </ScrollView>
         </KeyboardAvoidingView>
@@ -283,6 +379,31 @@ const styles = StyleSheet.create({
   },
   statLabel: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
   statValue: { color: '#3b82f6', fontSize: 24, fontWeight: '900' },
+  tabsContainer: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    alignItems: 'center',
+  },
+  tabButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(59, 130, 246, 0.6)',
+  },
+  tabText: { color: theme.colors.muted, fontSize: 14, fontWeight: '600' },
+  tabTextActive: { color: theme.colors.text, fontWeight: '700' },
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
-  subHeader: { color: '#3b82f6', fontSize: 14, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase' },
+  subHeader: { color: '#3b82f6', fontSize: 15, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase' },
+  subHeaderDivider: { height: 1, opacity: 0.45, marginBottom: 10 },
+  subHeaderSmall: { color: '#3b82f6', fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase' },
+  marketGrid: { flexDirection: 'row', gap: 16 },
+  marketColumn: { flex: 1 },
+  marketLabel: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
+  marketValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  marketIcon: { width: 16, height: 16, resizeMode: 'contain' },
+  marketValue: { color: 'white', fontSize: 16, fontWeight: '700' },
+  marketValueText: { marginTop: 6 },
 });

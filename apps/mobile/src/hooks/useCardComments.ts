@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { Alert } from "react-native";
-import { apiGetAuth, apiPostAuth, apiDeleteAuth } from "../lib/api";
+import { apiGetAuth, apiPostAuth, apiDeleteAuth, apiPutAuth } from "../lib/api";
 import { ChatMessage } from "../types/chat"; // We reuse ChatMessage type for consistency
 import { auth } from "../lib/firebase";
 
@@ -9,9 +9,11 @@ interface CommentOut {
   id: number;
   created_at: string; // ISO date
   updated_at: string | null;
+  edited_at: string | null;
   content: string;
   is_deleted: boolean;
   user_id: number;
+  user_firebase_id: string;
   user_display_name: string;
   user_profile_img: string | null;
   likes_count: number;
@@ -56,13 +58,13 @@ export const useCardComments = (cardId: string) => {
       text: c.content,
       userId: c.user_id,
       userName: c.user_display_name,
-      userFirebaseId: "", 
+      userFirebaseId: c.user_firebase_id,
       userImage: c.user_profile_img ?? undefined,
       createdAt: c.created_at,
-      editedAt: c.updated_at !== c.created_at ? c.updated_at : null,
+      editedAt: c.edited_at,
       likedByFirebaseIds: likes,
       replyTo: replyTo,
-      isMe: false, 
+      isMe: c.user_firebase_id === currentUserUid,
     };
   }, []);
 
@@ -87,6 +89,26 @@ export const useCardComments = (cardId: string) => {
     } catch (err) {
       console.error(err);
       Alert.alert("Error", "Failed to post comment");
+    }
+  };
+
+  const editComment = async (commentId: number, text: string) => {
+    try {
+      await apiPutAuth(`/comments/${commentId}`, { content: text });
+      await fetchComments();
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Error", "Failed to edit comment");
+    }
+  };
+
+  const deleteComment = async (commentId: number) => {
+    try {
+      await apiDeleteAuth(`/comments/${commentId}`);
+      await fetchComments();
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Error", "Failed to delete comment");
     }
   };
 
@@ -129,6 +151,8 @@ export const useCardComments = (cardId: string) => {
     loading,
     refreshComments: fetchComments,
     postComment,
-    toggleLike
+    toggleLike,
+    editComment,
+    deleteComment
   };
 };

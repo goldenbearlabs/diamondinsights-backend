@@ -7,13 +7,19 @@ class CommentCreate(BaseModel):
     parent_id: Optional[int] = None
 
 
+class CommentUpdate(BaseModel):
+    content: str
+
+
 class CommentOut(BaseModel):
     id: int
     created_at: datetime
     updated_at: Optional[datetime]
+    edited_at: Optional[datetime]
     content: str
     is_deleted: bool
     user_id: int
+    user_firebase_id: str
     user_display_name: str
     user_profile_img: Optional[str]
     likes_count: int

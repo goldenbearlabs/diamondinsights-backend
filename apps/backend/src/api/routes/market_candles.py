@@ -12,6 +12,8 @@ router = APIRouter(prefix="/market_candles", tags=["market_candles"])
 def get_market_candles(
     sort_by: str = Query("buy_volume"),
     series: Optional[str] = Query(None),
+    name: Optional[str] = Query(None),
+    card_id: Optional[str] = Query(None),
     desc: bool = Query(True),
     limit: int = Query(50, le=100),
     offset: int=0,
@@ -36,6 +38,12 @@ def get_market_candles(
 
     if series:
         query = query.filter(Card.series_name.ilike(series))
+
+    if name:
+        query = query.filter(Card.name.ilike(f"%{name}%"))
+
+    if card_id:
+        query = query.filter(MarketCandle.card_id == card_id)
 
     results = query.limit(limit).offset(offset).all()
 

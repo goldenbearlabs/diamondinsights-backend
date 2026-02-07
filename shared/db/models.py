@@ -1422,6 +1422,7 @@ class Comment(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
     updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), onupdate=_utcnow)
+    edited_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     content: Mapped[str] = mapped_column(Text)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     

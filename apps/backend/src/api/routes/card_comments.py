@@ -3,14 +3,13 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from firebase_admin import auth as fb_auth
-from pydantic import BaseModel
-from sqlalchemy import desc, func, select, exists
+from sqlalchemy import desc, select, exists
 from sqlalchemy.orm import Session, selectinload
 
 from shared.db.database import get_db
 from shared.db.models import Card, Comment, CommentLike, Users
 from src.api.routes.users import firebase_claims
-from src.schemas.card_comment import CommentCreate, CommentOut
+from src.schemas.card_comment import CommentCreate, CommentOut, CommentUpdate
 router = APIRouter(prefix="/comments", tags=["comments"])
 
 
@@ -62,7 +61,7 @@ def get_card_comments(
     query = (
         select(Comment)
         .options(selectinload(Comment.user), selectinload(Comment.likes))
-        .where(Comment.card_id == card_id)
+        .where(Comment.card_id == card_id, Comment.is_deleted.is_(False))
         .order_by(desc(Comment.created_at))
     )
     comments = db.scalars(query).all()
@@ -74,16 +73,15 @@ def get_card_comments(
         if current_user:
             is_liked = any(like.user_id == current_user.id for like in c.likes)
 
-        # Handle deleted content
-        content_scan = "[deleted]" if c.is_deleted else c.content
-        
         results.append(CommentOut(
             id=c.id,
             created_at=c.created_at,
             updated_at=c.updated_at,
-            content=content_scan,
+            edited_at=c.edited_at,
+            content=c.content,
             is_deleted=c.is_deleted,
             user_id=c.user_id,
+            user_firebase_id=c.user.firebase_id,
             user_display_name=c.user.display_name,
             user_profile_img=c.user.profile_img_url,
             likes_count=likes_count,
@@ -135,14 +133,63 @@ def create_comment(
         id=new_comment.id,
         created_at=new_comment.created_at,
         updated_at=new_comment.updated_at,
+        edited_at=new_comment.edited_at,
         content=new_comment.content,
         is_deleted=new_comment.is_deleted,
         user_id=user.id,
+        user_firebase_id=user.firebase_id,
         user_display_name=user.display_name,
         user_profile_img=user.profile_img_url,
         likes_count=0,
         is_liked_by_me=False,
         parent_id=new_comment.parent_id
+    )
+
+
+@router.put("/{comment_id}", response_model=CommentOut)
+def edit_comment(
+    comment_id: int,
+    body: CommentUpdate,
+    db: Session = Depends(get_db),
+    user: Users = Depends(get_current_user)
+):
+    comment = db.get(Comment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.is_deleted:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this comment")
+
+    comment.content = body.content
+    comment.edited_at = datetime.utcnow()
+    db.commit()
+
+    comment = db.scalar(
+        select(Comment)
+        .options(selectinload(Comment.user), selectinload(Comment.likes))
+        .where(Comment.id == comment_id)
+    )
+
+    likes_count = len(comment.likes)
+    is_liked = any(like.user_id == user.id for like in comment.likes)
+
+    return CommentOut(
+        id=comment.id,
+        created_at=comment.created_at,
+        updated_at=comment.updated_at,
+        edited_at=comment.edited_at,
+        content=comment.content,
+        is_deleted=comment.is_deleted,
+        user_id=comment.user_id,
+        user_firebase_id=comment.user.firebase_id,
+        user_display_name=comment.user.display_name,
+        user_profile_img=comment.user.profile_img_url,
+        likes_count=likes_count,
+        is_liked_by_me=is_liked,
+        parent_id=comment.parent_id
     )
 
 
@@ -159,10 +206,7 @@ def delete_comment(
     if comment.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this comment")
 
-    # Soft delete
-    comment.is_deleted = True
-    comment.content = "[deleted]"
-    
+    db.delete(comment)
     db.commit()
     return {"message": "Comment deleted"}
 
