@@ -1,0 +1,22 @@
+{
+  "attr": "BB/9",
+  "role": "pit",
+  "model": "lgb",
+  "best_cv_rmse": 2.6768428478084108,
+  "params": {
+    "n_estimators": 1939,
+    "learning_rate": 0.03245631796965468,
+    "num_leaves": 250,
+    "min_child_samples": 98,
+    "subsample": 0.8625373225021817,
+    "colsample_bytree": 0.7637940711718281,
+    "reg_lambda": 0.00524043536517276,
+    "reg_alpha": 3.6714003603573224,
+    "max_depth": 8,
+    "min_data_in_leaf": 43,
+    "min_sum_hessian_in_leaf": 1.4002652017019452,
+    "feature_fraction": 0.8705722602811711,
+    "bagging_fraction": 0.9077893008734625,
+    "bagging_freq": 7
+  }
+}

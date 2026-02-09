@@ -1,0 +1,22 @@
+{
+  "attr": "REAC",
+  "role": "hit",
+  "model": "lgb",
+  "best_cv_rmse": 3.30338441688727,
+  "params": {
+    "n_estimators": 1016,
+    "learning_rate": 0.14942617199427252,
+    "num_leaves": 70,
+    "min_child_samples": 100,
+    "subsample": 0.8701592254587852,
+    "colsample_bytree": 0.7588356130996836,
+    "reg_lambda": 8.376100971569657e-08,
+    "reg_alpha": 3.409627155639245,
+    "max_depth": 2,
+    "min_data_in_leaf": 6,
+    "min_sum_hessian_in_leaf": 9.049489816785638,
+    "feature_fraction": 0.9963082960094984,
+    "bagging_fraction": 0.8249038141529741,
+    "bagging_freq": 10
+  }
+}

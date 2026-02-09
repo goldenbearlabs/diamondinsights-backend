@@ -1,0 +1,22 @@
+{
+  "attr": "BLK",
+  "role": "hit",
+  "model": "lgb",
+  "best_cv_rmse": 3.0030978432514033,
+  "params": {
+    "n_estimators": 1939,
+    "learning_rate": 0.028271925690261622,
+    "num_leaves": 215,
+    "min_child_samples": 84,
+    "subsample": 0.9945763700907817,
+    "colsample_bytree": 0.7637940711718281,
+    "reg_lambda": 2.1050147500548226e-06,
+    "reg_alpha": 1.9608886666868404,
+    "max_depth": 3,
+    "min_data_in_leaf": 19,
+    "min_sum_hessian_in_leaf": 0.9992797346302141,
+    "feature_fraction": 0.9966644414933984,
+    "bagging_fraction": 0.8746863733048206,
+    "bagging_freq": 2
+  }
+}
