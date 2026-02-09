@@ -27,7 +27,7 @@ type MenuItem = {
 type MenuKey = Exclude<MenuType, null> | "community";
 
 const MARKET_ROUTES = ["/predictions", "/flipping", "/portfolio", "/leaderboard"];
-const GAMEPLAY_ROUTES = ["/rankings", "/overall", "/team-builder"];
+const GAMEPLAY_ROUTES = ["/gameplay-stats", "/rankings", "/overall", "/team-builder"];
 const COMMUNITY_ROUTES = ["/trending", "/blogs", "/chat"];
 
 const MARKET_ITEMS: MenuItem[] = [
@@ -38,7 +38,7 @@ const MARKET_ITEMS: MenuItem[] = [
 ];
 
 const GAMEPLAY_ITEMS: MenuItem[] = [
-  { label: "Rankings", route: "/(app)/rankings", icon: "list-ol" },
+  { label: "Stats", route: "/(app)/gameplay-stats", icon: "list-ol" },
   { label: "Your Overall", route: "/(app)/overall", icon: "user-alt" },
   { label: "Team Builder", route: "/(app)/team-builder", icon: "users-cog" },
 ];

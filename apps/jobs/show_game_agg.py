@@ -77,6 +77,8 @@ class ShowGameAgg(Job):
             "weather_desc": getattr(game, "weather_description", None),
             "difficulty_id": getattr(game, "difficulty", None),
             "date": getattr(game, "date", None),
+            "home_profile_username": getattr(game, "home_profile_username", None),
+            "away_profile_username": getattr(game, "away_profile_username", None),
             "home_team_id": getattr(game, "home_name", None),
             "away_team_id": getattr(game, "away_name", None),
         }

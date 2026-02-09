@@ -54,6 +54,14 @@ export default function RootLayout() {
           headerShown: false, 
         }} 
       />
+
+      <Stack.Screen
+        name="game/[gameId]"
+        options={{
+          presentation: "card",
+          headerShown: false,
+        }}
+      />
     </Stack>
   );
 }

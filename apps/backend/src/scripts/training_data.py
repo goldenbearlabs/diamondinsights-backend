@@ -1,18 +1,40 @@
 import re
-import pandas as pd
+import sys
+from pathlib import Path
 from datetime import timedelta
-from sqlalchemy import text
-from shared.db.database import engine
 
-OUTPUT_PATH = "src/training_data.csv"
+import pandas as pd
+from sqlalchemy import text
+
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+def _find_project_root(start: Path) -> Path:
+    for p in [start, *start.parents]:
+        if (p / "shared").is_dir():
+            return p
+    return start
+
+PROJECT_ROOT = _find_project_root(SCRIPT_DIR)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
+from shared.db.database import engine  # noqa: E402
+
+
+OUTPUT_PATH = SCRIPT_DIR.parent / "training_data.csv"
 
 def height_to_inches(v):
-    if not isinstance(v, str): return None
+    if not isinstance(v, str):
+        return None
     m = re.match(r"(\d+)'\s*(\d+)", v)
     return int(m.group(1)) * 12 + int(m.group(2)) if m else None
 
 def weight_to_lbs(v):
-    if not isinstance(v, str): return None
+    if not isinstance(v, str):
+        return None
     val = re.sub(r"[^\d]", "", v)
     return int(val) if val else None
 
@@ -20,7 +42,6 @@ def safe_div(n, d):
     return n / d if d and d != 0 else 0.0
 
 def make_naive(df, col):
-    """Removes timezone info from a datetime column to prevent comparison errors."""
     if col in df.columns and pd.api.types.is_datetime64_any_dtype(df[col]):
         df[col] = df[col].dt.tz_localize(None)
     return df
@@ -38,17 +59,13 @@ def load_base():
         ORDER BY cu.card_id, cu.update_date
     """
     df = pd.read_sql(text(q), engine, parse_dates=["update_date"])
-    
+
     df["last_update"] = df.groupby("card_id")["update_date"].shift(1)
-    df.loc[
-        df["last_update"].dt.year != df["update_date"].dt.year, 
-        "last_update"
-    ] = pd.NaT
+    df.loc[df["last_update"].dt.year != df["update_date"].dt.year, "last_update"] = pd.NaT
 
     df["mlb_id"] = df["mlb_id"].fillna(0).astype(int)
     df = make_naive(df, "update_date")
     df = make_naive(df, "last_update")
-    
     return df
 
 def load_attribute_changes():
@@ -58,67 +75,81 @@ def load_attribute_changes():
     """
     df = pd.read_sql(text(q), engine, parse_dates=["update_date"])
     df = make_naive(df, "update_date")
-    
-    # Clean delta (remove '+' string and cast to numeric)
+
     df["delta"] = df["delta"].astype(str).str.replace("+", "", regex=False)
-    df["delta"] = pd.to_numeric(df["delta"], errors='coerce').fillna(0)
+    df["delta"] = pd.to_numeric(df["delta"], errors="coerce")
+
+    df["old_value"] = pd.to_numeric(df["old_value"], errors="coerce")
+    df["new_value"] = pd.to_numeric(df["new_value"], errors="coerce")
+
     return df
 
 def load_batting():
-    df = pd.read_sql(text("""
-        SELECT b.player_id, g.game_date, g.season, b.split,
-               b.pa, b.r, b.h, b.doubles, b.triples, b.hr, 
-               b.hbp, b.tb, b.rbi, b.so, b.bb, b.ab, b.lob
-        FROM mlb_game_batting_stats b
-        JOIN mlb_games g ON g.id = b.game_id
-    """), engine, parse_dates=["game_date"])
-    
+    df = pd.read_sql(
+        text("""
+            SELECT b.player_id, g.game_date, g.season, b.split,
+                   b.pa, b.r, b.h, b.doubles, b.triples, b.hr, 
+                   b.hbp, b.tb, b.rbi, b.so, b.bb, b.ab, b.lob
+            FROM mlb_game_batting_stats b
+            JOIN mlb_games g ON g.id = b.game_id
+        """),
+        engine,
+        parse_dates=["game_date"],
+    )
     df["player_id"] = df["player_id"].fillna(0).astype(int)
     df["season"] = df["season"].fillna(0).astype(int)
     df = make_naive(df, "game_date")
     return df
 
 def load_pitching():
-    df = pd.read_sql(text("""
-        SELECT p.player_id, g.game_date, g.season, p.split,
-               p.outs_pitched, p.ip, p.ab, p.pitches_thrown,
-               p.h, p.doubles, p.triples, p.hr, p.bb, p.k, 
-               p.r, p.er, p.batters_faced, p.balls_thrown, p.strikes_thrown
-        FROM mlb_game_pitching_stats p
-        JOIN mlb_games g ON g.id = p.game_id
-    """), engine, parse_dates=["game_date"])
-    
+    df = pd.read_sql(
+        text("""
+            SELECT p.player_id, g.game_date, g.season, p.split,
+                   p.outs_pitched, p.ip, p.ab, p.pitches_thrown,
+                   p.h, p.doubles, p.triples, p.hr, p.bb, p.k, 
+                   p.r, p.er, p.batters_faced, p.balls_thrown, p.strikes_thrown
+            FROM mlb_game_pitching_stats p
+            JOIN mlb_games g ON g.id = p.game_id
+        """),
+        engine,
+        parse_dates=["game_date"],
+    )
     df["player_id"] = df["player_id"].fillna(0).astype(int)
     df["season"] = df["season"].fillna(0).astype(int)
     df = make_naive(df, "game_date")
     return df
 
 def load_baserunning():
-    df = pd.read_sql(text("""
-        SELECT b.player_id, g.game_date, g.season, 
-               b.sb, b.caught_stealing
-        FROM mlb_game_baserunning_stats b
-        JOIN mlb_games g ON g.id = b.game_id
-    """), engine, parse_dates=["game_date"])
-    
+    df = pd.read_sql(
+        text("""
+            SELECT b.player_id, g.game_date, g.season, 
+                   b.sb, b.caught_stealing
+            FROM mlb_game_baserunning_stats b
+            JOIN mlb_games g ON g.id = b.game_id
+        """),
+        engine,
+        parse_dates=["game_date"],
+    )
     df["player_id"] = df["player_id"].fillna(0).astype(int)
     df["season"] = df["season"].fillna(0).astype(int)
     df = make_naive(df, "game_date")
     return df
 
 def load_fielding():
-    df = pd.read_sql(text("""
-        SELECT f.player_id, g.game_date, g.season,
-               f.assists, f.put_outs, f.errors, f.chances
-        FROM mlb_game_fielding_stats f
-        JOIN mlb_games g ON g.id = f.game_id
-    """), engine, parse_dates=["game_date"])
-    
+    df = pd.read_sql(
+        text("""
+            SELECT f.player_id, g.game_date, g.season,
+                   f.assists, f.put_outs, f.errors, f.chances
+            FROM mlb_game_fielding_stats f
+            JOIN mlb_games g ON g.id = f.game_id
+        """),
+        engine,
+        parse_dates=["game_date"],
+    )
     df["player_id"] = df["player_id"].fillna(0).astype(int)
     df["season"] = df["season"].fillna(0).astype(int)
     df = make_naive(df, "game_date")
     return df
-
 
 def calc_batting_metrics(s, prefix):
     ab = s.get("ab", 0)
@@ -127,10 +158,10 @@ def calc_batting_metrics(s, prefix):
     hbp = s.get("hbp", 0)
     tb = s.get("tb", 0)
     so = s.get("so", 0)
-    
+
     exclude = {"player_id", "season", "game_id"}
     out = {f"{prefix}{k}": v for k, v in s.items() if k not in exclude}
-    
+
     out[f"{prefix}avg"] = safe_div(h, ab)
     out[f"{prefix}obp"] = safe_div(h + bb + hbp, ab + bb + hbp)
     out[f"{prefix}slug"] = safe_div(tb, ab)
@@ -146,7 +177,6 @@ def agg_batting(df, prefix):
 
     if not df.empty and "split" in df.columns:
         splits_clean = df["split"].apply(clean_split)
-        
         total_mask = splits_clean.isin(["vslhp", "vsrhp"])
         total_sum = df[total_mask].sum(numeric_only=True).to_dict()
     else:
@@ -164,7 +194,7 @@ def agg_batting(df, prefix):
 
 def calc_pitching_metrics(s, prefix):
     outs = s.get("outs_pitched", 0)
-    
+
     math_ip = outs / 3.0
     display_ip = (outs // 3) + ((outs % 3) / 10.0)
 
@@ -176,7 +206,6 @@ def calc_pitching_metrics(s, prefix):
     k = s.get("k", 0)
 
     exclude = {"player_id", "season", "game_id", "outs_pitched", "ip"}
-    
     out = {f"{prefix}p{k}": v for k, v in s.items() if k not in exclude}
 
     out[f"{prefix}outs_pitched"] = outs
@@ -187,10 +216,9 @@ def calc_pitching_metrics(s, prefix):
     out[f"{prefix}bb9"] = safe_div(bb * 9, math_ip)
     out[f"{prefix}hr9"] = safe_div(hr * 9, math_ip)
     out[f"{prefix}whip"] = safe_div(bb + h, math_ip)
-    
+
     out[f"{prefix}avg_against"] = safe_div(h, ab)
     out[f"{prefix}strike_pct"] = safe_div(s.get("strikes_thrown", 0), s.get("pitches_thrown", 0))
-    
     return out
 
 def agg_pitching(df, prefix):
@@ -199,7 +227,6 @@ def agg_pitching(df, prefix):
 
     if not df.empty and "split" in df.columns:
         splits_clean = df["split"].apply(clean_split)
-        
         total_mask = splits_clean.isin(["vslhb", "vsrhb"])
         total_sum = df[total_mask].sum(numeric_only=True).to_dict()
     else:
@@ -219,27 +246,49 @@ def agg_baserunning(df, prefix):
     s = df.sum(numeric_only=True).to_dict()
     sb = s.get("sb", 0)
     cs = s.get("caught_stealing", 0)
-    out = {
+    return {
         f"{prefix}sb": sb,
         f"{prefix}cs": cs,
         f"{prefix}sb_attempts": sb + cs,
-        f"{prefix}sb_pct": safe_div(sb, sb + cs)
+        f"{prefix}sb_pct": safe_div(sb, sb + cs),
     }
-    return out
 
 def agg_fielding(df, prefix):
     s = df.sum(numeric_only=True).to_dict()
     errors = s.get("errors", 0)
     chances = s.get("chances", 0)
-    out = {
+    return {
         f"{prefix}errors": errors,
         f"{prefix}chances": chances,
         f"{prefix}put_outs": s.get("put_outs", 0),
         f"{prefix}assists": s.get("assists", 0),
-        f"{prefix}field_pct": safe_div(chances - errors, chances)
+        f"{prefix}field_pct": safe_div(chances - errors, chances),
     }
-    return out
 
+def _merge_attr_changes(base: pd.DataFrame, attr_changes: pd.DataFrame) -> pd.DataFrame:
+    if attr_changes.empty:
+        return base
+
+    attr_pivot = attr_changes.pivot_table(
+        index=["update_id", "update_date", "card_id"],
+        columns="name",
+        values=["new_value", "old_value", "delta"],
+        aggfunc="first",
+    )
+
+    val_map = {"new_value": "new", "old_value": "old", "delta": "delta"}
+    attr_pivot.columns = [f"{col[1]}_{val_map[col[0]]}" for col in attr_pivot.columns]
+    attr_pivot = attr_pivot.reset_index()
+
+    out = pd.merge(base, attr_pivot, on=["update_id", "update_date", "card_id"], how="left")
+
+    all_attr_cols = [c for c in attr_pivot.columns if c not in ["update_id", "update_date", "card_id"]]
+    delta_cols = [c for c in all_attr_cols if c.endswith("_delta")]
+
+    if delta_cols:
+        out[delta_cols] = out[delta_cols].fillna(0)
+
+    return out
 
 def main():
     print("Loading Data...")
@@ -251,66 +300,43 @@ def main():
     fielding = load_fielding()
     print("Data Loaded.")
 
-    # --- Start: Merge Attribute Changes ---
-    if not attr_changes.empty:
-        # Pivot to wide format: (update_id, card_id) -> contactLeft_delta, contactLeft_old, etc.
-        attr_pivot = attr_changes.pivot_table(
-            index=["update_id", "update_date", "card_id"],
-            columns="name",
-            values=["new_value", "old_value", "delta"],
-            aggfunc="first"
-        )
-        
-        # Flatten MultiIndex columns: e.g., ('new_value', 'contactLeft') -> 'contactLeft_new'
-        # Mapping: new_value -> new, old_value -> old, delta -> delta
-        val_map = {"new_value": "new", "old_value": "old", "delta": "delta"}
-        attr_pivot.columns = [f"{col[1]}_{val_map[col[0]]}" for col in attr_pivot.columns]
-        
-        attr_pivot = attr_pivot.reset_index()
-        
-        # Merge into base (left join keeps all base rows, fills missing attrs with NaN)
-        base = pd.merge(base, attr_pivot, on=["update_id", "update_date", "card_id"], how="left")
-        
-        # Fill newly created attribute columns with 0
-        new_cols = [c for c in attr_pivot.columns if c not in ["update_id", "update_date", "card_id"]]
-        base[new_cols] = base[new_cols].fillna(0)
-    # --- End: Merge Attribute Changes ---
+    base = _merge_attr_changes(base, attr_changes)
 
     rows = []
-    
+
     relevant_ids = set(base["mlb_id"].unique())
     batting = batting[batting["player_id"].isin(relevant_ids)]
     pitching = pitching[pitching["player_id"].isin(relevant_ids)]
+    baserunning = baserunning[baserunning["player_id"].isin(relevant_ids)]
+    fielding = fielding[fielding["player_id"].isin(relevant_ids)]
 
     print(f"Processing {len(base)} updates...")
-    
-    for i, u in base.iterrows():
-        row = u.to_dict()
-        pid = u["mlb_id"]
+
+    for _, u in base.iterrows():
+        pid = int(u["mlb_id"] or 0)
         ud = u["update_date"]
         last = u["last_update"]
-        
+        if pid == 0 or pd.isna(ud):
+            continue
+
+        row = u.to_dict()
+
         try:
             raw_year = int(u["year"])
             card_year = raw_year + 2000 if raw_year < 100 else raw_year
         except (ValueError, TypeError):
             card_year = 0
 
-        if pd.notna(ud):
-            season_year = int(ud.year)
-        else:
-            season_year = card_year
+        season_year = int(ud.year) if pd.notna(ud) else card_year
 
-        if pid == 0: continue
-
-        b_p = batting[batting.player_id == pid].copy()
-        p_p = pitching[pitching.player_id == pid].copy()
-        br_p = baserunning[baserunning.player_id == pid].copy()
-        f_p = fielding[fielding.player_id == pid].copy()
+        b_p = batting[batting.player_id == pid]
+        p_p = pitching[pitching.player_id == pid]
+        br_p = baserunning[baserunning.player_id == pid]
+        f_p = fielding[fielding.player_id == pid]
 
         szn_mask_b = (b_p.season == season_year) & (b_p.game_date < ud)
         szn_mask_p = (p_p.season == season_year) & (p_p.game_date < ud)
-        
+
         m1_start = ud - timedelta(days=30)
         m1_mask_b = (b_p.game_date >= m1_start) & (b_p.game_date < ud)
         m1_mask_p = (p_p.game_date >= m1_start) & (p_p.game_date < ud)
@@ -327,15 +353,19 @@ def main():
 
         scopes = {
             "szn_": (b_p[szn_mask_b], p_p[szn_mask_p], szn_br_df, szn_f_df),
-            "m1_": (b_p[m1_mask_b], p_p[m1_mask_p], br_p[br_p.game_date.between(m1_start, ud)], f_p[f_p.game_date.between(m1_start, ud)]),
-            "since_": (b_p[since_mask_b], p_p[since_mask_p], None, None) 
+            "m1_": (
+                b_p[m1_mask_b],
+                p_p[m1_mask_p],
+                br_p[(br_p.game_date >= m1_start) & (br_p.game_date < ud)],
+                f_p[(f_p.game_date >= m1_start) & (f_p.game_date < ud)],
+            ),
+            "since_": (b_p[since_mask_b], p_p[since_mask_p], None, None),
         }
 
         for prefix, (b_df, p_df, br_df, f_df) in scopes.items():
             row.update(agg_batting(b_df, prefix))
             row.update(agg_pitching(p_df, prefix))
-            
-            if br_df is not None: 
+            if br_df is not None:
                 row.update(agg_baserunning(br_df, prefix))
             if f_df is not None:
                 row.update(agg_fielding(f_df, prefix))
@@ -346,7 +376,7 @@ def main():
 
     final_df["height_inches"] = final_df["height"].apply(height_to_inches)
     final_df["weight_lbs"] = final_df["weight"].apply(weight_to_lbs)
-    
+
     pos = final_df["display_position"].fillna("")
     sec = final_df["display_secondary_positions"].fillna("")
 
@@ -361,7 +391,9 @@ def main():
     final_df["age_bucket_prime"] = final_df["age"].between(26, 30).astype(int)
     final_df["age_bucket_old"] = (final_df["age"] > 30).astype(int)
 
-    final_df = final_df.fillna(0)
+    attr_keep_na_cols = [c for c in final_df.columns if c.endswith("_old") or c.endswith("_new")]
+    fill_cols = [c for c in final_df.columns if c not in attr_keep_na_cols]
+    final_df[fill_cols] = final_df[fill_cols].fillna(0)
 
     print(f"Done. Generated {len(final_df)} rows and {len(final_df.columns)} columns.")
     final_df.to_csv(OUTPUT_PATH, index=False)

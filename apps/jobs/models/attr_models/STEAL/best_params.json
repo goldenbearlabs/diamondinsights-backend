@@ -1,0 +1,22 @@
+{
+  "attr": "STEAL",
+  "role": "hit",
+  "model": "lgb",
+  "best_cv_rmse": 2.2757767891137197,
+  "params": {
+    "n_estimators": 2948,
+    "learning_rate": 0.01022698717878845,
+    "num_leaves": 251,
+    "min_child_samples": 99,
+    "subsample": 0.9058690027859808,
+    "colsample_bytree": 0.620720154159701,
+    "reg_lambda": 1.5739115097317524e-08,
+    "reg_alpha": 2.2632868124322236,
+    "max_depth": 2,
+    "min_data_in_leaf": 5,
+    "min_sum_hessian_in_leaf": 8.312251937593873,
+    "feature_fraction": 0.9787397169202001,
+    "bagging_fraction": 0.8450963299609621,
+    "bagging_freq": 1
+  }
+}

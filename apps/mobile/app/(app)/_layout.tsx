@@ -29,6 +29,7 @@ export default function TabLayout() {
       <Tabs.Screen name="portfolio" options={{ title: "Portfolio" }} />
       <Tabs.Screen name="leaderboard" options={{ title: "Leaderboard" }} />
       <Tabs.Screen name="rankings" options={{ title: "Rankings" }} />
+      <Tabs.Screen name="gameplay-stats" options={{ title: "Stats" }} />
       <Tabs.Screen name="overall" options={{ title: "Your Overall" }} />
       <Tabs.Screen name="team-builder" options={{ title: "Team Builder" }} />
       <Tabs.Screen name="card" options={{ title: "Card", href: null }} />

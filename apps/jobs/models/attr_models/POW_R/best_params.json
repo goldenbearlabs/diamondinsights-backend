@@ -1,0 +1,22 @@
+{
+  "attr": "POW R",
+  "role": "hit",
+  "model": "lgb",
+  "best_cv_rmse": 2.3553919486303014,
+  "params": {
+    "n_estimators": 2491,
+    "learning_rate": 0.02584973264466475,
+    "num_leaves": 225,
+    "min_child_samples": 85,
+    "subsample": 0.8713629791236849,
+    "colsample_bytree": 0.7897142616144268,
+    "reg_lambda": 0.017044600044271514,
+    "reg_alpha": 3.3568706419798326,
+    "max_depth": 9,
+    "min_data_in_leaf": 45,
+    "min_sum_hessian_in_leaf": 0.4278481382033305,
+    "feature_fraction": 0.8371005972885007,
+    "bagging_fraction": 0.9822092328785991,
+    "bagging_freq": 2
+  }
+}

@@ -1,4 +1,4 @@
-.PHONY: help up down ps logs build test \
+.PHONY: help up down ps logs logs-backend build test \
 	migrate revision run-job training-data \
 	runner-up runner-down runner-ps runner-logs runner-restart runner-build runner-pull runner-update runner-install \
 	server-up server-down server-ps server-logs \
@@ -20,7 +20,7 @@ COMPOSE_MONITORING = docker compose -f infra/monitoring/docker-compose.yml --env
 
 help:
 	@printf "Usage:\n"
-	@printf "  make up|down|ps|logs|build\n"
+	@printf "  make up|down|ps|logs|logs-backend|build\n"
 	@printf "  make migrate | revision REV_MSG='desc'\n"
 	@printf "  make run-job JOB_MODULE=apps.jobs.card_sync JOB_CLASS=CardSync [JOB_ARGS='reload_all_years=True']\n"
 	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|show_profile_stats_updater|show_game_refresh|show_game_agg\n"
@@ -44,6 +44,9 @@ ps:
 
 logs:
 	$(COMPOSE_BASE) logs -f
+
+logs-backend:
+	$(COMPOSE_BASE) logs -f backend
 
 test:
 	python3 -m pytest
@@ -175,5 +178,4 @@ monitoring-ps:
 
 monitoring-logs:
 	$(COMPOSE_MONITORING) logs -f
-
 

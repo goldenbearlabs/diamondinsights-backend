@@ -289,11 +289,6 @@ class ShowGameRefresh(Job):
         for username in usernames:
             username = (username or "").strip()
 
-            # DEBUG ME
-            #if username != "wizzy47911779":
-                #self.logger.debug("show game refresh skip username=%s reason=debug_filter", username)
-                #continue
-
             if not username:
                 self.logger.debug("show game refresh skip username=%s reason=blank", username)
                 continue
@@ -337,6 +332,12 @@ class ShowGameRefresh(Job):
                 the list of unprocessed non cpu games
 
         '''
+        def _is_cpu(s: str | None) -> bool:
+            if not s:
+                return False
+            t = str(s).strip()
+            t = re.sub(r"\s*\^b\d+\^\s*$", "", t).strip()
+            return t.upper() == "CPU"
         
         existing_games = self._existing_game_ids(db_session, username)
         self.logger.debug(
@@ -351,11 +352,15 @@ class ShowGameRefresh(Job):
             return []
         
         # Filter out CPU games.
-        cpu_filtered = 0
-        for game in api_games:
-            if game.home_full_name == "CPU" or game.away_full_name == "CPU":
-                cpu_filtered += 1
-                api_games.remove(game)
+        before = len(api_games)
+        api_games = [
+            g for g in api_games
+            if not (
+                _is_cpu(g.home_full_name)
+                or _is_cpu(g.away_full_name)
+            )
+        ]
+        cpu_filtered = before - len(api_games)
 
         remaining = [g for g in api_games if g.id not in existing_games]
         self.logger.info(

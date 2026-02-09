@@ -86,5 +86,3 @@ For attribute models, only these are required at inference time:
 - `final_model.joblib`
 - `feature_cols.json`
 - `best_model.json`
-
-(Optionally keep `dataset_meta.json` for provenance.)
