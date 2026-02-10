@@ -36,6 +36,9 @@ export const MarketVolumeChart = ({ buyVolume, sellVolume, loading }: Props) => 
   const buy = buyVolume ?? 0;
   const sell = sellVolume ?? 0;
 
+  const maxRaw = Math.max(buy, sell);
+  const maxValue = Math.ceil(maxRaw * 1.2);
+
   const barData = [
     {
       value: sell,
@@ -71,6 +74,7 @@ export const MarketVolumeChart = ({ buyVolume, sellVolume, loading }: Props) => 
         <BarChart
           data={barData}
           height={160}
+          maxValue={maxValue}
           barWidth={60}
           spacing={40}
           initialSpacing={30}
