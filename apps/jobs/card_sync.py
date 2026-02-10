@@ -61,7 +61,12 @@ class CardSync(Job):
         col_names = [c.key for c in mapper.column_attrs]
         cols = Card.__table__.columns
 
-        update_cols = {c.name: insert(Card).excluded[c.name] for c in cols if c.name != "id"}
+        # Preserve existing mlb_id links; card_sync should not unlink players.
+        update_cols = {
+            c.name: insert(Card).excluded[c.name]
+            for c in cols
+            if c.name not in {"id", "mlb_id"}
+        }
 
         total = len(cards)
         for start in range(0, total, chunk_size):
@@ -281,13 +286,15 @@ class CardAdapter:
             card.has_rank_change = self._json_get(item, "has_rank_change", False)
             card.event = self._json_get(item, "event", False)
             card.set_name = self._json_get(item, "set_name", "")
-            card.is_live_set = self._json_get(item, "is_live_set", False)
             card.ui_anim_index = self._json_get(item, "ui_anim_index", 0) or 0
 
             series_name = (self._json_get(item, "series") or "").strip() or "UNKNOWN"
             if series_name and series_name in self.series_map:
                 card.series_name = series_name
                 card.series = self.series_map[series_name]
+            # Live Series should be derived from the series name, not the API's is_live_set flag.
+            # Some non-live series are incorrectly marked as live in the feed.
+            card.is_live_set = (series_name == "Live")
             
             item_quirks = self._json_get(item, "quirks", [])
             card_quirks = []

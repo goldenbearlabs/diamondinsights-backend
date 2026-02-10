@@ -1,11 +1,11 @@
-.PHONY: help up down ps logs build test \
+.PHONY: help up down ps logs logs-backend build test \
 	migrate revision run-job training-data \
 	runner-up runner-down runner-ps runner-logs runner-restart runner-build runner-pull runner-update runner-install \
 	server-up server-down server-ps server-logs \
 	monitoring-up monitoring-down monitoring-ps monitoring-logs \
 	card_sync card_sync_above card_sync_below card_synce_below \
 	game_boxscore_sync market_candle_sync market_price_sync market_sync player_sync roster_update_sync prediction_sync \
-	show_profile_stats_updater show_game_refresh
+	show_profile_stats_updater show_game_refresh show_game_agg
 
 ENV_FILE ?= .env
 RUNNER_ENV ?= .env
@@ -20,10 +20,10 @@ COMPOSE_MONITORING = docker compose -f infra/monitoring/docker-compose.yml --env
 
 help:
 	@printf "Usage:\n"
-	@printf "  make up|down|ps|logs|build\n"
+	@printf "  make up|down|ps|logs|logs-backend|build\n"
 	@printf "  make migrate | revision REV_MSG='desc'\n"
 	@printf "  make run-job JOB_MODULE=apps.jobs.card_sync JOB_CLASS=CardSync [JOB_ARGS='reload_all_years=True']\n"
-	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|show_profile_stats_updater|show_game_refresh\n"
+	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|show_profile_stats_updater|show_game_refresh|show_game_agg\n"
 	@printf "  make runner-up|runner-down|runner-ps|runner-logs\n"
 	@printf "  make server-up|server-down|server-ps|server-logs\n"
 	@printf "  make monitoring-up|monitoring-down|monitoring-ps|monitoring-logs\n"
@@ -45,6 +45,9 @@ ps:
 logs:
 	$(COMPOSE_BASE) logs -f
 
+logs-backend:
+	$(COMPOSE_BASE) logs -f backend
+
 test:
 	python3 -m pytest
 	python3 scripts/update_test_coverage.py
@@ -57,6 +60,9 @@ migrate:
 
 revision:
 	$(COMPOSE_BASE) exec backend alembic revision --autogenerate -m "$(REV_MSG)"
+
+fix-alembic:
+	$(COMPOSE_BASE) exec backend alembic upgrade head
 
 run-job: up
 	$(COMPOSE_BASE) exec jobs python -c "from shared.core.logging_config import configure_logging; configure_logging(service_name='run-job'); from shared.db.database import SessionLocal; from $(JOB_MODULE) import $(JOB_CLASS); s=SessionLocal(); $(JOB_CLASS)($(JOB_ARGS)).run(s); s.close()"
@@ -116,6 +122,10 @@ show_game_refresh: JOB_MODULE=apps.jobs.show_game_refresh
 show_game_refresh: JOB_CLASS=ShowGameRefresh
 show_game_refresh: run-job
 
+show_game_agg: JOB_MODULE=apps.jobs.show_game_agg
+show_game_agg: JOB_CLASS=ShowGameAgg
+show_game_agg: run-job
+
 runner-up:
 	$(COMPOSE_RUNNER) up -d --build
 
@@ -168,6 +178,4 @@ monitoring-ps:
 
 monitoring-logs:
 	$(COMPOSE_MONITORING) logs -f
-
-
 

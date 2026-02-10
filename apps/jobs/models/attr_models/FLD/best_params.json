@@ -1,0 +1,22 @@
+{
+  "attr": "FLD",
+  "role": "hit",
+  "model": "lgb",
+  "best_cv_rmse": 2.946444045755932,
+  "params": {
+    "n_estimators": 1308,
+    "learning_rate": 0.038243971836980445,
+    "num_leaves": 251,
+    "min_child_samples": 10,
+    "subsample": 0.7144801265189,
+    "colsample_bytree": 0.7641794225393788,
+    "reg_lambda": 0.009787941721971683,
+    "reg_alpha": 3.3568706419798326,
+    "max_depth": 0,
+    "min_data_in_leaf": 65,
+    "min_sum_hessian_in_leaf": 0.02807108016913836,
+    "feature_fraction": 0.9787397169202001,
+    "bagging_fraction": 0.8307568963343969,
+    "bagging_freq": 10
+  }
+}

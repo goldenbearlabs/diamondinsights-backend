@@ -1,0 +1,22 @@
+{
+  "attr": "CON L",
+  "role": "hit",
+  "model": "lgb",
+  "best_cv_rmse": 3.429674793867065,
+  "params": {
+    "n_estimators": 1869,
+    "learning_rate": 0.011570808482815807,
+    "num_leaves": 241,
+    "min_child_samples": 57,
+    "subsample": 0.8983193934742976,
+    "colsample_bytree": 0.7250175786499715,
+    "reg_lambda": 0.22026135440510425,
+    "reg_alpha": 0.9349842859819899,
+    "max_depth": 10,
+    "min_data_in_leaf": 33,
+    "min_sum_hessian_in_leaf": 0.1883773058370467,
+    "feature_fraction": 0.9652887827848995,
+    "bagging_fraction": 0.8786812633948151,
+    "bagging_freq": 1
+  }
+}

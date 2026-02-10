@@ -1450,3 +1450,4 @@ class CommentLike(Base):
 
     user: Mapped["Users"] = relationship(back_populates="comment_likes")
     comment: Mapped["Comment"] = relationship(back_populates="likes")
+        
