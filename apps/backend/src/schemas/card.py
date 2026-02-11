@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Dict, Optional
 
 # This class defines the JSON structure that gets returned
 class CardResponse(BaseModel):
@@ -9,7 +9,15 @@ class CardResponse(BaseModel):
     ovr: int
     rarity: str
     display_position: str
+    display_primary_position: Optional[str] = None
+    display_secondary_positions: Optional[str] = None
     display_seconday_position: Optional[str] = None
+    true_overall: Optional[float] = None
+    true_overall_rounded: Optional[int] = None
+    meta_overall: Optional[float] = None
+    meta_overall_rounded: Optional[int] = None
+    true_overall_by_position: Optional[Dict[str, int]] = None
+    meta_overall_by_position: Optional[Dict[str, int]] = None
     jersey_number: int
     age: int
     bat_hand: str

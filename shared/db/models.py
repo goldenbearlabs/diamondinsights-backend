@@ -130,8 +130,76 @@ class Card(Base):
         cascade="all, delete-orphan"
     )
     predictions: Mapped[List["CardPrediction"]] = relationship(back_populates="card", passive_deletes=True)
+    position_overalls: Mapped[List["CardPositionOverall"]] = relationship(
+        back_populates="card", passive_deletes=True, cascade="all, delete-orphan"
+    )
     votes: Mapped[List["CardVote"]] = relationship(back_populates="card", passive_deletes=True)
     portfolio_holdings: Mapped[List["PortfolioHolding"]] = relationship(back_populates="card", passive_deletes=True)
+
+    def _preferred_position_overall(self) -> Optional["CardPositionOverall"]:
+        rows = self.position_overalls or []
+        if not rows:
+            return None
+
+        primary_pos = (self.display_position or "").strip().upper()
+        for row in rows:
+            if (row.position or "").strip().upper() == primary_pos:
+                return row
+        for row in rows:
+            if row.is_primary:
+                return row
+        return rows[0]
+
+    @property
+    def display_seconday_position(self) -> Optional[str]:
+        # Backward-compatible alias for older API clients.
+        return self.display_secondary_positions
+
+    @property
+    def display_primary_position(self) -> str:
+        return self.display_position
+
+    @property
+    def true_overall(self) -> Optional[float]:
+        row = self._preferred_position_overall()
+        return None if row is None else float(row.true_overall)
+
+    @property
+    def true_overall_rounded(self) -> Optional[int]:
+        row = self._preferred_position_overall()
+        return None if row is None else int(row.true_overall_rounded)
+
+    @property
+    def meta_overall(self) -> Optional[float]:
+        row = self._preferred_position_overall()
+        return None if row is None else float(row.meta_overall)
+
+    @property
+    def meta_overall_rounded(self) -> Optional[int]:
+        row = self._preferred_position_overall()
+        return None if row is None else int(row.meta_overall_rounded)
+
+    @property
+    def true_overall_by_position(self) -> dict[str, int]:
+        rows = self.position_overalls or []
+        out: dict[str, int] = {}
+        for row in rows:
+            position = (row.position or "").strip().upper()
+            if not position:
+                continue
+            out[position] = int(row.true_overall_rounded)
+        return out
+
+    @property
+    def meta_overall_by_position(self) -> dict[str, int]:
+        rows = self.position_overalls or []
+        out: dict[str, int] = {}
+        for row in rows:
+            position = (row.position or "").strip().upper()
+            if not position:
+                continue
+            out[position] = int(row.meta_overall_rounded)
+        return out
     
     def __repr__(self) -> str:
         return f"CARD (id={self.id}, name={self.name}, series={self.series_name}, ovr={self.ovr})"
@@ -679,6 +747,34 @@ class CardPrediction(Base):
 
     __table_args__ = (
         Index("ix_card_predictions_card_run_desc", "card_id", "run_id"),
+    )
+
+
+class CardPositionOverall(Base):
+    __tablename__ = "card_position_overalls"
+
+    card_id: Mapped[str] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[str] = mapped_column(String(8), primary_key=True)
+
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_hitter: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    true_overall: Mapped[float] = mapped_column(Float, nullable=False)
+    true_overall_rounded: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    meta_overall: Mapped[float] = mapped_column(Float, nullable=False)
+    meta_overall_rounded: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    computed_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False, index=True
+    )
+
+    card: Mapped["Card"] = relationship(back_populates="position_overalls")
+
+    __table_args__ = (
+        Index("ix_card_position_overalls_position", "position"),
     )
     
 class UpdateSchedule(Base):

@@ -195,10 +195,12 @@ def test_card_sync_integration_inserts_records(db_session, show_api_server, monk
     assert card1.id == "2024:uuid-1"
     assert card1.series_name == "Live"
     assert card1.search_name == "jose alvarez"
+    assert {q.name for q in card1.quirks} == {"Q1"}
 
     card2 = by_uuid["uuid-2"]
     assert card2.id == "2024:uuid-2"
     assert card2.series_name == "UNKNOWN"
+    assert card2.quirks == []
 
 
 def test_card_sync_integration_upserts_updates(db_session, show_api_server, monkeypatch):
@@ -206,7 +208,13 @@ def test_card_sync_integration_upserts_updates(db_session, show_api_server, monk
 
     payloads["2024"] = {
         1: [
-            _card_item("uuid-1", name="Name A", series="Live", ovr=88),
+            _card_item(
+                "uuid-1",
+                name="Name A",
+                series="Live",
+                ovr=88,
+                quirks=[{"name": "Q1", "description": "desc", "img": "q1.png"}],
+            ),
         ]
     }
 
@@ -216,6 +224,7 @@ def test_card_sync_integration_upserts_updates(db_session, show_api_server, monk
 
     card = db_session.execute(select(Card).where(Card.id == "2024:uuid-1")).scalar_one()
     assert card.ovr == 88
+    assert {q.name for q in card.quirks} == {"Q1"}
 
     payloads["2024"][1] = [
         _card_item("uuid-1", name="Name A", series="Live", ovr=92),
@@ -225,6 +234,7 @@ def test_card_sync_integration_upserts_updates(db_session, show_api_server, monk
 
     card = db_session.execute(select(Card).where(Card.id == "2024:uuid-1")).scalar_one()
     assert card.ovr == 92
+    assert card.quirks == []
 
 
 def test_card_sync_integration_http_error_bubbles(db_session, show_api_server, monkeypatch):

@@ -148,6 +148,14 @@ class Router:
                                 from apps.jobs.prediction_sync import PredictionSync
                                 PredictionSync().run(session)
 
+                            case "card_position_overall_sync":
+                                from apps.jobs.card_position_overall_sync import CardPositionOverallSync
+                                weights_path = payload.args.get("weights_path")
+                                if weights_path:
+                                    CardPositionOverallSync(weights_path=str(weights_path)).run(session)
+                                else:
+                                    CardPositionOverallSync().run(session)
+
                             case "show_profile_stats_updater":
                                 from apps.jobs.show_profile_refresh import ShowProfileStatsUpdater
                                 ShowProfileStatsUpdater().run(session)
