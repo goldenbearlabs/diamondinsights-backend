@@ -38,7 +38,11 @@ card_location_association = Table(
 
 class Card(Base):
     __tablename__ = "cards"
-    __table_args__ = (UniqueConstraint("year", "source_uuid", name="uq_cards_year_source_uuid"),)
+    __table_args__ = (
+        UniqueConstraint("year", "source_uuid", name="uq_cards_year_source_uuid"),
+        Index("ix_cards_year_mlb_id", "year", "mlb_id"),
+        Index("ix_cards_year_mlb_id_display_position", "year", "mlb_id", "display_position"),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column()
@@ -411,6 +415,11 @@ class CardAttributeChange(Base):
 
 class Player(Base):
     __tablename__ = "players"
+    __table_args__ = (
+        Index("ix_players_last_name", "last_name"),
+        Index("ix_players_last_name_lower", text("lower(last_name)")),
+        Index("ix_players_last_name_no_dot_lower", text("lower(replace(last_name, '.', ''))")),
+    )
 
     mlb_id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column()
