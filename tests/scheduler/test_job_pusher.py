@@ -29,6 +29,12 @@ class FakeQueue:
         ("game_boxscore_sync", {}, {"reload_all_games": False, "season": 2025}),
         ("game_boxscore_sync", {"reload_all_games": True, "season": 2024}, {"reload_all_games": True, "season": 2024}),
         ("prediction_sync", {}, {}),
+        ("card_position_overall_sync", {}, {}),
+        (
+            "card_position_overall_sync",
+            {"weights_path": "apps/backend/src/ml/true_overall_weights.json"},
+            {"weights_path": "apps/backend/src/ml/true_overall_weights.json"},
+        ),
         ("chat_cleaner", {}, {}),
         ("image_cleaner", {}, {}),
         ("show_profile_stats_updater", {}, {}),
