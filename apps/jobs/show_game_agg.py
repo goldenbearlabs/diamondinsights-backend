@@ -1,11 +1,19 @@
-from typing import Any, Optional
+from __future__ import annotations
+
+from typing import Any, Mapping, Optional
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 import json
 import math
+import os
+from datetime import datetime, timezone
+from io import BytesIO
+from time import perf_counter
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pandas as pd
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
@@ -14,7 +22,13 @@ from shared.db.models import ShowBallParks, ShowProfile, ShowGameSummary
 
 
 RECORDS_KEY = "records/records.parquet"
-RECORDS_LIMIT_PER_COMBO = 1000
+RECORDS_HOME_RUNS_KEY = "records/home_runs.parquet"
+RECORDS_HARDEST_HITS_KEY = "records/hardest_hits.parquet"
+CHECKPOINT_FILENAME = "checkpoint.json"
+BUNDLE_FETCH_WORKERS_DEFAULT = 4
+BUNDLE_FETCH_MAX_IN_FLIGHT_DEFAULT = 8
+
+# Legacy constants kept for compatibility with older unit tests/importers.
 RECORD_FURTHEST_HR = "furthest_homeruns"
 RECORD_FURTHEST_HR_PLUS = "furthest_homeruns_plus"
 RECORD_HARDEST_HIT = "hardest_hit_balls"
@@ -25,65 +39,535 @@ class ShowGameAgg(Job):
         super().__init__()
         self.spaces = SpacesConnector(SpacesConfig.from_env())
 
+    def _game_val(self, game: Mapping[str, Any] | ShowGameSummary, key: str) -> Any:
+        if isinstance(game, Mapping):
+            return game.get(key)
+        return getattr(game, key, None)
+
+    def _env_int(self, name: str, default: int, minimum: int = 1) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return max(minimum, value)
+
     def run(self, db_session: Session) -> None:
+        run_started = perf_counter()
+        bundle_fetch_workers = self._env_int(
+            "SHOW_GAME_AGG_BUNDLE_FETCH_WORKERS",
+            BUNDLE_FETCH_WORKERS_DEFAULT,
+        )
+        bundle_fetch_max_in_flight = self._env_int(
+            "SHOW_GAME_AGG_BUNDLE_FETCH_MAX_IN_FLIGHT",
+            BUNDLE_FETCH_MAX_IN_FLIGHT_DEFAULT,
+        )
+        if bundle_fetch_max_in_flight < bundle_fetch_workers:
+            bundle_fetch_max_in_flight = bundle_fetch_workers
+        self.logger.info(
+            "show game agg config bundle_fetch_workers=%s bundle_fetch_max_in_flight=%s",
+            bundle_fetch_workers,
+            bundle_fetch_max_in_flight,
+        )
+
+        t0 = perf_counter()
         usernames = [u.strip() for u in db_session.scalars(select(ShowProfile.username)) if u and u.strip()]
-        user_agg: dict[str, dict[str, Any]] = {
-            username: {
-                "pas_all": [],
-                "batting_box_agg": {},
-                "pitching_box_agg": {},
-            }
-            for username in usernames
+        load_usernames_s = perf_counter() - t0
+        self.logger.info(
+            "show game agg timing phase=load_usernames elapsed_s=%.3f usernames=%s",
+            load_usernames_s,
+            len(usernames),
+        )
+        if not usernames:
+            return
+
+        load_checkpoints_s = 0.0
+
+        t0 = perf_counter()
+        ballpark_elevation_by_id = self._fetch_ballpark_elevations(db_session)
+        load_ballparks_s = perf_counter() - t0
+        self.logger.info(
+            "show game agg timing phase=load_ballparks elapsed_s=%.3f parks=%s",
+            load_ballparks_s,
+            len(ballpark_elevation_by_id),
+        )
+        users_changed_count = 0
+        total_hr_candidates = 0
+        total_hard_candidates = 0
+        timings: dict[str, float] = {
+            "iterate_games_s": 0.0,
+            "load_bundle_s": 0.0,
+            "build_facts_s": 0.0,
+            "collect_records_s": 0.0,
+            "load_user_state_s": 0.0,
+            "update_user_state_s": 0.0,
+            "write_users_s": 0.0,
+            "write_records_s": 0.0,
+        }
+        counters: dict[str, int] = {
+            "games_scanned": 0,
+            "games_targeted": 0,
+            "target_user_assignments": 0,
+            "pas_rows_total": 0,
+            "batting_rows_total": 0,
+            "pitching_rows_total": 0,
         }
 
-        ballpark_elevation_by_id = self._fetch_ballpark_elevations(db_session)
-        homerun_candidates: list[dict[str, Any]] = []
-        hard_hit_candidates: list[dict[str, Any]] = []
+        for user_idx, username in enumerate(usernames, start=1):
+            user_started = perf_counter()
 
-        for game in self._fetch_all_games(db_session):
-            bundle = self._load_game_bundle(game.id)
-            self._build_facts_for_games(game, bundle)
+            t0 = perf_counter()
+            checkpoint = self._read_checkpoint_game_ids(username)
+            load_checkpoints_s += perf_counter() - t0
 
-            pas = bundle.get("plate_appearances", []) or []
-            batting_box = bundle.get("batting_boxscores", []) or []
-            pitching_box = bundle.get("pitching_boxscores", []) or []
+            user_state: Optional[dict[str, Any]] = None
+            user_changed = False
+            user_hr_candidates: list[dict[str, Any]] = []
+            user_hard_candidates: list[dict[str, Any]] = []
+            user_games_scanned = 0
+            user_games_targeted = 0
 
-            elevation = ballpark_elevation_by_id.get(getattr(game, "ball_park_id", None))
-            self._collect_record_candidates(
-                game=game,
-                pas=pas,
-                elevation=elevation,
-                homerun_candidates=homerun_candidates,
-                hard_hit_candidates=hard_hit_candidates,
+            iter_started = perf_counter()
+            with ThreadPoolExecutor(max_workers=bundle_fetch_workers) as pool:
+                in_flight: dict[Future[tuple[dict[str, Any], float]], tuple[Mapping[str, Any] | ShowGameSummary, str]] = {}
+
+                def process_completed_future(
+                    fut: Future[tuple[dict[str, Any], float]],
+                    game: Mapping[str, Any] | ShowGameSummary,
+                    game_id: str,
+                ) -> None:
+                    nonlocal user_state, user_changed
+
+                    bundle, load_elapsed_s = fut.result()
+                    timings["load_bundle_s"] += load_elapsed_s
+
+                    t0 = perf_counter()
+                    self._build_facts_for_games(game, bundle)
+                    timings["build_facts_s"] += perf_counter() - t0
+
+                    pas = bundle.get("plate_appearances", []) or []
+                    batting_box = bundle.get("batting_boxscores", []) or []
+                    pitching_box = bundle.get("pitching_boxscores", []) or []
+                    counters["pas_rows_total"] += len(pas)
+                    counters["batting_rows_total"] += len(batting_box)
+                    counters["pitching_rows_total"] += len(pitching_box)
+
+                    elevation = ballpark_elevation_by_id.get(self._coerce_int(self._game_val(game, "ball_park_id")))
+                    t0 = perf_counter()
+                    self._collect_record_candidates(
+                        game=game,
+                        pas=pas,
+                        elevation=elevation,
+                        homerun_candidates=user_hr_candidates,
+                        hard_hit_candidates=user_hard_candidates,
+                    )
+                    timings["collect_records_s"] += perf_counter() - t0
+
+                    t_user = perf_counter()
+                    if user_state is None:
+                        t0 = perf_counter()
+                        user_state = self._load_user_state(username)
+                        timings["load_user_state_s"] += perf_counter() - t0
+
+                    user_state["pas_new"].extend(pas)
+                    self._agg_batting(user_state["batting_box_agg"], batting_box)
+                    self._agg_pitching(user_state["pitching_box_agg"], pitching_box)
+
+                    checkpoint.add(game_id)
+                    user_changed = True
+                    timings["update_user_state_s"] += perf_counter() - t_user
+
+                for game in self._fetch_all_games(db_session, [username]):
+                    counters["games_scanned"] += 1
+                    user_games_scanned += 1
+                    if user_games_scanned % 10 == 0:
+                        self.logger.info(
+                            "show game agg progress username=%s user_index=%s/%s user_games_scanned=%s user_games_targeted=%s total_games_scanned=%s in_flight=%s",
+                            username,
+                            user_idx,
+                            len(usernames),
+                            user_games_scanned,
+                            user_games_targeted,
+                            counters["games_scanned"],
+                            len(in_flight),
+                        )
+                    game_id = str(self._game_val(game, "id") or "")
+                    if not game_id or game_id in checkpoint:
+                        continue
+
+                    counters["games_targeted"] += 1
+                    counters["target_user_assignments"] += 1
+                    user_games_targeted += 1
+
+                    fut = pool.submit(self._load_game_bundle_timed, game_id)
+                    in_flight[fut] = (game, game_id)
+
+                    while len(in_flight) >= bundle_fetch_max_in_flight:
+                        done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
+                        for completed in done:
+                            done_game, done_game_id = in_flight.pop(completed)
+                            process_completed_future(completed, done_game, done_game_id)
+
+                for completed in as_completed(list(in_flight.keys())):
+                    done_game, done_game_id = in_flight.pop(completed)
+                    process_completed_future(completed, done_game, done_game_id)
+            timings["iterate_games_s"] += perf_counter() - iter_started
+
+            if user_changed and user_state is not None:
+                write_started = perf_counter()
+                base_prefix = f"facts/{username}"
+                merged_pas = self._merge_pas_rows(user_state["pas_existing"], user_state["pas_new"])
+                self._put_parquet(f"{base_prefix}/pas.parquet", merged_pas)
+                self._put_parquet(
+                    f"{base_prefix}/batting_boxscores.parquet",
+                    list(user_state["batting_box_agg"].values()),
+                )
+                self._put_parquet(
+                    f"{base_prefix}/pitching_boxscores.parquet",
+                    list(user_state["pitching_box_agg"].values()),
+                )
+                self._write_checkpoint_game_ids(username, checkpoint)
+                timings["write_users_s"] += perf_counter() - write_started
+                users_changed_count += 1
+
+            if user_hr_candidates or user_hard_candidates:
+                t0 = perf_counter()
+                self._append_and_write_records(user_hr_candidates, user_hard_candidates)
+                timings["write_records_s"] += perf_counter() - t0
+
+            total_hr_candidates += len(user_hr_candidates)
+            total_hard_candidates += len(user_hard_candidates)
+            self.logger.info(
+                "show game agg user summary username=%s user_index=%s/%s user_changed=%s games_scanned=%s games_targeted=%s hr_candidates=%s hard_candidates=%s elapsed_s=%.3f",
+                username,
+                user_idx,
+                len(usernames),
+                user_changed,
+                user_games_scanned,
+                user_games_targeted,
+                len(user_hr_candidates),
+                len(user_hard_candidates),
+                perf_counter() - user_started,
             )
 
-            game_usernames = [
-                getattr(game, "home_profile_username", None),
-                getattr(game, "away_profile_username", None),
-            ]
-            for username in game_usernames:
-                if not username:
-                    continue
-                user_bucket = user_agg.setdefault(
-                    username,
-                    {
-                        "pas_all": [],
-                        "batting_box_agg": {},
-                        "pitching_box_agg": {},
-                    },
-                )
-                user_bucket["pas_all"].extend(pas)
-                self._agg_batting(user_bucket["batting_box_agg"], batting_box)
-                self._agg_pitching(user_bucket["pitching_box_agg"], pitching_box)
+        total_elapsed_s = perf_counter() - run_started
+        self.logger.info(
+            (
+                "show game agg timing summary total_s=%.3f load_usernames_s=%.3f "
+                "load_checkpoints_s=%.3f load_ballparks_s=%.3f iterate_games_s=%.3f "
+                "load_bundle_s=%.3f build_facts_s=%.3f collect_records_s=%.3f "
+                "load_user_state_s=%.3f update_user_state_s=%.3f write_users_s=%.3f "
+                "write_records_s=%.3f users=%s users_changed=%s games_scanned=%s "
+                "games_targeted=%s target_user_assignments=%s pas_rows_total=%s "
+                "batting_rows_total=%s pitching_rows_total=%s hr_candidates=%s hard_candidates=%s"
+            ),
+            total_elapsed_s,
+            load_usernames_s,
+            load_checkpoints_s,
+            load_ballparks_s,
+            timings["iterate_games_s"],
+            timings["load_bundle_s"],
+            timings["build_facts_s"],
+            timings["collect_records_s"],
+            timings["load_user_state_s"],
+            timings["update_user_state_s"],
+            timings["write_users_s"],
+            timings["write_records_s"],
+            len(usernames),
+            users_changed_count,
+            counters["games_scanned"],
+            counters["games_targeted"],
+            counters["target_user_assignments"],
+            counters["pas_rows_total"],
+            counters["batting_rows_total"],
+            counters["pitching_rows_total"],
+            total_hr_candidates,
+            total_hard_candidates,
+        )
 
-        for username, agg in user_agg.items():
-            base_prefix = f"facts/{username}"
-            self._put_parquet(f"{base_prefix}/pas.parquet", agg["pas_all"])
-            self._put_parquet(f"{base_prefix}/batting_boxscores.parquet", list(agg["batting_box_agg"].values()))
-            self._put_parquet(f"{base_prefix}/pitching_boxscores.parquet", list(agg["pitching_box_agg"].values()))
+    def _append_and_write_records(
+        self,
+        homerun_candidates: list[dict[str, Any]],
+        hard_hit_candidates: list[dict[str, Any]],
+    ) -> None:
+        t0 = perf_counter()
+        existing_hr_rows = self._read_parquet_optional(RECORDS_HOME_RUNS_KEY)
+        existing_hard_rows = self._read_parquet_optional(RECORDS_HARDEST_HITS_KEY)
+        read_existing_s = perf_counter() - t0
 
-        records_rows = self._build_records_rows(homerun_candidates, hard_hit_candidates)
-        self._put_records_parquet(RECORDS_KEY, records_rows)
+        t0 = perf_counter()
+        new_hr_rows = [self._home_run_record_row(row) for row in homerun_candidates]
+        new_hard_rows = [self._hard_hit_record_row(row) for row in hard_hit_candidates]
+
+        merged_hr = self._merge_record_rows(existing_hr_rows, new_hr_rows)
+        merged_hard = self._merge_record_rows(existing_hard_rows, new_hard_rows)
+        merge_rows_s = perf_counter() - t0
+
+        write_hr_s = 0.0
+        if merged_hr:
+            t0 = perf_counter()
+            slope = self._fit_elevation_slope(merged_hr)
+            for row in merged_hr:
+                dist = self._coerce_float(row.get("distance_ft"))
+                elevation = self._coerce_float(row.get("elevation")) or 0.0
+                row["distance_plus_ft"] = None if dist is None else float(dist - (slope * elevation))
+            self._assign_ranks(
+                merged_hr,
+                value_field="distance_ft",
+                global_rank_field="rank",
+                difficulty_rank_field="difficulty_rank",
+            )
+            self._assign_ranks(
+                merged_hr,
+                value_field="distance_plus_ft",
+                global_rank_field="rank_plus",
+                difficulty_rank_field="difficulty_rank_plus",
+            )
+            self._put_records_parquet(
+                RECORDS_HOME_RUNS_KEY,
+                merged_hr,
+                schema=self._home_runs_records_schema(),
+            )
+            write_hr_s = perf_counter() - t0
+
+        write_hard_s = 0.0
+        if merged_hard:
+            t0 = perf_counter()
+            self._assign_ranks(
+                merged_hard,
+                value_field="exit_vel_mph",
+                global_rank_field="rank",
+                difficulty_rank_field="difficulty_rank",
+            )
+            self._put_records_parquet(
+                RECORDS_HARDEST_HITS_KEY,
+                merged_hard,
+                schema=self._hard_hits_records_schema(),
+            )
+            write_hard_s = perf_counter() - t0
+
+        self.logger.info(
+            (
+                "show game agg timing phase=records elapsed_read_existing_s=%.3f "
+                "elapsed_merge_rows_s=%.3f elapsed_write_hr_s=%.3f elapsed_write_hard_s=%.3f "
+                "existing_hr=%s new_hr=%s merged_hr=%s existing_hard=%s new_hard=%s merged_hard=%s"
+            ),
+            read_existing_s,
+            merge_rows_s,
+            write_hr_s,
+            write_hard_s,
+            len(existing_hr_rows),
+            len(new_hr_rows),
+            len(merged_hr),
+            len(existing_hard_rows),
+            len(new_hard_rows),
+            len(merged_hard),
+        )
+
+    def _home_run_record_row(self, source_row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "game_id": source_row.get("game_id"),
+            "event_id": self._coerce_int(source_row.get("event_id")),
+            "date": source_row.get("date"),
+            "difficulty": source_row.get("difficulty"),
+            "home_profile_username": source_row.get("home_profile_username"),
+            "away_profile_username": source_row.get("away_profile_username"),
+            "hitter_username": source_row.get("hitter_username"),
+            "pitcher_username": source_row.get("pitcher_username"),
+            "batter_mlb_id": self._coerce_int(source_row.get("batter_mlb_id")),
+            "pitcher_mlb_id": self._coerce_int(source_row.get("pitcher_mlb_id")),
+            "is_home_batting": source_row.get("is_home_batting"),
+            "elevation": self._coerce_float(source_row.get("elevation")),
+            "distance_ft": self._coerce_float(source_row.get("distance_ft")),
+            "distance_plus_ft": None,
+            "rank": None,
+            "difficulty_rank": None,
+            "rank_plus": None,
+            "difficulty_rank_plus": None,
+        }
+
+    def _hard_hit_record_row(self, source_row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "game_id": source_row.get("game_id"),
+            "event_id": self._coerce_int(source_row.get("event_id")),
+            "date": source_row.get("date"),
+            "difficulty": source_row.get("difficulty"),
+            "home_profile_username": source_row.get("home_profile_username"),
+            "away_profile_username": source_row.get("away_profile_username"),
+            "hitter_username": source_row.get("hitter_username"),
+            "pitcher_username": source_row.get("pitcher_username"),
+            "batter_mlb_id": self._coerce_int(source_row.get("batter_mlb_id")),
+            "pitcher_mlb_id": self._coerce_int(source_row.get("pitcher_mlb_id")),
+            "is_home_batting": source_row.get("is_home_batting"),
+            "exit_vel_mph": self._coerce_float(source_row.get("exit_vel_mph")),
+            "rank": None,
+            "difficulty_rank": None,
+        }
+
+    def _merge_record_rows(
+        self,
+        existing_rows: list[dict[str, Any]],
+        new_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not existing_rows:
+            return [dict(r) for r in new_rows]
+        if not new_rows:
+            return [dict(r) for r in existing_rows]
+
+        existing_df = pd.DataFrame(existing_rows)
+        new_df = pd.DataFrame(new_rows)
+        merged = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+
+        if "game_id" not in merged.columns:
+            merged["game_id"] = ""
+        if "event_id" not in merged.columns:
+            merged["event_id"] = -1
+
+        merged["_game_id"] = merged["game_id"].fillna("").astype(str)
+        merged["_event_id"] = pd.to_numeric(merged["event_id"], errors="coerce").fillna(-1).astype("int64")
+        merged = merged.drop_duplicates(subset=["_game_id", "_event_id"], keep="first")
+        merged = merged.drop(columns=["_game_id", "_event_id"])
+        return merged.to_dict(orient="records")
+
+    def _assign_ranks(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        value_field: str,
+        global_rank_field: str,
+        difficulty_rank_field: str,
+    ) -> None:
+        if not rows:
+            return
+
+        df = pd.DataFrame(rows)
+        if "game_id" not in df.columns:
+            df["game_id"] = ""
+        if "event_id" not in df.columns:
+            df["event_id"] = 0
+        if "difficulty" not in df.columns:
+            df["difficulty"] = ""
+
+        df["_value"] = pd.to_numeric(df.get(value_field), errors="coerce")
+        df["_value"] = df["_value"].fillna(float("-inf"))
+        df["_game_id"] = df["game_id"].fillna("").astype(str)
+        df["_event_id"] = pd.to_numeric(df["event_id"], errors="coerce").fillna(0).astype("int64")
+        df["_difficulty"] = df["difficulty"].fillna("").astype(str)
+
+        sorted_df = df.sort_values(
+            by=["_value", "_game_id", "_event_id"],
+            ascending=[False, True, True],
+            kind="mergesort",
+        )
+        sorted_df[global_rank_field] = pd.Series(range(1, len(sorted_df) + 1), index=sorted_df.index)
+        sorted_df[difficulty_rank_field] = (
+            sorted_df.groupby("_difficulty", sort=False).cumcount().astype("int64") + 1
+        )
+
+        rank_lookup = sorted_df.set_index(["_game_id", "_event_id"])[[global_rank_field, difficulty_rank_field]]
+        df = df.set_index(["_game_id", "_event_id"])
+        df[global_rank_field] = rank_lookup[global_rank_field]
+        df[difficulty_rank_field] = rank_lookup[difficulty_rank_field]
+        df = df.reset_index(drop=True)
+
+        df = df.drop(columns=["_value", "_difficulty"], errors="ignore")
+        rows[:] = df.to_dict(orient="records")
+
+    def _load_user_state(self, username: str) -> dict[str, Any]:
+        base_prefix = f"facts/{username}"
+        existing_pas = self._read_parquet_optional(f"{base_prefix}/pas.parquet")
+        existing_batting_rows = self._read_parquet_optional(f"{base_prefix}/batting_boxscores.parquet")
+        existing_pitching_rows = self._read_parquet_optional(f"{base_prefix}/pitching_boxscores.parquet")
+
+        return {
+            "pas_existing": existing_pas,
+            "pas_new": [],
+            "batting_box_agg": self._index_agg_rows(existing_batting_rows),
+            "pitching_box_agg": self._index_agg_rows(existing_pitching_rows),
+        }
+
+    def _index_agg_rows(self, rows: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+        out: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            player_id = self._coerce_int(row.get("mlb_id"))
+            if player_id is None:
+                continue
+            out[player_id] = dict(row)
+        return out
+
+    def _merge_pas_rows(
+        self,
+        existing_rows: list[dict[str, Any]],
+        new_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not new_rows:
+            return existing_rows
+        if not existing_rows:
+            return [dict(r) for r in new_rows]
+
+        existing_df = pd.DataFrame(existing_rows)
+        new_df = pd.DataFrame(new_rows)
+        merged = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+
+        for col, default in (
+            ("game_id", ""),
+            ("event_seq", -1),
+            ("batter_mlb_id", -1),
+            ("pitcher_mlb_id", -1),
+            ("result", ""),
+        ):
+            if col not in merged.columns:
+                merged[col] = default
+
+        merged["_game_id"] = merged["game_id"].fillna("").astype(str)
+        merged["_event_seq"] = pd.to_numeric(merged["event_seq"], errors="coerce").fillna(-1).astype("int64")
+        merged["_batter_mlb_id"] = (
+            pd.to_numeric(merged["batter_mlb_id"], errors="coerce").fillna(-1).astype("int64")
+        )
+        merged["_pitcher_mlb_id"] = (
+            pd.to_numeric(merged["pitcher_mlb_id"], errors="coerce").fillna(-1).astype("int64")
+        )
+        merged["_result"] = merged["result"].fillna("").astype(str)
+
+        merged = merged.drop_duplicates(
+            subset=["_game_id", "_event_seq", "_batter_mlb_id", "_pitcher_mlb_id", "_result"],
+            keep="first",
+        )
+        merged = merged.drop(
+            columns=["_game_id", "_event_seq", "_batter_mlb_id", "_pitcher_mlb_id", "_result"],
+            errors="ignore",
+        )
+        return merged.to_dict(orient="records")
+
+    def _checkpoint_key(self, username: str) -> str:
+        return f"facts/{username}/{CHECKPOINT_FILENAME}"
+
+    def _read_checkpoint_game_ids(self, username: str) -> set[str]:
+        key = self._checkpoint_key(username)
+        try:
+            payload = self.spaces.get_json(key)
+        except Exception:
+            return set()
+        if not isinstance(payload, dict):
+            return set()
+        game_ids = payload.get("aggregated_game_ids")
+        if not isinstance(game_ids, list):
+            return set()
+        return {str(gid).strip() for gid in game_ids if str(gid).strip()}
+
+    def _write_checkpoint_game_ids(self, username: str, game_ids: set[str]) -> None:
+        payload = {
+            "version": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "aggregated_game_ids": sorted(game_ids),
+        }
+        self.spaces.put_json(
+            key=self._checkpoint_key(username),
+            obj=payload,
+            cache_control="no-cache",
+        )
 
     def _put_parquet(self, key: str, rows: list[dict[str, Any]]) -> None:
         data = self._parquet_bytes(rows)
@@ -94,14 +578,37 @@ class ShowGameAgg(Job):
             cache_control="no-cache",
         )
 
-    def _put_records_parquet(self, key: str, rows: list[dict[str, Any]]) -> None:
-        data = self._parquet_bytes(rows, schema=self._records_schema())
+    def _put_records_parquet(
+        self,
+        key: str,
+        rows: list[dict[str, Any]],
+        schema: Optional[pa.Schema] = None,
+    ) -> None:
+        normalized_rows = self._normalize_rows_for_schema(rows, schema) if schema is not None else rows
+        data = self._parquet_bytes(normalized_rows, schema=schema)
         self.spaces.put_bytes(
             key=key,
             data=data,
             content_type="application/octet-stream",
             cache_control="no-cache",
         )
+
+    def _normalize_rows_for_schema(self, rows: list[dict[str, Any]], schema: pa.Schema) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            normalized = dict(row)
+            for field in schema:
+                value = normalized.get(field.name)
+                if pa.types.is_integer(field.type):
+                    normalized[field.name] = self._coerce_int(value)
+                elif pa.types.is_floating(field.type):
+                    normalized[field.name] = self._coerce_float(value)
+                elif pa.types.is_boolean(field.type):
+                    normalized[field.name] = value if isinstance(value, bool) else None
+                elif pa.types.is_string(field.type):
+                    normalized[field.name] = None if value is None else str(value)
+            out.append(normalized)
+        return out
 
     def _parquet_bytes(self, rows: list[dict[str, Any]], schema: Optional[pa.Schema] = None) -> bytes:
         if schema is None:
@@ -112,23 +619,64 @@ class ShowGameAgg(Job):
         pq.write_table(table, sink, compression="zstd")
         return sink.getvalue().to_pybytes()
 
-    def _records_schema(self) -> pa.Schema:
+    def _read_parquet_optional(self, key: str) -> list[dict[str, Any]]:
+        try:
+            raw = self.spaces.get_bytes(key)
+        except Exception:
+            return []
+        if not raw:
+            return []
+        try:
+            table = pq.read_table(BytesIO(raw))
+            return table.to_pylist()
+        except Exception:
+            return []
+
+    def _home_runs_records_schema(self) -> pa.Schema:
         return pa.schema(
             [
                 pa.field("game_id", pa.string()),
                 pa.field("event_id", pa.int64()),
-                pa.field("record", pa.string()),
-                pa.field("record_rank", pa.int32()),
-                pa.field("value", pa.float64()),
-                pa.field("batter_mlb_id", pa.int64()),
-                pa.field("pitcher_mlb_id", pa.int64()),
+                pa.field("date", pa.string()),
+                pa.field("difficulty", pa.string()),
+                pa.field("home_profile_username", pa.string()),
+                pa.field("away_profile_username", pa.string()),
                 pa.field("hitter_username", pa.string()),
                 pa.field("pitcher_username", pa.string()),
-                pa.field("difficulty", pa.string()),
+                pa.field("batter_mlb_id", pa.int64()),
+                pa.field("pitcher_mlb_id", pa.int64()),
+                pa.field("is_home_batting", pa.bool_()),
+                pa.field("elevation", pa.float64()),
+                pa.field("distance_ft", pa.float64()),
+                pa.field("distance_plus_ft", pa.float64()),
+                pa.field("rank", pa.int64()),
+                pa.field("difficulty_rank", pa.int64()),
+                pa.field("rank_plus", pa.int64()),
+                pa.field("difficulty_rank_plus", pa.int64()),
             ]
         )
 
-    def _build_facts_for_games(self, game: ShowGameSummary, bundle: dict[str, Any]) -> None:
+    def _hard_hits_records_schema(self) -> pa.Schema:
+        return pa.schema(
+            [
+                pa.field("game_id", pa.string()),
+                pa.field("event_id", pa.int64()),
+                pa.field("date", pa.string()),
+                pa.field("difficulty", pa.string()),
+                pa.field("home_profile_username", pa.string()),
+                pa.field("away_profile_username", pa.string()),
+                pa.field("hitter_username", pa.string()),
+                pa.field("pitcher_username", pa.string()),
+                pa.field("batter_mlb_id", pa.int64()),
+                pa.field("pitcher_mlb_id", pa.int64()),
+                pa.field("is_home_batting", pa.bool_()),
+                pa.field("exit_vel_mph", pa.float64()),
+                pa.field("rank", pa.int64()),
+                pa.field("difficulty_rank", pa.int64()),
+            ]
+        )
+
+    def _build_facts_for_games(self, game: Mapping[str, Any] | ShowGameSummary, bundle: dict[str, Any]) -> None:
         pas: list[dict[str, Any]] = bundle.get("plate_appearances", []) or []
         evts: list[dict[str, Any]] = bundle.get("events", []) or []
 
@@ -139,15 +687,15 @@ class ShowGameAgg(Job):
                 evt_by_seq[seq] = e
 
         shared = {
-            "ballpark_id": getattr(game, "ball_park_id", None),
-            "weather_degrees": getattr(game, "weather_degrees", None),
-            "weather_desc": getattr(game, "weather_description", None),
-            "difficulty_id": getattr(game, "difficulty", None),
-            "date": getattr(game, "date", None),
-            "home_profile_username": getattr(game, "home_profile_username", None),
-            "away_profile_username": getattr(game, "away_profile_username", None),
-            "home_team_id": getattr(game, "home_name", None),
-            "away_team_id": getattr(game, "away_name", None),
+            "ballpark_id": self._game_val(game, "ball_park_id"),
+            "weather_degrees": self._game_val(game, "weather_degrees"),
+            "weather_desc": self._game_val(game, "weather_description"),
+            "difficulty_id": self._game_val(game, "difficulty"),
+            "date": self._game_val(game, "date"),
+            "home_profile_username": self._game_val(game, "home_profile_username"),
+            "away_profile_username": self._game_val(game, "away_profile_username"),
+            "home_team_id": self._game_val(game, "home_name"),
+            "away_team_id": self._game_val(game, "away_name"),
         }
 
         for pa_row in pas:
@@ -312,35 +860,41 @@ class ShowGameAgg(Job):
 
     def _collect_record_candidates(
         self,
-        game: ShowGameSummary,
+        game: Mapping[str, Any] | ShowGameSummary,
         pas: list[dict[str, Any]],
         elevation: Optional[int],
         homerun_candidates: list[dict[str, Any]],
         hard_hit_candidates: list[dict[str, Any]],
     ) -> None:
-        game_id = str(getattr(game, "id", "") or "")
+        game_id = str(self._game_val(game, "id") or "")
         if not game_id:
             return
 
         elevation_value = self._coerce_float(elevation)
-        difficulty = getattr(game, "difficulty", None)
+        difficulty = self._game_val(game, "difficulty")
+        date_value = self._format_date(self._game_val(game, "date"))
+        home_username = self._game_val(game, "home_profile_username")
+        away_username = self._game_val(game, "away_profile_username")
 
         for pa_row in pas:
             event_id = self._coerce_int(pa_row.get("event_seq"))
             if event_id is None:
                 continue
 
-            hitter_username, pitcher_username = self._resolve_hitter_pitcher_usernames(
-                game, pa_row.get("is_home_batting")
-            )
+            is_home_batting = pa_row.get("is_home_batting")
+            hitter_username, pitcher_username = self._resolve_hitter_pitcher_usernames(game, is_home_batting)
             common_row = {
                 "game_id": game_id,
                 "event_id": event_id,
+                "date": date_value,
+                "difficulty": difficulty,
+                "home_profile_username": home_username,
+                "away_profile_username": away_username,
                 "batter_mlb_id": self._coerce_int(pa_row.get("batter_mlb_id")),
                 "pitcher_mlb_id": self._coerce_int(pa_row.get("pitcher_mlb_id")),
                 "hitter_username": hitter_username,
                 "pitcher_username": pitcher_username,
-                "difficulty": difficulty,
+                "is_home_batting": is_home_batting,
             }
 
             hr_distance = self._coerce_float(pa_row.get("hr_distance_ft"))
@@ -348,7 +902,7 @@ class ShowGameAgg(Job):
                 homerun_candidates.append(
                     {
                         **common_row,
-                        "value": hr_distance,
+                        "distance_ft": hr_distance,
                         "elevation": elevation_value,
                     }
                 )
@@ -358,93 +912,37 @@ class ShowGameAgg(Job):
                 hard_hit_candidates.append(
                     {
                         **common_row,
-                        "value": exit_vel,
+                        "exit_vel_mph": exit_vel,
                     }
                 )
 
+    def _format_date(self, dt: Any) -> Optional[str]:
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+            return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return str(dt)
+
     def _resolve_hitter_pitcher_usernames(
-        self, game: ShowGameSummary, is_home_batting: Any
+        self, game: Mapping[str, Any] | ShowGameSummary, is_home_batting: Any
     ) -> tuple[Optional[str], Optional[str]]:
-        home_username = getattr(game, "home_profile_username", None)
-        away_username = getattr(game, "away_profile_username", None)
+        home_username = self._game_val(game, "home_profile_username")
+        away_username = self._game_val(game, "away_profile_username")
         if is_home_batting is True:
             return home_username, away_username
         if is_home_batting is False:
             return away_username, home_username
         return None, None
 
-    def _build_records_rows(
-        self,
-        homerun_candidates: list[dict[str, Any]],
-        hard_hit_candidates: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        slope = self._fit_elevation_slope(homerun_candidates)
-        records: list[dict[str, Any]] = []
-
-        for row in homerun_candidates:
-            records.append(self._record_row(RECORD_FURTHEST_HR, row, row["value"]))
-
-            elevation = row.get("elevation")
-            elevation_num = elevation if isinstance(elevation, (int, float)) else 0.0
-            adjusted_value = row["value"] - (slope * float(elevation_num))
-            records.append(self._record_row(RECORD_FURTHEST_HR_PLUS, row, adjusted_value))
-
-        for row in hard_hit_candidates:
-            records.append(self._record_row(RECORD_HARDEST_HIT, row, row["value"]))
-
-        return self._rank_and_limit_records(records, RECORDS_LIMIT_PER_COMBO)
-
-    def _record_row(self, record_name: str, source_row: dict[str, Any], value: float) -> dict[str, Any]:
-        return {
-            "game_id": source_row["game_id"],
-            "event_id": source_row["event_id"],
-            "record": record_name,
-            "value": float(value),
-            "batter_mlb_id": source_row.get("batter_mlb_id"),
-            "pitcher_mlb_id": source_row.get("pitcher_mlb_id"),
-            "hitter_username": source_row.get("hitter_username"),
-            "pitcher_username": source_row.get("pitcher_username"),
-            "difficulty": source_row.get("difficulty"),
-        }
-
-    def _rank_and_limit_records(self, rows: list[dict[str, Any]], limit_per_combo: int) -> list[dict[str, Any]]:
-        grouped: dict[tuple[str, Optional[str]], list[dict[str, Any]]] = {}
-        for row in rows:
-            key = (str(row["record"]), row.get("difficulty"))
-            grouped.setdefault(key, []).append(row)
-
-        ranked_rows: list[dict[str, Any]] = []
-        for key in sorted(grouped.keys(), key=lambda x: (x[0], "" if x[1] is None else str(x[1]))):
-            ranked = sorted(grouped[key], key=self._record_sort_key)
-            for rank, row in enumerate(ranked[:limit_per_combo], start=1):
-                ranked_rows.append(
-                    {
-                        "game_id": row["game_id"],
-                        "event_id": row["event_id"],
-                        "record": row["record"],
-                        "record_rank": rank,
-                        "value": row["value"],
-                        "batter_mlb_id": row.get("batter_mlb_id"),
-                        "pitcher_mlb_id": row.get("pitcher_mlb_id"),
-                        "hitter_username": row.get("hitter_username"),
-                        "pitcher_username": row.get("pitcher_username"),
-                        "difficulty": row.get("difficulty"),
-                    }
-                )
-        return ranked_rows
-
-    def _record_sort_key(self, row: dict[str, Any]) -> tuple[float, str, int]:
-        game_id = str(row.get("game_id") or "")
-        event_id = self._coerce_int(row.get("event_id")) or 0
-        return (-float(row["value"]), game_id, event_id)
-
-    def _fit_elevation_slope(self, homerun_candidates: list[dict[str, Any]]) -> float:
+    def _fit_elevation_slope(self, homerun_rows: list[dict[str, Any]]) -> float:
         points: list[tuple[float, float]] = []
-        for row in homerun_candidates:
+        for row in homerun_rows:
             elevation = row.get("elevation")
             if not isinstance(elevation, (int, float)):
                 continue
-            value = self._coerce_float(row.get("value"))
+            value = self._coerce_float(row.get("distance_ft"))
             if value is None:
                 continue
             if not math.isfinite(float(elevation)) or not math.isfinite(value):
@@ -505,6 +1003,10 @@ class ShowGameAgg(Job):
             "pitching_boxscores": self._read_jsonl_optional(self._key(game_id, "pitcher_boxscores.jsonl")),
         }
 
+    def _load_game_bundle_timed(self, game_id: str) -> tuple[dict[str, Any], float]:
+        started = perf_counter()
+        return self._load_game_bundle(game_id), perf_counter() - started
+
     def _key(self, game_id: str, filename: str) -> str:
         return f"games/{game_id}/{filename}"
 
@@ -521,6 +1023,25 @@ class ShowGameAgg(Job):
                 out.append(json.loads(line))
         return out
 
-    def _fetch_all_games(self, db_session: Session):
-        stmt = select(ShowGameSummary).execution_options(yield_per=1000)
-        return db_session.scalars(stmt)
+    def _fetch_all_games(self, db_session: Session, usernames: list[str]):
+        username_filter = or_(
+            ShowGameSummary.home_profile_username.in_(usernames),
+            ShowGameSummary.away_profile_username.in_(usernames),
+        )
+        stmt = (
+            select(
+                ShowGameSummary.id,
+                ShowGameSummary.ball_park_id,
+                ShowGameSummary.weather_degrees,
+                ShowGameSummary.weather_description,
+                ShowGameSummary.difficulty,
+                ShowGameSummary.date,
+                ShowGameSummary.home_profile_username,
+                ShowGameSummary.away_profile_username,
+                ShowGameSummary.home_name,
+                ShowGameSummary.away_name,
+            )
+            .where(username_filter)
+            .execution_options(yield_per=1000, stream_results=True)
+        )
+        return db_session.execute(stmt).mappings()
