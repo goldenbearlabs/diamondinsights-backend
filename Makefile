@@ -4,7 +4,7 @@
 	server-up server-down server-ps server-logs \
 	monitoring-up monitoring-down monitoring-ps monitoring-logs \
 	card_sync card_sync_above card_sync_below card_synce_below \
-	game_boxscore_sync market_candle_sync market_price_sync market_sync player_sync roster_update_sync prediction_sync \
+	game_boxscore_sync market_candle_sync market_price_sync market_sync player_sync roster_update_sync prediction_sync card_position_overall_sync \
 	show_profile_stats_updater show_game_refresh show_game_agg
 
 ENV_FILE ?= .env
@@ -23,7 +23,7 @@ help:
 	@printf "  make up|down|ps|logs|logs-backend|build\n"
 	@printf "  make migrate | revision REV_MSG='desc'\n"
 	@printf "  make run-job JOB_MODULE=apps.jobs.card_sync JOB_CLASS=CardSync [JOB_ARGS='reload_all_years=True']\n"
-	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|show_profile_stats_updater|show_game_refresh|show_game_agg\n"
+	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|card_position_overall_sync|show_profile_stats_updater|show_game_refresh|show_game_agg\n"
 	@printf "  make runner-up|runner-down|runner-ps|runner-logs\n"
 	@printf "  make server-up|server-down|server-ps|server-logs\n"
 	@printf "  make monitoring-up|monitoring-down|monitoring-ps|monitoring-logs\n"
@@ -114,6 +114,10 @@ prediction_sync: JOB_MODULE=apps.jobs.prediction_sync
 prediction_sync: JOB_CLASS=PredictionSync
 prediction_sync: run-job
 
+card_position_overall_sync: JOB_MODULE=apps.jobs.card_position_overall_sync
+card_position_overall_sync: JOB_CLASS=CardPositionOverallSync
+card_position_overall_sync: run-job
+
 show_profile_stats_updater: JOB_MODULE=apps.jobs.show_profile_refresh
 show_profile_stats_updater: JOB_CLASS=ShowProfileStatsUpdater
 show_profile_stats_updater: run-job
@@ -178,4 +182,3 @@ monitoring-ps:
 
 monitoring-logs:
 	$(COMPOSE_MONITORING) logs -f
-

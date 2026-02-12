@@ -12,6 +12,7 @@ COPY requirements/base.txt /tmp/base.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY apps/jobs /app/apps/jobs
+COPY apps/backend/src/ml/true_overall_weights.json /app/apps/backend/src/ml/true_overall_weights.json
 COPY shared /app/shared
 
 ENV PYTHONPATH=/app/shared:/app/apps/jobs

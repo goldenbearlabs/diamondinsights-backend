@@ -1,4 +1,5 @@
 import types
+from types import SimpleNamespace
 
 import apps.jobs.card_sync as card_sync
 from shared.db.models import Series, Quirk, Location
@@ -170,6 +171,73 @@ def test_upsert_cards_chunks_and_executes(monkeypatch):
     assert stmt2["set_"] == {"name": "excluded.name"}
 
 
+def test_upsert_card_quirks_replaces_links_and_inserts_rows(monkeypatch):
+    class DummyAssocCols:
+        card_id = "card_id_col"
+
+    class DummyAssoc:
+        c = DummyAssocCols()
+
+    class DummyDeleteWhere:
+        def __init__(self, condition):
+            self.condition = condition
+
+    class DummyDelete:
+        def where(self, condition):
+            return DummyDeleteWhere(condition)
+
+    class DummyCardIdCol:
+        def in_(self, card_ids):
+            return ("in", tuple(card_ids))
+
+    class FakeInsertStmt:
+        def __init__(self):
+            self.rows = None
+
+        def values(self, rows):
+            self.rows = rows
+            return self
+
+        def on_conflict_do_nothing(self, index_elements=None):
+            return {
+                "rows": self.rows,
+                "index_elements": index_elements,
+            }
+
+    monkeypatch.setattr(card_sync, "card_quirk_association", DummyAssoc())
+    monkeypatch.setattr(card_sync.card_quirk_association, "c", SimpleNamespace(card_id=DummyCardIdCol()))
+    monkeypatch.setattr(card_sync, "delete", lambda table: DummyDelete())
+    monkeypatch.setattr(card_sync, "insert", lambda table: FakeInsertStmt())
+    monkeypatch.setattr(card_sync, "text", lambda sql: f"SQL:{sql}")
+
+    session = FakeSessionExec()
+    sync = card_sync.CardSync()
+
+    q1 = SimpleNamespace(name="Q1")
+    q2 = SimpleNamespace(name="Q2")
+    cards = [
+        SimpleNamespace(id="c1", quirks=[q1, q1, q2]),
+        SimpleNamespace(id="c2", quirks=[]),
+        SimpleNamespace(id="c3", quirks=[SimpleNamespace(name="")]),
+    ]
+
+    sync._upsert_card_quirks(session, cards, chunk_size=2)
+
+    assert session.commits == 2
+    assert len(session.exec_calls) == 5
+    assert session.exec_calls[0] == "SQL:SET LOCAL synchronous_commit TO OFF"
+    assert isinstance(session.exec_calls[1], DummyDeleteWhere)
+    assert session.exec_calls[1].condition == ("in", ("c1", "c2"))
+    assert session.exec_calls[2]["rows"] == [
+        {"card_id": "c1", "quirk_name": "Q1"},
+        {"card_id": "c1", "quirk_name": "Q2"},
+    ]
+    assert session.exec_calls[2]["index_elements"] == ["card_id", "quirk_name"]
+    assert session.exec_calls[3] == "SQL:SET LOCAL synchronous_commit TO OFF"
+    assert isinstance(session.exec_calls[4], DummyDeleteWhere)
+    assert session.exec_calls[4].condition == ("in", ("c3",))
+
+
 def test_card_sync_run_flow_dedupes_and_calls_components(monkeypatch):
     calls = []
     received = {}
@@ -212,6 +280,14 @@ def test_card_sync_run_flow_dedupes_and_calls_components(monkeypatch):
         received["upsert_cards"] = cards
         received["chunk_size"] = chunk_size
 
+    def fake_upsert_card_quirks(self, session, cards, chunk_size=5000):
+        received["upsert_card_quirks"] = cards
+        received["quirk_chunk_size"] = chunk_size
+
+    def fake_upsert_pitches(self, session, cards, chunk_size=5000):
+        received["upsert_pitches"] = cards
+        received["pitch_chunk_size"] = chunk_size
+
     monkeypatch.setattr(card_sync, "THE_SHOW_YEARS", [2024, 2025])
     monkeypatch.setattr(card_sync.CardSync, "_fetch_paginated_data", fake_fetch)
     monkeypatch.setattr(card_sync.CardSync, "_sync_series", fake_sync_series)
@@ -219,6 +295,8 @@ def test_card_sync_run_flow_dedupes_and_calls_components(monkeypatch):
     monkeypatch.setattr(card_sync.CardSync, "_sync_locations", fake_sync_locations)
     monkeypatch.setattr(card_sync, "CardAdapter", FakeAdapter)
     monkeypatch.setattr(card_sync.CardSync, "_upsert_cards", fake_upsert)
+    monkeypatch.setattr(card_sync.CardSync, "_upsert_card_quirks", fake_upsert_card_quirks)
+    monkeypatch.setattr(card_sync.CardSync, "_upsert_pitches", fake_upsert_pitches)
 
     sync = card_sync.CardSync(reload_all_years=True)
     sync.run(db_session=object())
@@ -236,6 +314,10 @@ def test_card_sync_run_flow_dedupes_and_calls_components(monkeypatch):
     assert received["adapter_items"] == all_items
     assert received["upsert_cards"] == ["card-1", "card-2"]
     assert received["chunk_size"] == 5000
+    assert received["upsert_card_quirks"] == ["card-1", "card-2"]
+    assert received["quirk_chunk_size"] == 5000
+    assert received["upsert_pitches"] == ["card-1", "card-2"]
+    assert received["pitch_chunk_size"] == 5000
 
 
 def test_card_sync_run_respects_reload_all_years(monkeypatch):
@@ -252,6 +334,8 @@ def test_card_sync_run_respects_reload_all_years(monkeypatch):
     monkeypatch.setattr(card_sync.CardSync, "_sync_locations", lambda self, session, items: {})
     monkeypatch.setattr(card_sync, "CardAdapter", lambda series_map, quirk_map, location_map: types.SimpleNamespace(run=lambda items: []))
     monkeypatch.setattr(card_sync.CardSync, "_upsert_cards", lambda self, session, cards, chunk_size=5000: None)
+    monkeypatch.setattr(card_sync.CardSync, "_upsert_card_quirks", lambda self, session, cards, chunk_size=5000: None)
+    monkeypatch.setattr(card_sync.CardSync, "_upsert_pitches", lambda self, session, cards, chunk_size=5000: None)
 
     sync = card_sync.CardSync(reload_all_years=False)
     sync.run(db_session=object())

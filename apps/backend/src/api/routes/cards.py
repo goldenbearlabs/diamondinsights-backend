@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from shared.db.database import get_db
 from shared.db.models import Card
 from src.schemas.card import CardResponse
@@ -20,7 +20,12 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
     
     """
     
-    card = db.get(Card, card_id)
+    card = (
+        db.query(Card)
+        .options(selectinload(Card.position_overalls))
+        .filter(Card.id == card_id)
+        .first()
+    )
     
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -46,7 +51,7 @@ def get_cards(
     These queries don't join with any other tables.
     """
 
-    query = db.query(Card)
+    query = db.query(Card).options(selectinload(Card.position_overalls))
 
     # filtering
     if is_hitter is not None:

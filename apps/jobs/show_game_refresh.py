@@ -2,6 +2,8 @@
 import os
 import re
 import unicodedata
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Optional, Set, Tuple, List, Dict, Any, Mapping
 from dataclasses import dataclass, field
@@ -280,6 +282,45 @@ class ShowGameRefresh(Job):
     def __init__(self):
         super().__init__()
         self.spaces = SpacesConnector(SpacesConfig.from_env())
+        self._upload_workers = max(1, int(os.getenv("SHOW_GAME_UPLOAD_WORKERS", "4")))
+        self._resolver_cache_max = max(1000, int(os.getenv("SHOW_GAME_RESOLVER_CACHE_MAX", "20000")))
+        self._resolver_cache_clear_every_games = max(
+            1,
+            int(os.getenv("SHOW_GAME_RESOLVER_CACHE_CLEAR_EVERY_GAMES", "50")),
+        )
+        self._games_since_cache_clear = 0
+        self._batter_id_cache: OrderedDict[tuple[str, Optional[str], int], Optional[int]] = OrderedDict()
+        self._pitcher_id_cache: OrderedDict[tuple[tuple[str, ...], int], Optional[int]] = OrderedDict()
+        self._player_hand_cache: dict[int, tuple[Optional[str], Optional[str]]] = {}
+
+    def _cache_get(self, cache: OrderedDict, key: tuple) -> tuple[bool, Optional[int]]:
+        if key not in cache:
+            return False, None
+        value = cache.pop(key)
+        cache[key] = value
+        return True, value
+
+    def _cache_put(self, cache: OrderedDict, key: tuple, value: Optional[int]) -> None:
+        if key in cache:
+            cache.pop(key)
+        cache[key] = value
+        while len(cache) > self._resolver_cache_max:
+            cache.popitem(last=False)
+
+    def _clear_resolver_caches(self) -> None:
+        self._batter_id_cache.clear()
+        self._pitcher_id_cache.clear()
+        self._player_hand_cache.clear()
+        self._games_since_cache_clear = 0
+
+    def _register_processed_game(self) -> None:
+        self._games_since_cache_clear += 1
+        if self._games_since_cache_clear >= self._resolver_cache_clear_every_games:
+            self.logger.debug(
+                "show game refresh clearing resolver caches games_since_clear=%s",
+                self._games_since_cache_clear,
+            )
+            self._clear_resolver_caches()
 
     def run(self, db_session: Session):
         usernames = [u for u in db_session.scalars(select(ShowProfile.username)) if u]
@@ -308,6 +349,7 @@ class ShowGameRefresh(Job):
                 files = self._process_game(db_session, username, game)
                 if files is None:
                     db_session.rollback()
+                    self._register_processed_game()
                     continue
 
                 try:
@@ -321,6 +363,10 @@ class ShowGameRefresh(Job):
                         e,
                     )
                     self._cleanup_game_files(files)
+                finally:
+                    self._register_processed_game()
+
+        self._clear_resolver_caches()
 
     def _fetch_unprocessed_games(self, db_session: Session, username: str) -> List[GameHistory]:
         '''
@@ -338,15 +384,9 @@ class ShowGameRefresh(Job):
             t = str(s).strip()
             t = re.sub(r"\s*\^b\d+\^\s*$", "", t).strip()
             return t.upper() == "CPU"
-        
-        existing_games = self._existing_game_ids(db_session, username)
-        self.logger.debug(
-            "show game refresh existing games username=%s count=%s",
-            username,
-            len(existing_games),
-        )
 
-        api_games = self._fetch_game_history(username)
+        latest_processed_game_id = self._latest_processed_game_id(db_session, username)
+        api_games = self._fetch_game_history(username, stop_at_game_id=latest_processed_game_id)
         if not api_games:
             self.logger.info("show game refresh no api games username=%s", username)
             return []
@@ -362,17 +402,47 @@ class ShowGameRefresh(Job):
         ]
         cpu_filtered = before - len(api_games)
 
+        api_game_ids = [g.id for g in api_games if g.id]
+        existing_games = self._existing_game_ids(db_session, username, candidate_ids=api_game_ids)
+        self.logger.debug(
+            "show game refresh existing games username=%s count=%s latest_processed=%s fetched=%s",
+            username,
+            len(existing_games),
+            latest_processed_game_id,
+            len(api_game_ids),
+        )
+
         remaining = [g for g in api_games if g.id not in existing_games]
         self.logger.info(
-            "show game refresh api_games username=%s total=%s cpu_filtered=%s unprocessed=%s",
+            "show game refresh api_games username=%s total=%s cpu_filtered=%s unprocessed=%s latest_processed=%s",
             username,
             len(api_games) + cpu_filtered,
             cpu_filtered,
             len(remaining),
+            latest_processed_game_id,
         )
         return remaining
 
-    def _existing_game_ids(self, db_session: Session, username: str) -> Set[str]:
+    def _latest_processed_game_id(self, db_session: Session, username: str) -> Optional[str]:
+        stmt = (
+            select(ShowGameSummary.id)
+            .where(
+                or_(
+                    ShowGameSummary.home_profile_username == username,
+                    ShowGameSummary.away_profile_username == username,
+                )
+            )
+            .order_by(ShowGameSummary.date.desc(), ShowGameSummary.id.desc())
+            .limit(1)
+        )
+        return db_session.scalars(stmt).first()
+
+    def _existing_game_ids(
+        self,
+        db_session: Session,
+        username: str,
+        candidate_ids: Optional[List[str]] = None,
+    ) -> Set[str]:
         '''
             Gets all exiting game ids in the db for the given username
             params:
@@ -387,11 +457,19 @@ class ShowGameRefresh(Job):
                 ShowGameSummary.away_profile_username == username,
             )
         )
+        if candidate_ids is not None:
+            if not candidate_ids:
+                return set()
+            stmt = stmt.where(ShowGameSummary.id.in_(candidate_ids))
         existing = {gid for gid in db_session.scalars(stmt) if gid}
         self.logger.debug("show game refresh existing ids username=%s count=%s", username, len(existing))
         return existing
 
-    def _fetch_game_history(self, username: str) -> None | List[GameHistory]:
+    def _fetch_game_history(
+        self,
+        username: str,
+        stop_at_game_id: Optional[str] = None,
+    ) -> None | List[GameHistory]:
         '''
             Gets all game_history objects from the mlb the show api
             params:
@@ -399,15 +477,47 @@ class ShowGameRefresh(Job):
             returns:
                 the list of game_history objects from the mlb the show api or None if no results from api
         '''
-        params = {"username": username, "platform": "xbox"}
+        params = {"username": username, "platform": "xbox", "page": 1}
         self.logger.debug("show game refresh fetch game history username=%s", username)
-        game_objs = self._fetch_paginated_data(GAME_HISTORY_URL, params, items_key="game_history")
+        res = self._api_client.get(GAME_HISTORY_URL, params)
+        max_pages = self._json_get(res, "total_pages", default=0) or 0
+        if max_pages <= 0 and (self._json_get(res, "game_history", default=[]) or []):
+            max_pages = 1
+        page = 1
+        game_objs: list[dict[str, Any]] = []
+        stop_hit = False
+
+        while page <= max_pages:
+            items = self._json_get(res, "game_history", default=[]) or []
+            for obj in items:
+                gid = str(obj.get("id", "")).strip()
+                if stop_at_game_id and gid == stop_at_game_id:
+                    stop_hit = True
+                    break
+                game_objs.append(obj)
+
+            if stop_hit:
+                break
+
+            page += 1
+            if page > max_pages:
+                break
+
+            params["page"] = page
+            res = self._api_client.get(GAME_HISTORY_URL, params)
+
         if not game_objs:
             self.logger.info("show game refresh game history empty username=%s", username)
             return []
         
         games = [GameHistory.from_json(o) for o in game_objs]
-        self.logger.info("show game refresh game history fetched username=%s count=%s", username, len(games))
+        self.logger.info(
+            "show game refresh game history fetched username=%s count=%s stop_at_game_id=%s stop_hit=%s",
+            username,
+            len(games),
+            stop_at_game_id,
+            stop_hit,
+        )
         return games
     
     def _fetch_game_log(self, username: str, game_id: str) -> Optional[GameLog]:
@@ -562,16 +672,50 @@ class ShowGameRefresh(Job):
         )
 
         try:
-            for name, filename, validator in datasets:
-                result = write_game_dataset_jsonl(
-                    spaces=self.spaces,
-                    game_id=game_id,
-                    filename=filename,
-                    rows=rows_by_name.get(name, []),
-                    validator=validator,
-                )
-                if result is not None:
-                    files[name] = result
+            if self._upload_workers <= 1:
+                for name, filename, validator in datasets:
+                    result = write_game_dataset_jsonl(
+                        spaces=self.spaces,
+                        game_id=game_id,
+                        filename=filename,
+                        rows=rows_by_name.get(name, []),
+                        validator=validator,
+                    )
+                    if result is not None:
+                        files[name] = result
+            else:
+                max_workers = min(self._upload_workers, len(datasets))
+                failures: list[tuple[str, Exception]] = []
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    future_by_name = {
+                        pool.submit(
+                            write_game_dataset_jsonl,
+                            spaces=self.spaces,
+                            game_id=game_id,
+                            filename=filename,
+                            rows=rows_by_name.get(name, []),
+                            validator=validator,
+                        ): name
+                        for name, filename, validator in datasets
+                    }
+                    for future in as_completed(future_by_name):
+                        name = future_by_name[future]
+                        try:
+                            result = future.result()
+                            if result is not None:
+                                files[name] = result
+                        except Exception as e:
+                            failures.append((name, e))
+
+                if failures:
+                    first_name, first_error = failures[0]
+                    self.logger.error(
+                        "show game refresh dataset upload failed game_id=%s dataset=%s err=%s",
+                        game_id,
+                        first_name,
+                        first_error,
+                    )
+                    raise first_error
 
             files["manifest"] = write_game_manifest(
                 spaces=self.spaces,
@@ -1111,6 +1255,22 @@ class ShowGameRefresh(Job):
         self.logger.info("show game events built game_id=%s total=%s", game.id, len(rows))
         return rows
 
+    def _initial_pitcher_by_batting_side(self, game_log: GameLog) -> dict[bool, str]:
+        current: dict[bool, str] = {}
+
+        # home pitcher faces away batting side (False)
+        if game_log.home_pitching_boxscores:
+            home_starter = self._strip_boxscore_name(game_log.home_pitching_boxscores[0].player_name)
+            if home_starter:
+                current[False] = home_starter
+
+        # away pitcher faces home batting side (True)
+        if game_log.away_pitching_boxscores:
+            away_starter = self._strip_boxscore_name(game_log.away_pitching_boxscores[0].player_name)
+            if away_starter:
+                current[True] = away_starter
+
+        return current
 
     def _build_plate_appearance_rows(
         self,
@@ -1124,10 +1284,10 @@ class ShowGameRefresh(Job):
         if not event_rows:
             return []
 
-        current_pitcher_by_side: dict[bool, str] = {}
+        current_pitcher_by_side = self._initial_pitcher_by_batting_side(game_log)
         base_rows: list[dict[str, Any]] = []
 
-        for idx, ev in enumerate(event_rows):
+        for ev in event_rows:
             seq = int(ev["seq"])
             is_home_batting = bool(ev["is_home_batting"])
             event_type = (ev.get("event_type") or "play").lower()
@@ -1157,17 +1317,6 @@ class ShowGameRefresh(Job):
             batter_mlb_id = self._resolve_batter_mlb_id(db_session, batter_name, batter_pos_code)
 
             pitcher_name = current_pitcher_by_side.get(is_home_batting)
-            if not pitcher_name:
-                for prev in reversed(event_rows[:idx]):
-                    if (prev.get("event_type") or "").lower() != "pitching_change":
-                        continue
-                    if bool(prev.get("is_home_batting")) != is_home_batting:
-                        continue
-                    prev_text = (prev.get("event_text") or "").strip()
-                    pitcher_name = game_log_text_regex.extract_pitcher_name(prev_text)
-                    if pitcher_name:
-                        current_pitcher_by_side[is_home_batting] = pitcher_name
-                        break
             pitcher_mlb_id = self._resolve_pitcher_mlb_id(db_session, pitcher_name)
 
             fields = game_log_text_regex._parse_pa_outcome_fields(text)
@@ -1873,6 +2022,10 @@ class ShowGameRefresh(Job):
             return None
 
         pos_code = self._norm_pos(batter_pos_code) if batter_pos_code else None
+        cache_key = (last, pos_code, year)
+        found, cached_value = self._cache_get(self._batter_id_cache, cache_key)
+        if found:
+            return cached_value
 
         # Base pool:
         # 1) non-pitchers
@@ -1891,10 +2044,12 @@ class ShowGameRefresh(Job):
 
         lasts = self._last_name_variants(batter_last_name)
         if not lasts:
+            self._cache_put(self._batter_id_cache, cache_key, None)
             return None
         
         #hardcode for shohei ohtani 2 way player
         if "ohtani" in lasts:
+            self._cache_put(self._batter_id_cache, cache_key, 660271)
             return 660271
     
         # Helper: get candidate mlb_ids by last name (can be multiple)
@@ -1914,8 +2069,10 @@ class ShowGameRefresh(Job):
             cand_ids = list(db_session.scalars(cand_stmt))
 
         if len(cand_ids) == 1:
+            self._cache_put(self._batter_id_cache, cache_key, cand_ids[0])
             return cand_ids[0]
         if len(cand_ids) == 0:
+            self._cache_put(self._batter_id_cache, cache_key, None)
             return None
 
         # 3) Position filter on Player.position abbreviation (if it narrows to 1; if it narrows to 0, ignore)
@@ -1929,6 +2086,7 @@ class ShowGameRefresh(Job):
                 )
             )
             if len(pos_filtered) == 1:
+                self._cache_put(self._batter_id_cache, cache_key, pos_filtered[0])
                 return pos_filtered[0]
             if len(pos_filtered) > 0:
                 cand_ids = pos_filtered
@@ -1957,7 +2115,9 @@ class ShowGameRefresh(Job):
                 )
             )
             row = db_session.execute(score_stmt).first()
-            return row[0] if row else None
+            resolved = row[0] if row else None
+            self._cache_put(self._batter_id_cache, cache_key, resolved)
+            return resolved
 
         # Secondary positions contains check (case-insensitive, with boundary-ish patterns)
         # Works for "2B, 3B" and "2B" etc.
@@ -2019,7 +2179,9 @@ class ShowGameRefresh(Job):
         )
 
         row = db_session.execute(score_stmt).first()
-        return row[0] if row else None
+        resolved = row[0] if row else None
+        self._cache_put(self._batter_id_cache, cache_key, resolved)
+        return resolved
 
     def _norm_last(self, s: str) -> str:
         s = (s or "").strip().lower()
@@ -2036,6 +2198,10 @@ class ShowGameRefresh(Job):
             return None
 
         year = MLB_THE_SHOW_YEAR
+        cache_key = (tuple(sorted(lasts)), year)
+        found, cached_value = self._cache_get(self._pitcher_id_cache, cache_key)
+        if found:
+            return cached_value
 
         base_q = (
             select(Player.mlb_id)
@@ -2054,8 +2220,10 @@ class ShowGameRefresh(Job):
 
         ids = list(db.scalars(base_q))
         if not ids:
+            self._cache_put(self._pitcher_id_cache, cache_key, None)
             return None
         if len(ids) == 1:
+            self._cache_put(self._pitcher_id_cache, cache_key, ids[0])
             return ids[0]
 
         ranked = (
@@ -2080,7 +2248,9 @@ class ShowGameRefresh(Job):
         )
 
         row = db.execute(ranked).first()
-        return row[0] if row else None
+        resolved = row[0] if row else None
+        self._cache_put(self._pitcher_id_cache, cache_key, resolved)
+        return resolved
 
     def _normalize_name(self, name_raw: str) -> str:
         name = (name_raw or "").strip()

@@ -1,6 +1,6 @@
 from apps.jobs.job import Job
 from shared.core.config import THE_SHOW_YEARS
-from shared.db.models import Series, Quirk, Location, Card, Pitch
+from shared.db.models import Series, Quirk, Location, Card, Pitch, card_quirk_association
 
 from typing import List, Dict, Optional
 from sqlalchemy import select, text, inspect as sa_inspect, delete
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 
 class CardSync(Job):
-    def __init__(self, reload_all_years: bool = False, base_url_template: Optional[str] = None):
+    def __init__(self, reload_all_years: bool = True, base_url_template: Optional[str] = None):
         super().__init__()
         self.reload_all_years = reload_all_years
         self.base_url_template = base_url_template or "https://mlb{year}.theshow.com"
@@ -53,6 +53,7 @@ class CardSync(Job):
         self.logger.info("cards prepared count=%s", len(cards_to_process))
 
         self._upsert_cards(db_session, cards_to_process, chunk_size=5000)
+        self._upsert_card_quirks(db_session, cards_to_process, chunk_size=5000)
         self._upsert_pitches(db_session, cards_to_process, chunk_size=5000)
         self._log_end(cards_upserted=len(cards_to_process))
 
@@ -80,6 +81,44 @@ class CardSync(Job):
                 set_=update_cols,
             )
             session.execute(stmt)
+            session.commit()
+
+    def _upsert_card_quirks(self, session: Session, cards: List[Card], chunk_size: int = 5000) -> None:
+        total = len(cards)
+
+        for start in range(0, total, chunk_size):
+            chunk = cards[start : start + chunk_size]
+            card_ids = [c.id for c in chunk if c.id]
+
+            session.execute(text("SET LOCAL synchronous_commit TO OFF"))
+
+            if card_ids:
+                session.execute(
+                    delete(card_quirk_association).where(card_quirk_association.c.card_id.in_(card_ids))
+                )
+
+            rows = []
+            for card in chunk:
+                card_id = getattr(card, "id", None)
+                if not card_id:
+                    continue
+
+                seen_quirk_names = set()
+                for q in (getattr(card, "quirks", None) or []):
+                    q_name = (getattr(q, "name", "") or "").strip()
+                    if not q_name or q_name in seen_quirk_names:
+                        continue
+                    seen_quirk_names.add(q_name)
+                    rows.append({"card_id": card_id, "quirk_name": q_name})
+
+            if rows:
+                stmt = (
+                    insert(card_quirk_association)
+                    .values(rows)
+                    .on_conflict_do_nothing(index_elements=["card_id", "quirk_name"])
+                )
+                session.execute(stmt)
+
             session.commit()
 
     def _upsert_pitches(self, session: Session, cards: List[Card], chunk_size: int = 5000) -> None:

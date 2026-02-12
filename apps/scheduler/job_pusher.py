@@ -38,6 +38,12 @@ class JobPusher:
     
     def prediction_sync(self) -> Payload:
         return self.push("prediction_sync")
+
+    def card_position_overall_sync(self, weights_path: Optional[str] = None) -> Payload:
+        args: dict[str, Any] = {}
+        if weights_path:
+            args["weights_path"] = weights_path
+        return self.push("card_position_overall_sync", args)
     
     def chat_cleaner(self) -> Payload:
         return self.push("chat_cleaner")

@@ -131,6 +131,13 @@ def test_run_idle_sets_status_to_idle(monkeypatch):
         ("player_sync", {"reload_all_players": "yes"}, "apps.jobs.player_sync", "PlayerSync", {"reload_all_players": True}),
         ("player_sync", {}, "apps.jobs.player_sync", "PlayerSync", {"reload_all_players": False}),
         ("prediction_sync", {}, "apps.jobs.prediction_sync", "PredictionSync", {}),
+        (
+            "card_position_overall_sync",
+            {},
+            "apps.jobs.card_position_overall_sync",
+            "CardPositionOverallSync",
+            {},
+        ),
     ],
 )
 def test_run_job_routes_and_acks(monkeypatch, job_type, args, module_path, class_name, expected_kwargs):

@@ -58,21 +58,21 @@ services:
     secrets:
       - firebase_service_key
 
-  scheduler:
-    build:
-      context: ../..
-      dockerfile: apps/scheduler/Dockerfile
-    working_dir: /app
-    restart: unless-stopped
-    environment:
-      TZ: America/Vancouver
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      PYTHONPATH: /app/shared:/app/apps/scheduler
-    depends_on:
-      redis:
-        condition: service_started
-    networks:
-      - app_network
+  # scheduler:
+  #   build:
+  #     context: ../..
+  #     dockerfile: apps/scheduler/Dockerfile
+  #   working_dir: /app
+  #   restart: unless-stopped
+  #   environment:
+  #     TZ: America/Vancouver
+  #     REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  #     PYTHONPATH: /app/shared:/app/apps/scheduler
+  #   depends_on:
+  #     redis:
+  #       condition: service_started
+  #   networks:
+  #     - app_network
 
   jobs:
     build:
