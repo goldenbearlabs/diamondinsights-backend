@@ -21,6 +21,7 @@ def get_card_prediction(card_id: str, db: Session = Depends(get_db)):
         db.query(CardPrediction, Card)
         .join(Card, Card.id == CardPrediction.card_id)
         .filter(CardPrediction.card_id == card_id)
+        .order_by(CardPrediction.run_id.desc())
         .first()
     )
     

@@ -30,18 +30,10 @@ type CardData = {
   age: number;
   is_hitter: boolean;
   rarity: string;
-};
-
-const getFakePrediction = (baseOvr: number, id: string) => {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) { hash = id.charCodeAt(i) + ((hash << 5) - hash); }
-  return baseOvr + (1 + (Math.abs(hash) % 4));
-};
-
-const getFakeSocials = (id: string) => {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) { hash = id.charCodeAt(i) + ((hash << 5) - hash); }
-  return { likes: 10 + (Math.abs(hash) % 150), dislikes: Math.abs(hash) % 20, comments: 2 + (Math.abs(hash) % 40) };
+  comment_count: number;
+  user_prediction_count: number;
+  predicted_ovr: number | null;
+  predicted_attributes: Record<string, number> | null;
 };
 
 export default function PredictionsScreen() {
@@ -53,7 +45,13 @@ export default function PredictionsScreen() {
   
   // Filter state
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
-  const [tempSelectedRarities, setTempSelectedRarities] = useState<string[]>([]); // Add this
+  const [tempSelectedRarities, setTempSelectedRarities] = useState<string[]>([]);
+  const [selectedPlayerType, setSelectedPlayerType] = useState<'all' | 'hitter' | 'pitcher'>('all');
+  const [tempSelectedPlayerType, setTempSelectedPlayerType] = useState<'all' | 'hitter' | 'pitcher'>('all');
+  const [selectedPopularity, setSelectedPopularity] = useState<'none' | 'most' | 'least'>('none');
+  const [tempSelectedPopularity, setTempSelectedPopularity] = useState<'none' | 'most' | 'least'>('none');
+  const [selectedDelta, setSelectedDelta] = useState<'none' | 'high' | 'low'>('none');
+  const [tempSelectedDelta, setTempSelectedDelta] = useState<'none' | 'high' | 'low'>('none');
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [currentFilterGroup, setCurrentFilterGroup] = useState<string | null>(null);
   
@@ -76,7 +74,7 @@ export default function PredictionsScreen() {
   // Reload cards when page, limit, or filters change
   useEffect(() => {
     loadCards(page, limit, searchText);
-  }, [page, limit, selectedRarities]);
+  }, [page, limit, selectedRarities, selectedPlayerType, selectedPopularity, selectedDelta]);
 
   
   const loadCards = async (targetPage: number, targetLimit: number, query: string) => {
@@ -92,6 +90,20 @@ export default function PredictionsScreen() {
       // Add rarity filter to URL if any are selected (server-side filtering)
       if (selectedRarities.length > 0) {
         url += `&rarity=${selectedRarities.join(',')}`;
+      }
+
+      // Add player type filter
+      if (selectedPlayerType === 'hitter') {
+        url += '&is_hitter=true';
+      } else if (selectedPlayerType === 'pitcher') {
+        url += '&is_hitter=false';
+      }
+
+      // Add sort (only if a sort filter is active, otherwise default OVR desc)
+      if (selectedPopularity !== 'none') {
+        url += `&sort_by=popularity&desc=${selectedPopularity === 'most'}`;
+      } else if (selectedDelta !== 'none') {
+        url += `&sort_by=predicted_ovr_delta&desc=${selectedDelta === 'high'}`;
       }
 
       const newCards = await apiGet<CardData[]>(url); 
@@ -114,9 +126,6 @@ export default function PredictionsScreen() {
   };
 
   const renderItem = ({ item }: { item: CardData }) => {
-    const predictedOvr = getFakePrediction(item.ovr, item.id);
-    const social = getFakeSocials(item.id);
-
     return (
       <TouchableOpacity 
         style={styles.cardContainer} 
@@ -129,14 +138,20 @@ export default function PredictionsScreen() {
           <View style={styles.teamRow}>
             <Text style={styles.teamName}>{item.team_short_name}</Text>
             <View style={styles.verticalDivider} />
-            <View style={styles.socialItem}><FontAwesome5 name="thumbs-up" size={10} color="#4ade80" solid /><Text style={styles.socialText}>{social.likes}</Text></View>
-            <View style={styles.socialItem}><FontAwesome5 name="thumbs-down" size={10} color="#f87171" solid /><Text style={styles.socialText}>{social.dislikes}</Text></View>
-            <View style={styles.socialItem}><FontAwesome5 name="comment-alt" size={10} color={theme.colors.muted} solid /><Text style={styles.socialText}>{social.comments}</Text></View>
+            <View style={styles.socialItem}><Ionicons name="bar-chart" size={10} color="#a78bfa" /><Text style={styles.socialText}>{item.user_prediction_count ?? 0}</Text></View>
+            <View style={styles.socialItem}><FontAwesome5 name="comment-alt" size={10} color={theme.colors.muted} solid /><Text style={styles.socialText}>{item.comment_count ?? 0}</Text></View>
           </View>
           <View style={styles.ratingRow}>
             <View style={styles.ratingBadge}><Text style={styles.ratingLabel}>CUR</Text><Text style={styles.currentRating}>{item.ovr}</Text></View>
-            <Ionicons name="arrow-forward" size={14} color="#4ade80" style={{ marginHorizontal: 8 }} />
-            <View style={[styles.ratingBadge, { borderColor: '#4ade80' }]}><Text style={[styles.ratingLabel, { color: '#4ade80' }]}>PRED</Text><Text style={styles.predictedRating}>{predictedOvr}</Text></View>
+            {item.predicted_ovr != null && (
+              <>
+                <Ionicons name="arrow-forward" size={14} color={item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : theme.colors.muted} style={{ marginHorizontal: 8 }} />
+                <View style={[styles.ratingBadge, { borderColor: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : 'rgba(255,255,255,0.1)' }]}>
+                  <Text style={[styles.ratingLabel, { color: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : theme.colors.muted }]}>PRED</Text>
+                  <Text style={[styles.currentRating, { color: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : 'white' }]}>{item.predicted_ovr}</Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
         <View style={styles.arrowContainer}><Ionicons name="chevron-forward" size={20} color={theme.colors.muted} /></View>
@@ -217,13 +232,16 @@ export default function PredictionsScreen() {
               style={styles.filterBtn} 
               onPress={() => {
                 setTempSelectedRarities(selectedRarities);
+                setTempSelectedPlayerType(selectedPlayerType);
+                setTempSelectedPopularity(selectedPopularity);
+                setTempSelectedDelta(selectedDelta);
                 setFilterModalOpen(true);
               }}
             >
               <Ionicons name="options" size={20} color="white" />
-              {selectedRarities.length > 0 && (
+              {(selectedRarities.length + (selectedPlayerType !== 'all' ? 1 : 0) + (selectedPopularity !== 'none' ? 1 : 0) + (selectedDelta !== 'none' ? 1 : 0)) > 0 && (
                 <View style={styles.filterBadge}>
-                  <Text style={styles.filterBadgeText}>{selectedRarities.length}</Text>
+                  <Text style={styles.filterBadgeText}>{selectedRarities.length + (selectedPlayerType !== 'all' ? 1 : 0) + (selectedPopularity !== 'none' ? 1 : 0) + (selectedDelta !== 'none' ? 1 : 0)}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -250,10 +268,73 @@ export default function PredictionsScreen() {
                   <>
                     <View style={styles.modalHeader}>
                       <Text style={styles.modalTitle}>Filters</Text>
-                      <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
-                        <Ionicons name="close" size={24} color="white" />
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                        {(selectedRarities.length > 0 || selectedPlayerType !== 'all' || selectedPopularity !== 'none' || selectedDelta !== 'none') && (
+                          <TouchableOpacity onPress={() => {
+                            setSelectedRarities([]);
+                            setSelectedPlayerType('all');
+                            setSelectedPopularity('none');
+                            setSelectedDelta('none');
+                            setFilterModalOpen(false);
+                            setCurrentFilterGroup(null);
+                            setPage(1);
+                          }}>
+                            <Text style={{ color: '#f87171', fontSize: 14, fontWeight: '600' }}>Clear All</Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
+                          <Ionicons name="close" size={24} color="white" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
+                    <TouchableOpacity 
+                      style={styles.filterGroupRow}
+                      onPress={() => setCurrentFilterGroup('playerType')}
+                    >
+                      <View style={styles.filterGroupLeft}>
+                        <Text style={styles.filterGroupLabel}>Player Type</Text>
+                      </View>
+                      <View style={styles.filterGroupRight}>
+                        {tempSelectedPlayerType !== 'all' && (
+                          <View style={styles.filterCountBadge}>
+                            <Text style={styles.filterCountText}>1</Text>
+                          </View>
+                        )}
+                        <Ionicons name="chevron-forward" size={20} color={theme.colors.muted} />
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.filterGroupRow}
+                      onPress={() => setCurrentFilterGroup('popularity')}
+                    >
+                      <View style={styles.filterGroupLeft}>
+                        <Text style={styles.filterGroupLabel}>Popularity</Text>
+                      </View>
+                      <View style={styles.filterGroupRight}>
+                        {tempSelectedPopularity !== 'none' && (
+                          <View style={styles.filterCountBadge}>
+                            <Text style={styles.filterCountText}>1</Text>
+                          </View>
+                        )}
+                        <Ionicons name="chevron-forward" size={20} color={theme.colors.muted} />
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.filterGroupRow}
+                      onPress={() => setCurrentFilterGroup('delta')}
+                    >
+                      <View style={styles.filterGroupLeft}>
+                        <Text style={styles.filterGroupLabel}>Predicted OVR</Text>
+                      </View>
+                      <View style={styles.filterGroupRight}>
+                        {tempSelectedDelta !== 'none' && (
+                          <View style={styles.filterCountBadge}>
+                            <Text style={styles.filterCountText}>1</Text>
+                          </View>
+                        )}
+                        <Ionicons name="chevron-forward" size={20} color={theme.colors.muted} />
+                      </View>
+                    </TouchableOpacity>
                     <TouchableOpacity 
                       style={styles.filterGroupRow}
                       onPress={() => setCurrentFilterGroup('rarity')}
@@ -262,14 +343,179 @@ export default function PredictionsScreen() {
                         <Text style={styles.filterGroupLabel}>Rarity</Text>
                       </View>
                       <View style={styles.filterGroupRight}>
-                        {selectedRarities.length > 0 && (
+                        {tempSelectedRarities.length > 0 && (
                           <View style={styles.filterCountBadge}>
-                            <Text style={styles.filterCountText}>{selectedRarities.length}</Text>
+                            <Text style={styles.filterCountText}>{tempSelectedRarities.length}</Text>
                           </View>
                         )}
                         <Ionicons name="chevron-forward" size={20} color={theme.colors.muted} />
                       </View>
                     </TouchableOpacity>
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={styles.applyButton}
+                        onPress={() => {
+                          setSelectedPlayerType(tempSelectedPlayerType);
+                          setSelectedPopularity(tempSelectedPopularity);
+                          setSelectedDelta(tempSelectedDelta);
+                          setSelectedRarities(tempSelectedRarities);
+                          if (tempSelectedPopularity !== 'none') setSelectedDelta('none');
+                          if (tempSelectedDelta !== 'none') setSelectedPopularity('none');
+                          setFilterModalOpen(false);
+                          setCurrentFilterGroup(null);
+                          setPage(1);
+                        }}
+                      >
+                        <Text style={styles.applyButtonText}>Apply All</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : currentFilterGroup === 'popularity' ? (
+                  // Popularity Sort Options
+                  <>
+                    <View style={styles.modalHeader}>
+                      <TouchableOpacity 
+                        style={styles.backButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Ionicons name="chevron-back" size={24} color="white" />
+                        <Text style={styles.backText}>Back</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.modalSubtitle}>Sort by Popularity</Text>
+                    {([['most', 'Most to Least'], ['least', 'Least to Most']] as const).map(([value, label]) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={styles.checkboxRow}
+                        onPress={() => setTempSelectedPopularity(value)}
+                      >
+                        <Ionicons 
+                          name={tempSelectedPopularity === value ? 'radio-button-on' : 'radio-button-off'} 
+                          size={22} 
+                          color={tempSelectedPopularity === value ? '#3b82f6' : 'rgba(255, 255, 255, 0.3)'} 
+                          style={{ marginRight: 12 }}
+                        />
+                        <Text style={styles.checkboxLabel}>{label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={styles.clearButton}
+                        onPress={() => {
+                          setTempSelectedPopularity('none');
+                          setCurrentFilterGroup(null);
+                        }}
+                      >
+                        <Text style={styles.clearButtonText}>Clear</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.applyButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Text style={styles.applyButtonText}>Done</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : currentFilterGroup === 'delta' ? (
+                  // Predicted OVR Sort Options
+                  <>
+                    <View style={styles.modalHeader}>
+                      <TouchableOpacity 
+                        style={styles.backButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Ionicons name="chevron-back" size={24} color="white" />
+                        <Text style={styles.backText}>Back</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.modalSubtitle}>Sort by Predicted OVR</Text>
+                    {([['high', 'Highest Predicted Increase'], ['low', 'Highest Predicted Decrease']] as const).map(([value, label]) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={styles.checkboxRow}
+                        onPress={() => setTempSelectedDelta(value)}
+                      >
+                        <Ionicons 
+                          name={tempSelectedDelta === value ? 'radio-button-on' : 'radio-button-off'} 
+                          size={22} 
+                          color={tempSelectedDelta === value ? '#3b82f6' : 'rgba(255, 255, 255, 0.3)'} 
+                          style={{ marginRight: 12 }}
+                        />
+                        <Text style={styles.checkboxLabel}>{label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={styles.clearButton}
+                        onPress={() => {
+                          setTempSelectedDelta('none');
+                          setCurrentFilterGroup(null);
+                        }}
+                      >
+                        <Text style={styles.clearButtonText}>Clear</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.applyButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Text style={styles.applyButtonText}>Done</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : currentFilterGroup === 'playerType' ? (
+                  // Player Type Options (Radio Buttons)
+                  <>
+                    <View style={styles.modalHeader}>
+                      <TouchableOpacity 
+                        style={styles.backButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Ionicons name="chevron-back" size={24} color="white" />
+                        <Text style={styles.backText}>Back</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => setFilterModalOpen(false)}>
+                        <Ionicons name="close" size={24} color="white" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.modalSubtitle}>Select Player Type</Text>
+                    {([['all', 'All Players'], ['hitter', 'Hitters'], ['pitcher', 'Pitchers']] as const).map(([value, label]) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={styles.checkboxRow}
+                        onPress={() => setTempSelectedPlayerType(value)}
+                      >
+                        <Ionicons 
+                          name={tempSelectedPlayerType === value ? 'radio-button-on' : 'radio-button-off'} 
+                          size={22} 
+                          color={tempSelectedPlayerType === value ? '#3b82f6' : 'rgba(255, 255, 255, 0.3)'} 
+                          style={{ marginRight: 12 }}
+                        />
+                        <Text style={styles.checkboxLabel}>{label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={styles.clearButton}
+                        onPress={() => {
+                          setTempSelectedPlayerType('all');
+                          setCurrentFilterGroup(null);
+                        }}
+                      >
+                        <Text style={styles.clearButtonText}>Clear</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.applyButton}
+                        onPress={() => setCurrentFilterGroup(null)}
+                      >
+                        <Text style={styles.applyButtonText}>Done</Text>
+                      </TouchableOpacity>
+                    </View>
                   </>
                 ) : (
                   // Rarity Options
@@ -315,20 +561,18 @@ export default function PredictionsScreen() {
                     <View style={styles.modalActions}>
                       <TouchableOpacity
                         style={styles.clearButton}
-                        onPress={() => setTempSelectedRarities([])}
+                        onPress={() => {
+                          setTempSelectedRarities([]);
+                          setCurrentFilterGroup(null);
+                        }}
                       >
-                        <Text style={styles.clearButtonText}>Clear All</Text>
+                        <Text style={styles.clearButtonText}>Clear</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.applyButton}
-                        onPress={() => {
-                          setSelectedRarities(tempSelectedRarities);
-                          setFilterModalOpen(false);
-                          setCurrentFilterGroup(null);
-                          setPage(1);
-                        }}
+                        onPress={() => setCurrentFilterGroup(null)}
                       >
-                        <Text style={styles.applyButtonText}>Apply</Text>
+                        <Text style={styles.applyButtonText}>Done</Text>
                       </TouchableOpacity>
                     </View>
                   </>
@@ -349,12 +593,18 @@ export default function PredictionsScreen() {
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
               ListFooterComponent={cards.length > 0 ? renderFooter : null} // Only show footer if we have data
               ListEmptyComponent={
-                selectedRarities.length > 0 ? (
+                (selectedRarities.length > 0 || selectedPlayerType !== 'all' || selectedPopularity !== 'none' || selectedDelta !== 'none') ? (
                   <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>No cards match your filters.</Text>
                     <TouchableOpacity 
                       style={styles.clearFiltersButton}
-                      onPress={() => setTempSelectedRarities([])}
+                      onPress={() => {
+                        setSelectedRarities([]);
+                        setSelectedPlayerType('all');
+                        setSelectedPopularity('none');
+                        setSelectedDelta('none');
+                        setPage(1);
+                      }}
                     >
                       <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
                     </TouchableOpacity>
@@ -395,7 +645,6 @@ const styles = StyleSheet.create({
   ratingBadge: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   ratingLabel: { fontSize: 8, color: theme.colors.muted, fontWeight: '800', marginBottom: 1 },
   currentRating: { color: 'white', fontWeight: '700', fontSize: 14 },
-  predictedRating: { color: '#4ade80', fontWeight: '800', fontSize: 14 },
   arrowContainer: { paddingLeft: 10 },
 
   footerContainer: {

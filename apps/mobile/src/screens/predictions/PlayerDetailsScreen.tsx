@@ -2,9 +2,10 @@ import React from 'react';
 import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
-import { AttributeBar } from '../../predictionscomponents/AttributeBar'; 
+import { AttributeBar } from '../../predictionscomponents/AttributeBar';
+import PredictionAttributeBar from '../../predictionscomponents/PredictionAttributeBar';
 import { theme } from '../../theme/colors';
 import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
@@ -18,6 +19,23 @@ const TWO_WAY_PLAYERS = [
 ];
 
 const STUB_ICON = require('../../../assets/images/stub.png');
+
+const BATTING_PREDICTION_KEYS = [
+  { key: 'CON_R', label: 'Contact R' },
+  { key: 'CON_L', label: 'Contact L' },
+  { key: 'POW_R', label: 'Power R' },
+  { key: 'POW_L', label: 'Power L' },
+  { key: 'VIS', label: 'Vision' },
+  { key: 'CLT', label: 'Clutch' },
+];
+
+const PITCHING_PREDICTION_KEYS = [
+  { key: 'STA', label: 'Stamina' },
+  { key: 'PCLT', label: 'Clutch' },
+  { key: 'H_9', label: 'H/9' },
+  { key: 'K_9', label: 'K/9' },
+  { key: 'BB_9', label: 'BB/9' },
+];
 
 export default function PlayerDetailsScreen() {
   const router = useRouter();
@@ -56,7 +74,7 @@ export default function PlayerDetailsScreen() {
           setUserPrediction(res.predicted_ovr.toString());
           setIsSubmitted(true);
         })
-        .catch(() => {}) // Ignore 404s (no prediction yet)
+        .catch(() => {}) 
         .finally(() => setLoadingPred(false));
     }
   }, [card?.id]);
@@ -79,7 +97,6 @@ export default function PlayerDetailsScreen() {
     }
   };
 
-  // 3. Updated Market Fetcher (Added Candles)
   useEffect(() => {
     const fetchMarket = async () => {
       if (!card?.id) return;
@@ -112,7 +129,6 @@ export default function PlayerDetailsScreen() {
     fetchMarket();
   }, [card?.id]);
 
-  // 4. Restored Original Alert Text
   const handleInfoPress = () => {
     Alert.alert(
       "Prediction Info",
@@ -179,9 +195,24 @@ export default function PlayerDetailsScreen() {
                 </Text>
                 <Text style={styles.teamText}>Throws: {card.throw_hand} • Bats: {card.bat_hand}</Text>
                 <View style={styles.divider} />
-                <View style={styles.statBadge}>
-                  <Text style={styles.statLabel}>OVERALL</Text>
-                  <Text style={styles.statValue}>{card.ovr}</Text>
+                <View style={styles.overallRow}>
+                  <View style={styles.statBadge}>
+                    <Text style={styles.statLabel}>OVERALL</Text>
+                    <Text style={styles.statValue}>{card.ovr}</Text>
+                  </View>
+                  {card.predicted_ovr != null && (
+                    <View style={[styles.statBadge, {
+                      backgroundColor: card.predicted_ovr > card.ovr ? 'rgba(74, 222, 128, 0.15)' : card.predicted_ovr < card.ovr ? 'rgba(248, 113, 113, 0.15)' : 'rgba(107, 114, 128, 0.15)',
+                      borderColor: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                    }]}>
+                      <Text style={[styles.statLabel, {
+                        color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                      }]}>PRED</Text>
+                      <Text style={[styles.statValue, {
+                        color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                      }]}>{card.predicted_ovr}</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
@@ -220,7 +251,6 @@ export default function PlayerDetailsScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              // INPUT STATE UI
               <>
                 {/* Header with Info Icon */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -338,6 +368,69 @@ export default function PlayerDetailsScreen() {
                  <AttributeBar label="Reaction" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
 
               </View>
+
+              {/* Predicted Attributes */}
+              {card.predicted_attributes && (
+                <>
+                  <View style={styles.predictionHeader}>
+                    <View style={styles.proBadge}>
+                      <FontAwesome5 name="crown" size={10} color="#fbbf24" style={styles.proIcon} />
+                      <Text style={styles.proText}>PRO</Text>
+                    </View>
+                    <Text style={[styles.sectionTitle, { color: '#fbbf24', marginBottom: 0 }]}>Predicted Attributes</Text>
+                  </View>
+                  <View style={styles.glassCard}>
+                    
+                    {/* Pitching Predictions */}
+                    {PITCHING_PREDICTION_KEYS.some(({ key }) => 
+                      card.predicted_attributes?.[`pit_pred_${key}_new`] != null
+                    ) && (
+                      <>
+                        <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                        {PITCHING_PREDICTION_KEYS.map(({ key, label }) => {
+                          const newVal = card.predicted_attributes?.[`pit_pred_${key}_new`];
+                          const delta = card.predicted_attributes?.[`pit_pred_${key}_delta`];
+                          if (newVal == null || delta == null) return null;
+                          return (
+                            <PredictionAttributeBar
+                              key={key}
+                              label={label}
+                              predictedValue={Math.round(newVal)}
+                              delta={delta}
+                            />
+                          );
+                        })}
+                        {showBatting && <View style={{ height: 24 }} />}
+                      </>
+                    )}
+
+                    {/* Batting Predictions */}
+                    {BATTING_PREDICTION_KEYS.some(({ key }) => 
+                      card.predicted_attributes?.[`hit_pred_${key}_new`] != null
+                    ) && (
+                      <>
+                        <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                        {BATTING_PREDICTION_KEYS.map(({ key, label }) => {
+                          const newVal = card.predicted_attributes?.[`hit_pred_${key}_new`];
+                          const delta = card.predicted_attributes?.[`hit_pred_${key}_delta`];
+                          if (newVal == null || delta == null) return null;
+                          return (
+                            <PredictionAttributeBar
+                              key={key}
+                              label={label}
+                              predictedValue={Math.round(newVal)}
+                              delta={delta}
+                            />
+                          );
+                        })}
+                      </>
+                    )}
+
+                  </View>
+                </>
+              )}
             </>
           ) : (
             // 5. Updated Market Tab (Kept your exact layout + Added Chart)
@@ -421,6 +514,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
     padding: 10, borderRadius: 8, alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#3b82f6'
   },
+  overallRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   statLabel: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
   statValue: { color: '#3b82f6', fontSize: 24, fontWeight: '900' },
   tabsContainer: { flexDirection: 'row', gap: 12, marginBottom: 12 },
@@ -450,4 +547,38 @@ const styles = StyleSheet.create({
   marketIcon: { width: 16, height: 16, resizeMode: 'contain' },
   marketValue: { color: 'white', fontSize: 16, fontWeight: '700' },
   marketValueText: { marginTop: 6 },
+  predictionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  proBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  proIcon: {
+    marginRight: 4,
+  },
+  proText: {
+    color: '#fbbf24',
+    fontWeight: '800',
+    fontSize: 10,
+    letterSpacing: 0.4,
+  },
+  subSectionTitle: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 12,
+    marginBottom: 8,
+  },
 });
