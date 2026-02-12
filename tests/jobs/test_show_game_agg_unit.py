@@ -3,9 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from apps.jobs.show_game_agg import (
-    RECORD_FURTHEST_HR,
-    RECORD_FURTHEST_HR_PLUS,
-    RECORD_HARDEST_HIT,
+    RECORDS_HARDEST_HITS_KEY,
+    RECORDS_HOME_RUNS_KEY,
     ShowGameAgg,
 )
 
@@ -22,6 +21,7 @@ def test_collect_record_candidates_extracts_expected_rows():
         home_profile_username="home_user",
         away_profile_username="away_user",
         difficulty="legend",
+        date="2026-02-12T10:00:00Z",
     )
     pas = [
         {
@@ -42,12 +42,6 @@ def test_collect_record_candidates_extracts_expected_rows():
             "batter_mlb_id": 303,
             "pitcher_mlb_id": 404,
         },
-        {
-            "event_seq": None,
-            "result": "home_run",
-            "hr_distance_ft": 450,
-            "exit_vel_mph": 111,
-        },
     ]
     homeruns = []
     hard_hit = []
@@ -63,158 +57,151 @@ def test_collect_record_candidates_extracts_expected_rows():
     assert len(homeruns) == 1
     assert homeruns[0]["game_id"] == "g-1"
     assert homeruns[0]["event_id"] == 7
-    assert homeruns[0]["value"] == 440.0
+    assert homeruns[0]["distance_ft"] == 440.0
     assert homeruns[0]["hitter_username"] == "home_user"
     assert homeruns[0]["pitcher_username"] == "away_user"
     assert homeruns[0]["difficulty"] == "legend"
     assert homeruns[0]["elevation"] == 1200.0
+    assert homeruns[0]["home_profile_username"] == "home_user"
+    assert homeruns[0]["away_profile_username"] == "away_user"
 
     assert len(hard_hit) == 2
     assert hard_hit[0]["event_id"] == 7
     assert hard_hit[0]["hitter_username"] == "home_user"
     assert hard_hit[0]["pitcher_username"] == "away_user"
+    assert hard_hit[0]["exit_vel_mph"] == 110.0
     assert hard_hit[1]["event_id"] == 8
     assert hard_hit[1]["hitter_username"] == "away_user"
     assert hard_hit[1]["pitcher_username"] == "home_user"
+    assert hard_hit[1]["exit_vel_mph"] == 104.0
 
 
 def test_fit_elevation_slope_and_zero_variance_fallback():
     agg = _agg()
 
     candidates = [
-        {"elevation": 0, "value": 300.0},
-        {"elevation": 500, "value": 350.0},
-        {"elevation": 1000, "value": 400.0},
+        {"elevation": 0, "distance_ft": 300.0},
+        {"elevation": 500, "distance_ft": 350.0},
+        {"elevation": 1000, "distance_ft": 400.0},
     ]
     assert agg._fit_elevation_slope(candidates) == pytest.approx(0.1)
 
     no_variance = [
-        {"elevation": 1000, "value": 370.0},
-        {"elevation": 1000, "value": 390.0},
+        {"elevation": 1000, "distance_ft": 370.0},
+        {"elevation": 1000, "distance_ft": 390.0},
     ]
     assert agg._fit_elevation_slope(no_variance) == 0.0
 
 
-def test_build_records_rows_ranks_by_combo_and_limits_top_1000():
+def test_append_and_write_records_merges_and_ranks():
     agg = _agg()
 
-    homeruns = []
-    for i in range(1005):
-        homeruns.append(
-            {
-                "game_id": f"g{i}",
-                "event_id": i,
-                "batter_mlb_id": i,
-                "pitcher_mlb_id": i + 1,
-                "hitter_username": "h",
-                "pitcher_username": "p",
-                "difficulty": "legend",
-                "value": float(300 + i),
-                "elevation": 0.0,
-            }
-        )
-    homeruns.extend(
-        [
-            {
-                "game_id": "g-rookie-1",
-                "event_id": 1,
-                "batter_mlb_id": 1,
-                "pitcher_mlb_id": 2,
-                "hitter_username": "h1",
-                "pitcher_username": "p1",
-                "difficulty": "rookie",
-                "value": 380.0,
-                "elevation": 0.0,
-            },
-            {
-                "game_id": "g-rookie-2",
-                "event_id": 2,
-                "batter_mlb_id": 1,
-                "pitcher_mlb_id": 2,
-                "hitter_username": "h1",
-                "pitcher_username": "p1",
-                "difficulty": "rookie",
-                "value": 390.0,
-                "elevation": 0.0,
-            },
-        ]
-    )
-    hard_hit = [
+    existing_home_runs = [
         {
-            "game_id": "hh-1",
+            "game_id": "g1",
             "event_id": 1,
-            "batter_mlb_id": 10,
-            "pitcher_mlb_id": 20,
-            "hitter_username": "h1",
-            "pitcher_username": "p1",
+            "date": "2026-02-01T00:00:00Z",
             "difficulty": "legend",
-            "value": 108.0,
-        },
+            "home_profile_username": "h1",
+            "away_profile_username": "a1",
+            "hitter_username": "h1",
+            "pitcher_username": "a1",
+            "batter_mlb_id": 1,
+            "pitcher_mlb_id": 2,
+            "is_home_batting": True,
+            "elevation": 0.0,
+            "distance_ft": 410.0,
+            "distance_plus_ft": 410.0,
+            "rank": 1,
+            "difficulty_rank": 1,
+            "rank_plus": 1,
+            "difficulty_rank_plus": 1,
+        }
+    ]
+    existing_hard = [
         {
-            "game_id": "hh-2",
+            "game_id": "g1",
+            "event_id": 1,
+            "date": "2026-02-01T00:00:00Z",
+            "difficulty": "legend",
+            "home_profile_username": "h1",
+            "away_profile_username": "a1",
+            "hitter_username": "h1",
+            "pitcher_username": "a1",
+            "batter_mlb_id": 1,
+            "pitcher_mlb_id": 2,
+            "is_home_batting": True,
+            "exit_vel_mph": 108.0,
+            "rank": 1,
+            "difficulty_rank": 1,
+        }
+    ]
+
+    written = {}
+    agg._read_parquet_optional = lambda key: existing_home_runs if key == RECORDS_HOME_RUNS_KEY else existing_hard
+
+    def fake_put_records_parquet(key, rows, schema=None):
+        written[key] = [dict(r) for r in rows]
+
+    agg._put_records_parquet = fake_put_records_parquet
+
+    new_hr = [
+        {
+            "game_id": "g2",
             "event_id": 2,
-            "batter_mlb_id": 10,
-            "pitcher_mlb_id": 20,
-            "hitter_username": "h1",
-            "pitcher_username": "p1",
+            "date": "2026-02-02T00:00:00Z",
             "difficulty": "legend",
-            "value": 112.0,
-        },
+            "home_profile_username": "h2",
+            "away_profile_username": "a2",
+            "hitter_username": "h2",
+            "pitcher_username": "a2",
+            "batter_mlb_id": 3,
+            "pitcher_mlb_id": 4,
+            "is_home_batting": False,
+            "distance_ft": 430.0,
+            "elevation": 1000.0,
+        }
+    ]
+    new_hard = [
         {
-            "game_id": "hh-3",
-            "event_id": 3,
-            "batter_mlb_id": 10,
-            "pitcher_mlb_id": 20,
-            "hitter_username": "h1",
-            "pitcher_username": "p1",
-            "difficulty": "rookie",
-            "value": 105.0,
-        },
+            "game_id": "g2",
+            "event_id": 2,
+            "date": "2026-02-02T00:00:00Z",
+            "difficulty": "legend",
+            "home_profile_username": "h2",
+            "away_profile_username": "a2",
+            "hitter_username": "h2",
+            "pitcher_username": "a2",
+            "batter_mlb_id": 3,
+            "pitcher_mlb_id": 4,
+            "is_home_batting": False,
+            "exit_vel_mph": 112.0,
+        }
     ]
 
-    records = agg._build_records_rows(homeruns, hard_hit)
+    agg._append_and_write_records(new_hr, new_hard)
 
-    hr_legend = [r for r in records if r["record"] == RECORD_FURTHEST_HR and r["difficulty"] == "legend"]
-    assert len(hr_legend) == 1000
-    assert [r["record_rank"] for r in hr_legend] == list(range(1, 1001))
-    assert hr_legend[0]["value"] == 1304.0
-    assert hr_legend[-1]["value"] == 305.0
+    assert RECORDS_HOME_RUNS_KEY in written
+    assert RECORDS_HARDEST_HITS_KEY in written
 
-    hr_plus_legend = [r for r in records if r["record"] == RECORD_FURTHEST_HR_PLUS and r["difficulty"] == "legend"]
-    assert len(hr_plus_legend) == 1000
-    assert [r["record_rank"] for r in hr_plus_legend] == list(range(1, 1001))
-    assert hr_plus_legend[0]["value"] == 1304.0
+    hr_rows = written[RECORDS_HOME_RUNS_KEY]
+    assert len(hr_rows) == 2
+    assert hr_rows[0]["rank"] == 1
+    assert hr_rows[0]["distance_ft"] == 430.0
+    assert hr_rows[1]["rank"] == 2
+    assert hr_rows[1]["distance_ft"] == 410.0
+    assert all("distance_plus_ft" in r for r in hr_rows)
+    assert all("rank_plus" in r for r in hr_rows)
 
-    hr_rookie = [r for r in records if r["record"] == RECORD_FURTHEST_HR and r["difficulty"] == "rookie"]
-    assert len(hr_rookie) == 2
-    assert [r["record_rank"] for r in hr_rookie] == [1, 2]
-    assert [r["value"] for r in hr_rookie] == [390.0, 380.0]
-
-    hardest_hit_legend = [r for r in records if r["record"] == RECORD_HARDEST_HIT and r["difficulty"] == "legend"]
-    assert len(hardest_hit_legend) == 2
-    assert [r["record_rank"] for r in hardest_hit_legend] == [1, 2]
-    assert [r["value"] for r in hardest_hit_legend] == [112.0, 108.0]
+    hh_rows = written[RECORDS_HARDEST_HITS_KEY]
+    assert len(hh_rows) == 2
+    assert hh_rows[0]["rank"] == 1
+    assert hh_rows[0]["exit_vel_mph"] == 112.0
+    assert hh_rows[1]["rank"] == 2
+    assert hh_rows[1]["exit_vel_mph"] == 108.0
 
 
-def test_is_pas_sorted_by_event_seq_handles_none_at_end():
-    agg = _agg()
-    pas = [
-        {"event_seq": 1},
-        {"event_seq": 2},
-        {"event_seq": 2},
-        {"event_seq": None},
-    ]
-    assert agg._is_pas_sorted_by_event_seq(pas) is True
-
-    unsorted_pas = [
-        {"event_seq": 2},
-        {"event_seq": 1},
-        {"event_seq": None},
-    ]
-    assert agg._is_pas_sorted_by_event_seq(unsorted_pas) is False
-
-
-def test_run_processes_each_game_once_and_fans_out_to_both_users():
+def test_run_processes_only_games_missing_from_checkpoint():
     agg = _agg()
 
     class FakeSession:
@@ -222,49 +209,96 @@ def test_run_processes_each_game_once_and_fans_out_to_both_users():
             return ["u1", "u2", "u3"]
 
     games = [
-        SimpleNamespace(id="g1", home_profile_username="u1", away_profile_username="u2"),
-        SimpleNamespace(id="g2", home_profile_username="u2", away_profile_username="u3"),
+        SimpleNamespace(id="g1", home_profile_username="u1", away_profile_username="u2", ball_park_id=None),
+        SimpleNamespace(id="g2", home_profile_username="u2", away_profile_username="u3", ball_park_id=None),
+        SimpleNamespace(id="g3", home_profile_username="u1", away_profile_username="u3", ball_park_id=None),
     ]
     bundles = {
-        "g1": {
-            "plate_appearances": [{"event_seq": 1}],
-            "batting_boxscores": [{"mlb_id": 10, "ab": 1}],
-            "pitching_boxscores": [{"mlb_id": 20, "outs_pitched": 3}],
-        },
-        "g2": {
-            "plate_appearances": [{"event_seq": 2}],
+        "g3": {
+            "plate_appearances": [{"game_id": "g3", "event_seq": 3, "result": "single"}],
+            "events": [],
             "batting_boxscores": [{"mlb_id": 11, "ab": 2}],
             "pitching_boxscores": [{"mlb_id": 21, "outs_pitched": 6}],
-        },
+        }
     }
+
+    checkpoints = {
+        "u1": {"g1"},
+        "u2": {"g1", "g2"},
+        "u3": {"g2", "g3"},
+    }
+
     load_calls = []
-    parquet_writes = {}
-    records_write = {}
+    written_parquet = {}
+    written_checkpoints = {}
+    record_calls = []
 
     agg._fetch_all_games = lambda _db_session: games
     agg._fetch_ballpark_elevations = lambda _db_session: {}
+    agg._read_checkpoint_game_ids = lambda username: set(checkpoints.get(username, set()))
+    agg._load_user_state = lambda _username: {
+        "pas_existing": [],
+        "pas_new": [],
+        "batting_box_agg": {},
+        "pitching_box_agg": {},
+    }
     agg._build_facts_for_games = lambda _game, _bundle: None
-    agg._collect_record_candidates = lambda **_kwargs: None
+
+    def fake_collect(**kwargs):
+        game = kwargs["game"]
+        kwargs["homerun_candidates"].append(
+            {
+                "game_id": game.id,
+                "event_id": 1,
+                "date": "2026-02-02T00:00:00Z",
+                "difficulty": "legend",
+                "home_profile_username": game.home_profile_username,
+                "away_profile_username": game.away_profile_username,
+                "hitter_username": game.home_profile_username,
+                "pitcher_username": game.away_profile_username,
+                "batter_mlb_id": 1,
+                "pitcher_mlb_id": 2,
+                "is_home_batting": True,
+                "distance_ft": 420.0,
+                "elevation": 0.0,
+            }
+        )
+        kwargs["hard_hit_candidates"].append(
+            {
+                "game_id": game.id,
+                "event_id": 1,
+                "date": "2026-02-02T00:00:00Z",
+                "difficulty": "legend",
+                "home_profile_username": game.home_profile_username,
+                "away_profile_username": game.away_profile_username,
+                "hitter_username": game.home_profile_username,
+                "pitcher_username": game.away_profile_username,
+                "batter_mlb_id": 1,
+                "pitcher_mlb_id": 2,
+                "is_home_batting": True,
+                "exit_vel_mph": 108.0,
+            }
+        )
+
+    agg._collect_record_candidates = fake_collect
+    agg._append_and_write_records = lambda hr, hh: record_calls.append((list(hr), list(hh)))
 
     def fake_load(game_id):
         load_calls.append(game_id)
         return bundles[game_id]
 
-    def fake_put_parquet(key, rows):
-        parquet_writes[key] = list(rows)
-
-    def fake_put_records_parquet(key, rows):
-        records_write["key"] = key
-        records_write["rows"] = list(rows)
-
     agg._load_game_bundle = fake_load
-    agg._put_parquet = fake_put_parquet
-    agg._put_records_parquet = fake_put_records_parquet
+    agg._put_parquet = lambda key, rows: written_parquet.setdefault(key, list(rows))
+    agg._write_checkpoint_game_ids = lambda username, game_ids: written_checkpoints.setdefault(
+        username, set(game_ids)
+    )
 
     agg.run(FakeSession())
 
-    assert load_calls == ["g1", "g2"]
-    assert len(parquet_writes["facts/u1/pas.parquet"]) == 1
-    assert len(parquet_writes["facts/u2/pas.parquet"]) == 2
-    assert len(parquet_writes["facts/u3/pas.parquet"]) == 1
-    assert records_write["key"] == "records/records.parquet"
+    assert load_calls == ["g3"]
+    assert "facts/u1/pas.parquet" in written_parquet
+    assert "facts/u1/batting_boxscores.parquet" in written_parquet
+    assert "facts/u1/pitching_boxscores.parquet" in written_parquet
+    assert "u1" in written_checkpoints
+    assert written_checkpoints["u1"] == {"g1", "g3"}
+    assert len(record_calls) == 1

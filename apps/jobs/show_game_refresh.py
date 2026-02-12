@@ -1,5 +1,6 @@
 
 import os
+import random
 import re
 import unicodedata
 from collections import OrderedDict
@@ -12,6 +13,7 @@ from sqlalchemy import func, or_, select, exists, and_, case
 from sqlalchemy.orm import Session
 
 from apps.jobs.job import Job
+from shared.db.database import SessionLocal
 from shared.db.models import (
     Card,
     MLBPosition,
@@ -282,7 +284,9 @@ class ShowGameRefresh(Job):
     def __init__(self):
         super().__init__()
         self.spaces = SpacesConnector(SpacesConfig.from_env())
+        self._user_workers = max(1, int(os.getenv("SHOW_GAME_USER_WORKERS", "4")))
         self._upload_workers = max(1, int(os.getenv("SHOW_GAME_UPLOAD_WORKERS", "4")))
+        self._history_validation_pages = max(0, int(os.getenv("SHOW_GAME_HISTORY_VALIDATION_PAGES", "4")))
         self._resolver_cache_max = max(1000, int(os.getenv("SHOW_GAME_RESOLVER_CACHE_MAX", "20000")))
         self._resolver_cache_clear_every_games = max(
             1,
@@ -322,49 +326,84 @@ class ShowGameRefresh(Job):
             )
             self._clear_resolver_caches()
 
-    def run(self, db_session: Session):
-        usernames = [u for u in db_session.scalars(select(ShowProfile.username)) if u]
-        self._log_start(total_usernames=len(usernames))
-        self.logger.info("show game refresh start usernames=%s", len(usernames))
-        
-        for username in usernames:
-            username = (username or "").strip()
+    def _process_username(self, db_session: Session, username: str) -> None:
+        username = (username or "").strip()
+        if not username:
+            self.logger.debug("show game refresh skip username=%s reason=blank", username)
+            return
 
-            if not username:
-                self.logger.debug("show game refresh skip username=%s reason=blank", username)
+        self.logger.info("show game refresh processing username=%s", username)
+        unprocessed_games = self._fetch_unprocessed_games(db_session, username)
+
+        self.logger.info(
+            "show game refresh username=%s games_to_process=%s",
+            username,
+            len(unprocessed_games),
+        )
+
+        for game in unprocessed_games:
+            self.logger.info("show game refresh processing game_id=%s username=%s", game.id, username)
+            files = self._process_game(db_session, username, game)
+            if files is None:
+                db_session.rollback()
+                self._register_processed_game()
                 continue
 
-            self.logger.info("show game refresh processing username=%s", username)
-            unprocessed_games = self._fetch_unprocessed_games(db_session, username)
+            try:
+                db_session.commit()
+                self.logger.info("show game refresh commit succeeded game_id=%s", game.id)
+            except Exception as e:
+                db_session.rollback()
+                self.logger.exception(
+                    "show game refresh commit failed game_id=%s err=%s",
+                    game.id,
+                    e,
+                )
+                self._cleanup_game_files(files)
+            finally:
+                self._register_processed_game()
 
-            self.logger.info(
-                "show game refresh username=%s games_to_process=%s",
-                username,
-                len(unprocessed_games),
-            )
+    def _process_username_in_isolated_worker(self, username: str) -> None:
+        worker = ShowGameRefresh()
+        session = SessionLocal()
+        try:
+            worker._process_username(session, username)
+        finally:
+            session.close()
+            worker._clear_resolver_caches()
 
-            for game in unprocessed_games:
+    def run(self, db_session: Session):
+        usernames = [u for u in db_session.scalars(select(ShowProfile.username)) if u]
+        random.shuffle(usernames)
+        self._log_start(total_usernames=len(usernames), user_workers=self._user_workers)
+        self.logger.info(
+            "show game refresh start usernames=%s user_workers=%s",
+            len(usernames),
+            self._user_workers,
+        )
 
-                self.logger.info("show game refresh processing game_id=%s username=%s", game.id, username)
-                files = self._process_game(db_session, username, game)
-                if files is None:
-                    db_session.rollback()
-                    self._register_processed_game()
-                    continue
+        if self._user_workers <= 1 or len(usernames) <= 1:
+            for username in usernames:
+                self._process_username(db_session, username)
+            self._clear_resolver_caches()
+            return
 
+        max_workers = min(self._user_workers, len(usernames))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_by_username = {
+                pool.submit(self._process_username_in_isolated_worker, username): username
+                for username in usernames
+            }
+            for future in as_completed(future_by_username):
+                username = future_by_username[future]
                 try:
-                    db_session.commit()
-                    self.logger.info("show game refresh commit succeeded game_id=%s", game.id)
+                    future.result()
                 except Exception as e:
-                    db_session.rollback()
                     self.logger.exception(
-                        "show game refresh commit failed game_id=%s err=%s",
-                        game.id,
+                        "show game refresh username failed username=%s err=%s",
+                        username,
                         e,
                     )
-                    self._cleanup_game_files(files)
-                finally:
-                    self._register_processed_game()
 
         self._clear_resolver_caches()
 
@@ -378,15 +417,28 @@ class ShowGameRefresh(Job):
                 the list of unprocessed non cpu games
 
         '''
-        def _is_cpu(s: str | None) -> bool:
-            if not s:
-                return False
-            t = str(s).strip()
-            t = re.sub(r"\s*\^b\d+\^\s*$", "", t).strip()
-            return t.upper() == "CPU"
-
         latest_processed_game_id = self._latest_processed_game_id(db_session, username)
-        api_games = self._fetch_game_history(username, stop_at_game_id=latest_processed_game_id)
+        api_games, sampled_candidate_ids, _ = self._fetch_game_history(
+            username,
+            stop_at_game_id=latest_processed_game_id,
+        )
+
+        if sampled_candidate_ids:
+            sampled_existing = self._existing_game_ids(
+                db_session,
+                username,
+                candidate_ids=list(sampled_candidate_ids),
+            )
+            missing_sample_ids = sampled_candidate_ids - sampled_existing
+            if missing_sample_ids:
+                self.logger.warning(
+                    "show game refresh early stop validation failed username=%s sampled=%s missing=%s refetch=full",
+                    username,
+                    len(sampled_candidate_ids),
+                    len(missing_sample_ids),
+                )
+                api_games, _, _ = self._fetch_game_history(username, stop_at_game_id=None)
+
         if not api_games:
             self.logger.info("show game refresh no api games username=%s", username)
             return []
@@ -396,8 +448,8 @@ class ShowGameRefresh(Job):
         api_games = [
             g for g in api_games
             if not (
-                _is_cpu(g.home_full_name)
-                or _is_cpu(g.away_full_name)
+                self._is_cpu_name(g.home_full_name)
+                or self._is_cpu_name(g.away_full_name)
             )
         ]
         cpu_filtered = before - len(api_games)
@@ -422,6 +474,20 @@ class ShowGameRefresh(Job):
             latest_processed_game_id,
         )
         return remaining
+
+    def _is_cpu_name(self, raw: str | None) -> bool:
+        if not raw:
+            return False
+        t = str(raw).strip()
+        t = re.sub(r"\s*\^b\d+\^\s*$", "", t).strip()
+        return t.upper() == "CPU"
+
+    def _is_cpu_game_obj(self, obj: Mapping[str, Any]) -> bool:
+        return self._is_cpu_name(obj.get("home_full_name")) or self._is_cpu_name(obj.get("away_full_name"))
+
+    def _fetch_game_history_page(self, username: str, page: int) -> Mapping[str, Any]:
+        params = {"username": username, "platform": "xbox", "page": page}
+        return self._api_client.get(GAME_HISTORY_URL, params) or {}
 
     def _latest_processed_game_id(self, db_session: Session, username: str) -> Optional[str]:
         stmt = (
@@ -469,7 +535,7 @@ class ShowGameRefresh(Job):
         self,
         username: str,
         stop_at_game_id: Optional[str] = None,
-    ) -> None | List[GameHistory]:
+    ) -> tuple[List[GameHistory], Set[str], bool]:
         '''
             Gets all game_history objects from the mlb the show api
             params:
@@ -477,15 +543,16 @@ class ShowGameRefresh(Job):
             returns:
                 the list of game_history objects from the mlb the show api or None if no results from api
         '''
-        params = {"username": username, "platform": "xbox", "page": 1}
         self.logger.debug("show game refresh fetch game history username=%s", username)
-        res = self._api_client.get(GAME_HISTORY_URL, params)
+        res = self._fetch_game_history_page(username, page=1)
         max_pages = self._json_get(res, "total_pages", default=0) or 0
         if max_pages <= 0 and (self._json_get(res, "game_history", default=[]) or []):
             max_pages = 1
         page = 1
         game_objs: list[dict[str, Any]] = []
         stop_hit = False
+        sampled_candidate_ids: Set[str] = set()
+        sampled_pages: list[int] = []
 
         while page <= max_pages:
             items = self._json_get(res, "game_history", default=[]) or []
@@ -503,22 +570,42 @@ class ShowGameRefresh(Job):
             if page > max_pages:
                 break
 
-            params["page"] = page
-            res = self._api_client.get(GAME_HISTORY_URL, params)
+            res = self._fetch_game_history_page(username, page=page)
+
+        if (
+            stop_at_game_id
+            and stop_hit
+            and self._history_validation_pages > 0
+            and page < max_pages
+        ):
+            sample_pool = list(range(page + 1, max_pages + 1))
+            sample_count = min(self._history_validation_pages, len(sample_pool))
+            sampled_pages = random.sample(sample_pool, sample_count) if sample_count > 0 else []
+            for sampled_page in sampled_pages:
+                sampled_res = self._fetch_game_history_page(username, page=sampled_page)
+                sampled_items = self._json_get(sampled_res, "game_history", default=[]) or []
+                for obj in sampled_items:
+                    if self._is_cpu_game_obj(obj):
+                        continue
+                    gid = str(obj.get("id", "")).strip()
+                    if gid:
+                        sampled_candidate_ids.add(gid)
 
         if not game_objs:
             self.logger.info("show game refresh game history empty username=%s", username)
-            return []
+            return [], sampled_candidate_ids, stop_hit
         
         games = [GameHistory.from_json(o) for o in game_objs]
         self.logger.info(
-            "show game refresh game history fetched username=%s count=%s stop_at_game_id=%s stop_hit=%s",
+            "show game refresh game history fetched username=%s count=%s stop_at_game_id=%s stop_hit=%s sampled_pages=%s sampled_candidates=%s",
             username,
             len(games),
             stop_at_game_id,
             stop_hit,
+            sampled_pages,
+            len(sampled_candidate_ids),
         )
-        return games
+        return games, sampled_candidate_ids, stop_hit
     
     def _fetch_game_log(self, username: str, game_id: str) -> Optional[GameLog]:
         '''
