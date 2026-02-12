@@ -9,5 +9,9 @@
     "web": "npm --workspace apps/web run dev",
     "mobile": "npm --workspace apps/mobile start",
     "mobile:tunnel": "npm --workspace apps/mobile start -- --tunnel"
+  },
+  "dependencies": {
+    "react-native-gifted-charts": "^1.4.73",
+    "react-native-linear-gradient": "^2.8.3"
   }
 }

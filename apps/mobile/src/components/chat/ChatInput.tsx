@@ -9,9 +9,10 @@ interface ChatInputProps {
   onSend: (text: string, replyToId?: number) => void;
   replyingTo: ChatMessage | null;
   onCancelReply: () => void;
+  placeholder?: string;
 }
 
-export const ChatInput = ({ onSend, replyingTo, onCancelReply }: ChatInputProps) => {
+export const ChatInput = ({ onSend, replyingTo, onCancelReply, placeholder }: ChatInputProps) => {
   const [text, setText] = useState("");
 
   const handleSend = () => {
@@ -39,7 +40,7 @@ export const ChatInput = ({ onSend, replyingTo, onCancelReply }: ChatInputProps)
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
-          placeholder={replyingTo ? "Write a reply..." : "Message #Main Chat"}
+          placeholder={replyingTo ? "Write a reply..." : (placeholder || "Message #Main Chat")}
           placeholderTextColor={theme.colors.muted}
           value={text}
           onChangeText={setText}

@@ -2,13 +2,16 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { theme } from '../theme/colors';
 
+const DEFAULT_BAR_COLOR = '#3b82f6';
+
 type AttributeBarProps = {
   label: string;
   value: number;
   maxValue?: number; 
+  barColor?: string;
 };
 
-export const AttributeBar = ({ label, value, maxValue = 125 }: AttributeBarProps) => {
+export const AttributeBar = ({ label, value, maxValue = 125, barColor }: AttributeBarProps) => {
   const widthPercent = Math.min((value / maxValue) * 100, 100);
 
   return (
@@ -19,7 +22,7 @@ export const AttributeBar = ({ label, value, maxValue = 125 }: AttributeBarProps
       </View>
       
       <View style={styles.track}>
-        <View style={[styles.fill, { width: `${widthPercent}%` }]} />
+        <View style={[styles.fill, { width: `${widthPercent}%`, backgroundColor: barColor || DEFAULT_BAR_COLOR }]} />
       </View>
     </View>
   );
@@ -53,7 +56,7 @@ const styles = StyleSheet.create({
   },
   fill: {
     height: '100%',
-    backgroundColor: '#3b82f6', 
+    backgroundColor: DEFAULT_BAR_COLOR,
     borderRadius: 4,
   },
 });

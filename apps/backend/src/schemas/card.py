@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 # This class defines the JSON structure that gets returned
 class CardResponse(BaseModel):
@@ -73,7 +73,10 @@ class CardResponse(BaseModel):
     baserunning_ability: int
     baserunning_aggression: int
 
-    
+    comment_count: Optional[int] = 0
+    user_prediction_count: Optional[int] = 0
+    predicted_ovr: Optional[int] = None
+    predicted_attributes: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

@@ -26,10 +26,14 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
   const isLikedByMe = currentUserUid 
     ? message.likedByFirebaseIds?.includes(currentUserUid)
     : false;
-  // ------------------
+  
 
-  const timeString = new Date(message.createdAt).toLocaleTimeString([], { 
-    hour: 'numeric', minute: '2-digit' 
+  const timeString = new Date(message.createdAt).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 
   useEffect(() => {

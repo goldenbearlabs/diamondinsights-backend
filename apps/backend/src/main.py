@@ -17,8 +17,11 @@ from src.api.routes import (
     users,
     show_profiles,
     search,
-    chat
-)
+    chat,
+    card_predictions,
+    user_predictions,
+    card_comments
+    )
 
 load_dotenv()
 
@@ -55,7 +58,9 @@ app.include_router(show_profiles.router)
 app.include_router(show_profiles.public_router)
 app.include_router(search.router)
 app.include_router(chat.router)
-
+app.include_router(card_predictions.router)
+app.include_router(user_predictions.router)
+app.include_router(card_comments.router)
 @app.get("/")
 def health_check():
     return {"status": "API is running", "project": "DiamondInsights"}

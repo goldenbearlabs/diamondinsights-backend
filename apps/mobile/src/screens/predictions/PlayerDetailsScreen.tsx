@@ -1,14 +1,40 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
-import { AttributeBar } from '../../predictionscomponents/AttributeBar'; 
+import { AttributeBar } from '../../predictionscomponents/AttributeBar';
+import PredictionAttributeBar from '../../predictionscomponents/PredictionAttributeBar';
 import { theme } from '../../theme/colors';
+import { TextInput, Alert, ActivityIndicator } from 'react-native';
+import { useState, useEffect } from 'react';
+import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
+import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
+import { MarketSpreadChart } from '../../components/playerdetails/MarketSpreadChart';
+import { MarketVolumeChart } from '../../components/playerdetails/MarketVolumeChart';
 
 const TWO_WAY_PLAYERS = [
   "Shohei Ohtani",
+];
+
+const STUB_ICON = require('../../../assets/images/stub.png');
+
+const BATTING_PREDICTION_KEYS = [
+  { key: 'CON_R', label: 'Contact R' },
+  { key: 'CON_L', label: 'Contact L' },
+  { key: 'POW_R', label: 'Power R' },
+  { key: 'POW_L', label: 'Power L' },
+  { key: 'VIS', label: 'Vision' },
+  { key: 'CLT', label: 'Clutch' },
+];
+
+const PITCHING_PREDICTION_KEYS = [
+  { key: 'STA', label: 'Stamina' },
+  { key: 'PCLT', label: 'Clutch' },
+  { key: 'H_9', label: 'H/9' },
+  { key: 'K_9', label: 'K/9' },
+  { key: 'BB_9', label: 'BB/9' },
 ];
 
 export default function PlayerDetailsScreen() {
@@ -20,9 +46,110 @@ export default function PlayerDetailsScreen() {
 
   const isTwoWay = TWO_WAY_PLAYERS.includes(card.name);
 
-  
   const showPitching = card.is_hitter === false || isTwoWay;
   const showBatting = card.is_hitter === true || isTwoWay;
+
+  const BATTING_COLOR = '#3b82f6';
+  const PITCHING_COLOR = '#fbbf24';
+  const FIELDING_COLOR = '#22c55e';
+ 
+  const [userPrediction, setUserPrediction] = useState<string>('');
+  const [loadingPred, setLoadingPred] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'attributes' | 'market'>('attributes');
+  
+  const [buyPrice, setBuyPrice] = useState<number | null>(null);
+  const [sellPrice, setSellPrice] = useState<number | null>(null);
+  const [buyVolume, setBuyVolume] = useState<number | null>(null);
+  const [sellVolume, setSellVolume] = useState<number | null>(null);
+  // 2. New State for Candles
+  const [marketCandles, setMarketCandles] = useState<any[]>([]);
+  const [loadingMarket, setLoadingMarket] = useState(false);
+
+  useEffect(() => {
+    if (card?.id) {
+      setLoadingPred(true);
+      getUserPrediction(card.id)
+        .then(res => {
+          setUserPrediction(res.predicted_ovr.toString());
+          setIsSubmitted(true);
+        })
+        .catch(() => {}) 
+        .finally(() => setLoadingPred(false));
+    }
+  }, [card?.id]);
+
+  const handlePredict = async () => {
+    const val = parseInt(userPrediction, 10);
+    if (isNaN(val) || val < 0 || val > 99) {
+      Alert.alert("Invalid Input", "Please enter a valid overall (0-99).");
+      return;
+    }
+    try {
+      setLoadingPred(true);
+      await saveUserPrediction({ card_id: card.id, predicted_ovr: val });
+      setIsSubmitted(true);
+      Alert.alert("Success", "Your prediction has been saved!");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to save prediction");
+    } finally {
+      setLoadingPred(false);
+    }
+  };
+
+  useEffect(() => {
+    const fetchMarket = async () => {
+      if (!card?.id) return;
+      setLoadingMarket(true);
+
+      try {
+        const [buyRes, sellRes, candlesRes, volumeRes] = await Promise.all([
+          apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=true&limit=1`),
+          apiGet<any[]>(`/completed_orders/latest?card_id=${card.id}&is_buy=false&limit=1`),
+          apiGet<any[]>(`/completed_orders/${card.id}/history?limit=500`),
+          apiGet<any[]>(`/market_candles/?card_id=${card.id}&series=live&limit=1`)
+        ]);
+
+        setBuyPrice(buyRes?.[0]?.price ?? null);
+        setSellPrice(sellRes?.[0]?.price ?? null);
+        setMarketCandles(candlesRes || []);
+        setBuyVolume(volumeRes?.[0]?.buy_volume ?? null);
+        setSellVolume(volumeRes?.[0]?.sell_volume ?? null);
+      } catch (err) {
+        setBuyPrice(null);
+        setSellPrice(null);
+        setBuyVolume(null);
+        setSellVolume(null);
+        setMarketCandles([]);
+      } finally {
+        setLoadingMarket(false);
+      }
+    };
+
+    fetchMarket();
+  }, [card?.id]);
+
+  const handleInfoPress = () => {
+    Alert.alert(
+      "Prediction Info",
+      "These are your personal predictions based on what overall you think this player will go up/down to after the next roster update. Your predictions will be scored after the next roster update.\n\nNote: All predictions are locked and finalized 48 hours before the next roster update.",
+      [{ text: "Got it" }]
+    );
+  };
+
+  const getSellNowPrice = (ovr: number): number => {
+    if (ovr >= 95) return 10000;
+    if (ovr >= 92) return 10000;
+    const table: Record<number, number> = {
+      91: 9000, 90: 8000, 89: 7000, 88: 5500, 87: 4500,
+      86: 3750, 85: 3000, 84: 1500, 83: 1200, 82: 900,
+      81: 600, 80: 400, 79: 150, 78: 125, 77: 100,
+      76: 75, 75: 50,
+    };
+    if (table[ovr] !== undefined) return table[ovr];
+    if (ovr >= 65) return 25;
+    return 5;
+  };
 
   return (
     <View style={styles.container}>
@@ -42,7 +169,16 @@ export default function PlayerDetailsScreen() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+        >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           
           {/* bio section */}
           <View style={styles.glassCard}>
@@ -59,56 +195,295 @@ export default function PlayerDetailsScreen() {
                 </Text>
                 <Text style={styles.teamText}>Throws: {card.throw_hand} • Bats: {card.bat_hand}</Text>
                 <View style={styles.divider} />
-                <View style={styles.statBadge}>
-                  <Text style={styles.statLabel}>OVERALL</Text>
-                  <Text style={styles.statValue}>{card.ovr}</Text>
+                <View style={styles.overallRow}>
+                  <View style={styles.statBadge}>
+                    <Text style={styles.statLabel}>OVERALL</Text>
+                    <Text style={styles.statValue}>{card.ovr}</Text>
+                  </View>
+                  {card.predicted_ovr != null && (
+                    <View style={[styles.statBadge, {
+                      backgroundColor: card.predicted_ovr > card.ovr ? 'rgba(74, 222, 128, 0.15)' : card.predicted_ovr < card.ovr ? 'rgba(248, 113, 113, 0.15)' : 'rgba(107, 114, 128, 0.15)',
+                      borderColor: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                    }]}>
+                      <Text style={[styles.statLabel, {
+                        color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                      }]}>PRED</Text>
+                      <Text style={[styles.statValue, {
+                        color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                      }]}>{card.predicted_ovr}</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
           </View>
 
-          {/* attribute section */}
-          <Text style={styles.sectionTitle}>Attributes</Text>
-          <View style={styles.glassCard}>
-            
-            {/* pitching attributes */}
-            {showPitching && (
+          {/* COMMENTS SECTION */}
+          <CardCommentsSection cardId={card.id} />
+
+          {/* USER PREDICTION SECTION (New Location) */}
+          <View style={[styles.glassCard, { marginTop: 16, padding: 16 }]}>
+            {isSubmitted ? (
+               // SUBMITTED STATE UI
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Ionicons name="checkmark-circle" size={32} color="#22c55e" />
+                  <View>
+                    <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                      Prediction Submitted
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 14 }}>
+                      You predicted: <Text style={{ color: 'white', fontWeight: 'bold' }}>{userPrediction}</Text>
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity 
+                  onPress={() => setIsSubmitted(false)}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                    borderRadius: 8
+                  }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
               <>
-                <Text style={styles.subHeader}>Pitching</Text>
-                <AttributeBar label="Stamina" value={card.stamina || 0} />
-                <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} />
-                <AttributeBar label="H/9" value={card.hits_per_bf || 0} /> 
-                <AttributeBar label="K/9" value={card.k_per_bf || 0} />
-                <AttributeBar label="BB/9" value={card.bb_per_bf || 0} />
-                <AttributeBar label="HR/9" value={card.hr_per_bf || 0} />
-                {/* Add a spacer if we are about to show batting stats below */}
-                {showBatting && <View style={{ height: 24 }} />}
+                {/* Header with Info Icon */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 18 }}>
+                    Your Prediction
+                  </Text>
+                  <TouchableOpacity onPress={handleInfoPress} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="information-circle-outline" size={22} color={theme.colors.muted} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Input and Button Row */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={{ 
+                    backgroundColor: 'rgba(255,255,255,0.1)', 
+                    borderRadius: 8, 
+                    paddingHorizontal: 12,
+                    height: 50,
+                    justifyContent: 'center',
+                    flex: 1
+                  }}>
+                    <TextInput
+                      value={userPrediction}
+                      onChangeText={setUserPrediction}
+                      placeholder="Enter OVR (e.g. 88)"
+                      placeholderTextColor="rgba(255,255,255,0.5)"
+                      style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}
+                      keyboardType="numeric"
+                      maxLength={2}
+                    />
+                  </View>
+                  
+                  <TouchableOpacity
+                    onPress={handlePredict}
+                    disabled={loadingPred}
+                    style={{
+                      backgroundColor: theme.colors.primary,
+                      height: 50,
+                      borderRadius: 8,
+                      paddingHorizontal: 20,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      opacity: loadingPred ? 0.7 : 1
+                    }}
+                  >
+                    {loadingPred ? (
+                      <ActivityIndicator color="white" />
+                    ) : (
+                      <Text style={{ color: 'white', fontWeight: 'bold' }}>Predict</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </>
             )}
-
-            {/* batting */}
-            {showBatting && (
-               <>
-                <Text style={styles.subHeader}>Batting</Text>
-                <AttributeBar label="Contact R" value={card.contact_right || 0} />
-                <AttributeBar label="Contact L" value={card.contact_left || 0} />
-                <AttributeBar label="Power R" value={card.power_right || 0} />
-                <AttributeBar label="Power L" value={card.power_left || 0} />
-                <AttributeBar label="Vision" value={card.plate_vision || 0} />
-                <AttributeBar label="Clutch" value={card.batting_clutch || 0} />
-                <View style={{ height: 16 }} />
-              </>
-            )}
-
-            {/* Fielding  */}
-             <Text style={styles.subHeader}>Fielding</Text>
-             <AttributeBar label="Fielding" value={card.fielding_ability || 0} />
-             <AttributeBar label="Arm Strength" value={card.arm_strength || 0} />
-             <AttributeBar label="Reaction" value={card.reaction_time || 0} />
-
           </View>
 
+          {/* attribute / market tabs */}
+          <View style={styles.tabsContainer}>
+            <TouchableOpacity
+              onPress={() => setActiveTab('attributes')}
+              style={[styles.tabButton, activeTab === 'attributes' && styles.tabButtonActive]}
+            >
+              <Text style={[styles.tabText, activeTab === 'attributes' && styles.tabTextActive]}>Attributes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveTab('market')}
+              style={[styles.tabButton, activeTab === 'market' && styles.tabButtonActive]}
+            >
+              <Text style={[styles.tabText, activeTab === 'market' && styles.tabTextActive]}>Market</Text>
+            </TouchableOpacity>
+          </View>
+
+          {activeTab === 'attributes' ? (
+            <>
+              <Text style={styles.sectionTitle}>Attributes</Text>
+              <View style={styles.glassCard}>
+                
+                {/* pitching attributes */}
+                {showPitching && (
+                  <>
+                    <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                    <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                    <AttributeBar label="Stamina" value={card.stamina || 0} barColor={PITCHING_COLOR} />
+                    <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} barColor={PITCHING_COLOR} />
+                    <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} /> 
+                    <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
+                    <AttributeBar label="BB/9" value={card.bb_per_bf || 0} barColor={PITCHING_COLOR} />
+                    {showBatting && <View style={{ height: 24 }} />}
+                  </>
+                )}
+
+                {/* batting */}
+                {showBatting && (
+                   <>
+                  <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                  <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                    <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Contact</Text>
+                    <AttributeBar label="Contact R" value={card.contact_right || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Contact L" value={card.contact_left || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Vision" value={card.plate_vision || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Clutch" value={card.batting_clutch || 0} barColor={BATTING_COLOR} />
+                    <View style={{ height: 12 }} />
+                    <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Power</Text>
+                    <AttributeBar label="Power R" value={card.power_right || 0} barColor={BATTING_COLOR} />
+                    <AttributeBar label="Power L" value={card.power_left || 0} barColor={BATTING_COLOR} />
+                    <View style={{ height: 16 }} />
+                  </>
+                )}
+
+                {/* Fielding  */}
+                 <Text style={[styles.subHeader, { color: FIELDING_COLOR }]}>Fielding</Text>
+                 <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
+                 <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Reaction" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
+
+              </View>
+
+              {/* Predicted Attributes */}
+              {card.predicted_attributes && (
+                <>
+                  <View style={styles.predictionHeader}>
+                    <View style={styles.proBadge}>
+                      <FontAwesome5 name="crown" size={10} color="#fbbf24" style={styles.proIcon} />
+                      <Text style={styles.proText}>PRO</Text>
+                    </View>
+                    <Text style={[styles.sectionTitle, { color: '#fbbf24', marginBottom: 0 }]}>Predicted Attributes</Text>
+                  </View>
+                  <View style={styles.glassCard}>
+                    
+                    {/* Pitching Predictions */}
+                    {PITCHING_PREDICTION_KEYS.some(({ key }) => 
+                      card.predicted_attributes?.[`pit_pred_${key}_new`] != null
+                    ) && (
+                      <>
+                        <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                        {PITCHING_PREDICTION_KEYS.map(({ key, label }) => {
+                          const newVal = card.predicted_attributes?.[`pit_pred_${key}_new`];
+                          const delta = card.predicted_attributes?.[`pit_pred_${key}_delta`];
+                          if (newVal == null || delta == null) return null;
+                          return (
+                            <PredictionAttributeBar
+                              key={key}
+                              label={label}
+                              predictedValue={Math.round(newVal)}
+                              delta={delta}
+                            />
+                          );
+                        })}
+                        {showBatting && <View style={{ height: 24 }} />}
+                      </>
+                    )}
+
+                    {/* Batting Predictions */}
+                    {BATTING_PREDICTION_KEYS.some(({ key }) => 
+                      card.predicted_attributes?.[`hit_pred_${key}_new`] != null
+                    ) && (
+                      <>
+                        <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                        {BATTING_PREDICTION_KEYS.map(({ key, label }) => {
+                          const newVal = card.predicted_attributes?.[`hit_pred_${key}_new`];
+                          const delta = card.predicted_attributes?.[`hit_pred_${key}_delta`];
+                          if (newVal == null || delta == null) return null;
+                          return (
+                            <PredictionAttributeBar
+                              key={key}
+                              label={label}
+                              predictedValue={Math.round(newVal)}
+                              delta={delta}
+                            />
+                          );
+                        })}
+                      </>
+                    )}
+
+                  </View>
+                </>
+              )}
+            </>
+          ) : (
+            // 5. Updated Market Tab (Kept your exact layout + Added Chart)
+            <>
+              <Text style={styles.sectionTitle}>Market</Text>
+              <View style={styles.glassCard}>
+                <View style={styles.marketGrid}>
+                  <View style={styles.marketColumn}>
+                    <Text style={styles.marketLabel}>Buy Order</Text>
+                    {loadingMarket ? (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>Loading...</Text>
+                    ) : buyPrice !== null ? (
+                      <View style={styles.marketValueRow}>
+                        <Image source={STUB_ICON} style={styles.marketIcon} />
+                        <Text style={styles.marketValue}>{buyPrice.toLocaleString()}</Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>N/A</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.marketColumn}>
+                    <Text style={styles.marketLabel}>Quick Sell</Text>
+                    <View style={styles.marketValueRow}>
+                      <Image source={STUB_ICON} style={styles.marketIcon} />
+                      <Text style={styles.marketValue}>{getSellNowPrice(card.ovr).toLocaleString()}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.marketColumn}>
+                    <Text style={styles.marketLabel}>Sell Order</Text>
+                    {loadingMarket ? (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>Loading...</Text>
+                    ) : sellPrice !== null ? (
+                      <View style={styles.marketValueRow}>
+                        <Image source={STUB_ICON} style={styles.marketIcon} />
+                        <Text style={styles.marketValue}>{sellPrice.toLocaleString()}</Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.marketValue, styles.marketValueText]}>N/A</Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+
+              {/* NEW CHART ADDED HERE */}
+              <MarketSpreadChart data={marketCandles} loading={loadingMarket} />
+              <MarketVolumeChart buyVolume={buyVolume} sellVolume={sellVolume} loading={loadingMarket} />
+            </>
+          )}
+
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );
@@ -139,8 +514,71 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
     padding: 10, borderRadius: 8, alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#3b82f6'
   },
+  overallRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   statLabel: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
   statValue: { color: '#3b82f6', fontSize: 24, fontWeight: '900' },
+  tabsContainer: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    alignItems: 'center',
+  },
+  tabButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(59, 130, 246, 0.6)',
+  },
+  tabText: { color: theme.colors.muted, fontSize: 14, fontWeight: '600' },
+  tabTextActive: { color: theme.colors.text, fontWeight: '700' },
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
-  subHeader: { color: '#3b82f6', fontSize: 14, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase' },
+  subHeader: { color: '#3b82f6', fontSize: 15, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase' },
+  subHeaderDivider: { height: 1, opacity: 0.45, marginBottom: 10 },
+  subHeaderSmall: { color: '#3b82f6', fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase' },
+  marketGrid: { flexDirection: 'row', gap: 16 },
+  marketColumn: { flex: 1 },
+  marketLabel: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
+  marketValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  marketIcon: { width: 16, height: 16, resizeMode: 'contain' },
+  marketValue: { color: 'white', fontSize: 16, fontWeight: '700' },
+  marketValueText: { marginTop: 6 },
+  predictionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  proBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  proIcon: {
+    marginRight: 4,
+  },
+  proText: {
+    color: '#fbbf24',
+    fontWeight: '800',
+    fontSize: 10,
+    letterSpacing: 0.4,
+  },
+  subSectionTitle: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 12,
+    marginBottom: 8,
+  },
 });

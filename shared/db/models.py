@@ -133,6 +133,7 @@ class Card(Base):
         uselist=False, 
         cascade="all, delete-orphan"
     )
+    comments: Mapped[List["Comment"]] = relationship(back_populates="card", cascade="all, delete-orphan")
     predictions: Mapped[List["CardPrediction"]] = relationship(back_populates="card", passive_deletes=True)
     position_overalls: Mapped[List["CardPositionOverall"]] = relationship(
         back_populates="card", passive_deletes=True, cascade="all, delete-orphan"
@@ -710,6 +711,8 @@ class Users(Base):
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     messages: Mapped[List["Message"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    comments: Mapped[List["Comment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    comment_likes: Mapped[List["CommentLike"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"USERS (id={self.id}, firebase_id={self.firebase_id}, email={self.email})"
@@ -1143,3 +1146,413 @@ class ShowBallParks(Base):
 
     def __repr__(self) -> str:
         return f"SHOW_BALL_PARKS (id={self.id}, name={self.name})"
+    
+class ShowGameHalfInning(Base):
+    __tablename__ = "show_game_half_innings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    game_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("show_game_summary.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    inning: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    is_home_batting: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    runs: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    hits: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    walks: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    errors: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    pitches: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    runners_left_on: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("game_id", "inning", "is_home_batting", name="uq_half_inning_game_inning_side"),
+        Index("ix_half_inning_game_inning", "game_id", "inning"),
+    )
+    
+class ShowBatterBoxscore(Base):
+    __tablename__ = "show_batter_boxscore"
+
+    game_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("show_game_summary.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+
+    appearance_idx: Mapped[int] = mapped_column(Integer, primary_key=True)
+    replaced_apperance_idx: Mapped[Optional[int]] = mapped_column(Integer)
+
+    player_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+    mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+    ab: Mapped[int] = mapped_column(Integer)
+    h: Mapped[int] = mapped_column(Integer)
+    r: Mapped[int] = mapped_column(Integer)
+    rbi: Mapped[int] = mapped_column(Integer)
+    bb: Mapped[int] = mapped_column(Integer)
+    so: Mapped[int] = mapped_column(Integer)
+    doubles: Mapped[int] = mapped_column(Integer)
+    triples: Mapped[int] = mapped_column(Integer)
+    hr: Mapped[int] = mapped_column(Integer)
+    sh: Mapped[int] = mapped_column(Integer)
+    sf: Mapped[int] = mapped_column(Integer)
+    gidp: Mapped[int] = mapped_column(Integer)
+    e: Mapped[int] = mapped_column(Integer)
+    pb: Mapped[int] = mapped_column(Integer)
+    hbp: Mapped[int] = mapped_column(Integer)
+    sb: Mapped[int] = mapped_column(Integer)
+    cs: Mapped[int] = mapped_column(Integer)
+
+    innings: Mapped[int] = mapped_column(Integer)
+    pos: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("ix_show_batter_boxscore_game_side", "game_id", "is_home"),
+        Index("ix_show_batter_boxscore_mlb_id", "mlb_id"),
+    )
+
+class ShowBatterBoxscoreCardCandidate(Base):
+    __tablename__ = "show_batter_boxscore_card_candidates"
+
+    game_id: Mapped[str] = mapped_column(String, primary_key=True)
+    is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    appearance_idx: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    card_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("cards.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    score: Mapped[Optional[float]] = mapped_column(Float)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["game_id", "is_home", "appearance_idx"],
+            ["show_batter_boxscore.game_id", "show_batter_boxscore.is_home", "show_batter_boxscore.appearance_idx"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_show_batter_boxscore_candidates_card", "card_id"),
+    )
+
+
+class ShowPitcherBoxscore(Base):
+    __tablename__ = "show_pitcher_boxscore"
+
+    game_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("show_game_summary.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+
+    appearance_idx: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+
+    player_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+    mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+    ip_raw: Mapped[str] = mapped_column(String(8), nullable=False)
+    outs_pitched: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+    r: Mapped[int] = mapped_column(Integer)
+    h: Mapped[int] = mapped_column(Integer)
+    er: Mapped[int] = mapped_column(Integer)
+    bb: Mapped[int] = mapped_column(Integer)
+    so: Mapped[int] = mapped_column(Integer)
+    era: Mapped[Optional[float]] = mapped_column(Float)
+
+    wp: Mapped[int] = mapped_column(Integer)
+    win: Mapped[int] = mapped_column(Integer)
+    loss: Mapped[int] = mapped_column(Integer)
+    save: Mapped[int] = mapped_column(Integer)
+    b_save: Mapped[int] = mapped_column(Integer)
+    hold: Mapped[int] = mapped_column(Integer)
+
+    s_wins: Mapped[int] = mapped_column(Integer)
+    s_losses: Mapped[int] = mapped_column(Integer)
+    s_saves: Mapped[int] = mapped_column(Integer)
+    s_b_saves: Mapped[int] = mapped_column(Integer)
+    s_holds: Mapped[int] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("ix_show_pitcher_boxscore_game_side", "game_id", "is_home"),
+        Index("ix_show_pitcher_boxscore_mlb_id", "mlb_id"),
+    )
+
+class ShowPitcherBoxscoreCardCandidate(Base):
+    __tablename__ = "show_pitcher_boxscore_card_candidates"
+
+    game_id: Mapped[str] = mapped_column(String, primary_key=True)
+    is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    appearance_idx: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+
+    card_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("cards.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    score: Mapped[Optional[float]] = mapped_column(Float)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["game_id", "is_home", "appearance_idx"],
+            ["show_pitcher_boxscore.game_id", "show_pitcher_boxscore.is_home", "show_pitcher_boxscore.appearance_idx"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_show_pitcher_boxscore_candidates_card", "card_id"),
+    )
+
+class ShowGameEvent(Base):
+    __tablename__ = "show_game_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    game_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("show_game_summary.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    half_inning_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("show_game_half_innings.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
+
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)  # strict order in entire game
+    inning: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    is_home_batting: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+
+    # Snapshots (so you don't need to replay to answer basic questions)
+    outs_before: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    outs_after: Mapped[Optional[int]] = mapped_column(SmallInteger)
+
+    home_score_before: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    away_score_before: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    home_score_after: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    away_score_after: Mapped[Optional[int]] = mapped_column(SmallInteger)
+
+    # Base occupancy snapshots (pre/post)
+    pre_on_1b: Mapped[Optional[bool]] = mapped_column(Boolean)
+    pre_on_2b: Mapped[Optional[bool]] = mapped_column(Boolean)
+    pre_on_3b: Mapped[Optional[bool]] = mapped_column(Boolean)
+    post_on_1b: Mapped[Optional[bool]] = mapped_column(Boolean)
+    post_on_2b: Mapped[Optional[bool]] = mapped_column(Boolean)
+    post_on_3b: Mapped[Optional[bool]] = mapped_column(Boolean)
+
+    # What is this event?
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)  
+    # e.g. "pa", "pitching_change", "pinch_hit", "substitution", "balk", "wild_pitch", "passed_ball", "runner_out", "pickoff", etc.
+
+    # Always store the raw snippet that produced the event (replay/debug)
+    event_text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Color-code markers / context flags
+    is_critical_play: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_critical_situation: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_go_ahead_play: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_simulated_play: Mapped[Optional[bool]] = mapped_column(Boolean)
+
+    event_seq_in_half: Mapped[Optional[int]] = mapped_column(SmallInteger)
+
+    parser_version: Mapped[Optional[str]] = mapped_column(String(32))
+
+    __table_args__ = (
+        UniqueConstraint("game_id", "seq", name="uq_show_game_events_game_seq"),
+        Index("ix_show_game_events_half_seq", "half_inning_id", "seq"),
+        Index("ix_show_game_events_type", "game_id", "event_type"),
+    )
+
+class ShowGamePlateAppearance(Base):
+    __tablename__ = "show_game_plate_appearances"
+
+    event_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("show_game_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    batter_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+    pitcher_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    # If you can resolve to your Player table, store mlb_id here
+    batter_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    pitcher_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+    # Outcome basics
+    result: Mapped[Optional[str]] = mapped_column(String(32))          # single/double/hr/so/flyout/etc
+    batted_ball_type: Mapped[Optional[str]] = mapped_column(String(32))  # ground/fly/line/popup
+    fielder_pos: Mapped[Optional[str]] = mapped_column(String(8))      # CF/SS/1B etc
+    putout_code: Mapped[Optional[str]] = mapped_column(String(32))     # F7, 6-3, SF8, 6-4-3 DP, etc
+
+    is_out: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_double_play: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_sac_fly: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_sac_bunt: Mapped[Optional[bool]] = mapped_column(Boolean)
+
+    runs_scored: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    rbi: Mapped[Optional[int]] = mapped_column(SmallInteger)
+
+    # HR / contact quality
+    hr_distance_ft: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    is_perfect_perfect: Mapped[Optional[bool]] = mapped_column(Boolean)
+    exit_vel_mph: Mapped[Optional[int]] = mapped_column(SmallInteger)
+
+    # Strikeout extras (only when result is some kind of K)
+    is_strikeout: Mapped[Optional[bool]] = mapped_column(Boolean)
+    k_pitch_type: Mapped[Optional[str]] = mapped_column(String(32))
+    k_loc_height: Mapped[Optional[str]] = mapped_column(String(8))     # high/middle/low
+    k_loc_width: Mapped[Optional[str]] = mapped_column(String(8))      # inside/center/outside or left/center/right
+    k_is_chase: Mapped[Optional[bool]] = mapped_column(Boolean)
+    k_is_looking: Mapped[Optional[bool]] = mapped_column(Boolean)
+    k_timing: Mapped[Optional[str]] = mapped_column(String(32))        # early/late
+
+    batter_side: Mapped[Optional[str]] = mapped_column(String(8))      # L/R
+    pitcher_throws: Mapped[Optional[str]] = mapped_column(String(8))   # L/R
+
+    is_scoring_play: Mapped[Optional[bool]] = mapped_column(Boolean)
+    hit_direction: Mapped[Optional[str]] = mapped_column(String(32))
+    is_error: Mapped[Optional[bool]] = mapped_column(Boolean)
+    error_pos: Mapped[Optional[str]] = mapped_column(String(32))
+
+    event: Mapped["ShowGameEvent"] = relationship()
+
+class ShowEventCardCandidate(Base):
+    __tablename__ = "show_event_card_candidates"
+
+    event_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("show_game_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role: Mapped[str] = mapped_column(String(8), primary_key=True)  # "batter" | "pitcher" | "runner"
+    card_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("cards.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    score: Mapped[Optional[float]] = mapped_column(Float)  # optional ranking/confidence
+
+class ShowEventRunnerMove(Base):
+    __tablename__ = "show_event_runner_moves"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    event_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("show_game_events.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    runner_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+    runner_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+    from_base: Mapped[Optional[int]] = mapped_column(SmallInteger)  # 0=batter, 1/2/3
+    to_base: Mapped[Optional[int]] = mapped_column(SmallInteger)    # 1/2/3/4(home), -1=out
+
+    move_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    # "advance", "score", "out", "stolen_base", "caught_stealing", "pickoff",
+    # "extra_bases_out", "wild_pitch", "passed_ball", etc.
+
+    note: Mapped[Optional[str]] = mapped_column(String(128))
+
+class ShowGamePitchingChange(Base):
+    __tablename__ = "show_game_pitching_changes"
+
+    event_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("show_game_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    pitcher_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+    pitcher_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+    replaced_pitcher_name_raw: Mapped[Optional[str]] = mapped_column(String(128))
+
+class ShowGameSubstitution(Base):
+    __tablename__ = "show_game_substitutions"
+
+    event_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("show_game_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    sub_type: Mapped[str] = mapped_column(String(24), nullable=False)   # "pinch_hit", "defensive", etc (start with pinch_hit)
+
+    incoming_player_name_raw: Mapped[str] = mapped_column(String(128), nullable=False)
+    outgoing_player_name_raw: Mapped[Optional[str]] = mapped_column(String(128))
+
+    incoming_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    outgoing_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+class ShowGamePitcherGameScore(Base):
+    __tablename__ = "show_game_pitcher_game_scores"
+
+    game_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("show_game_summary.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    pitcher_name_raw: Mapped[str] = mapped_column(String(128), primary_key=True)
+    is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    game_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    pitcher_mlb_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+class UserPrediction(Base):
+    __tablename__ = "user_predictions"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id"), primary_key=True)
+    predicted_ovr: Mapped[int] = mapped_column(Integer) 
+
+    def __repr__(self) -> str:
+        return f"USER_PREDICTION (user_id={self.user_id}, card_id={self.card_id}, predicted_ovr={self.predicted_ovr})"
+    
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), onupdate=_utcnow)
+    edited_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user: Mapped["Users"] = relationship(back_populates="comments")
+    
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), index=True)
+    card: Mapped["Card"] = relationship(back_populates="comments")
+    
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True)
+    replicas: Mapped[List["Comment"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
+    parent: Mapped[Optional["Comment"]] = relationship(back_populates="replicas", remote_side=[id])
+
+    likes: Mapped[List["CommentLike"]] = relationship(back_populates="comment", cascade="all, delete-orphan")
+
+    def __repr__(self) -> str:
+        return f"COMMENT(id={self.id}, user_id={self.user_id}, card_id={self.card_id})"
+
+class CommentLike(Base):
+    __tablename__ = "comment_likes"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    comment_id: Mapped[int] = mapped_column(ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    user: Mapped["Users"] = relationship(back_populates="comment_likes")
+    comment: Mapped["Comment"] = relationship(back_populates="likes")
+        
