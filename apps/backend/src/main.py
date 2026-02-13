@@ -14,6 +14,7 @@ from src.api.routes import (
     mlb_game_batting_stats,
     players,
     quirks,
+    records,
     users,
     show_profiles,
     search,
@@ -51,6 +52,7 @@ app.include_router(market_candles.router)
 app.include_router(mlb_game_batting_stats.router)
 app.include_router(players.router)
 app.include_router(users.router)
+app.include_router(records.router)
 app.include_router(show_profiles.router)
 app.include_router(show_profiles.public_router)
 app.include_router(search.router)

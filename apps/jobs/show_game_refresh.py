@@ -5,7 +5,7 @@ import re
 import unicodedata
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Set, Tuple, List, Dict, Any, Mapping
 from dataclasses import dataclass, field
 
@@ -453,6 +453,7 @@ class ShowGameRefresh(Job):
             )
         ]
         cpu_filtered = before - len(api_games)
+        api_games, canonical_filtered = self._dedupe_games_by_canonical_identity(api_games, username)
 
         api_game_ids = [g.id for g in api_games if g.id]
         existing_games = self._existing_game_ids(db_session, username, candidate_ids=api_game_ids)
@@ -466,10 +467,11 @@ class ShowGameRefresh(Job):
 
         remaining = [g for g in api_games if g.id not in existing_games]
         self.logger.info(
-            "show game refresh api_games username=%s total=%s cpu_filtered=%s unprocessed=%s latest_processed=%s",
+            "show game refresh api_games username=%s total=%s cpu_filtered=%s canonical_filtered=%s unprocessed=%s latest_processed=%s",
             username,
             len(api_games) + cpu_filtered,
             cpu_filtered,
+            canonical_filtered,
             len(remaining),
             latest_processed_game_id,
         )
@@ -488,6 +490,77 @@ class ShowGameRefresh(Job):
     def _fetch_game_history_page(self, username: str, page: int) -> Mapping[str, Any]:
         params = {"username": username, "platform": "xbox", "page": page}
         return self._api_client.get(GAME_HISTORY_URL, params) or {}
+
+    def _canonical_game_identity(
+        self,
+        game: GameHistory,
+        current_username: str,
+    ) -> Optional[tuple[str, str, str]]:
+        home_username, away_username = self._resolve_game_usernames(game, current_username)
+        if not home_username or not away_username or game.date is None:
+            return None
+        dt = game.date
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        dt_key = dt.replace(microsecond=0).isoformat()
+        return (
+            dt_key,
+            home_username.strip().lower(),
+            away_username.strip().lower(),
+        )
+
+    def _dedupe_games_by_canonical_identity(
+        self,
+        games: List[GameHistory],
+        current_username: str,
+    ) -> tuple[List[GameHistory], int]:
+        deduped: list[GameHistory] = []
+        seen: dict[tuple[str, str, str], str] = {}
+        dropped = 0
+
+        for game in games:
+            key = self._canonical_game_identity(game, current_username)
+            if key is None:
+                deduped.append(game)
+                continue
+            if key in seen:
+                dropped += 1
+                self.logger.info(
+                    "show game refresh deduped perspective duplicate username=%s kept_game_id=%s dropped_game_id=%s key=%s",
+                    current_username,
+                    seen[key],
+                    game.id,
+                    key,
+                )
+                continue
+            seen[key] = game.id
+            deduped.append(game)
+
+        return deduped, dropped
+
+    def _find_summary_by_canonical_identity(
+        self,
+        db_session: Session,
+        *,
+        game_date: Optional[datetime],
+        home_username: Optional[str],
+        away_username: Optional[str],
+    ) -> Optional[ShowGameSummary]:
+        if game_date is None or not home_username or not away_username:
+            return None
+        stmt = (
+            select(ShowGameSummary)
+            .where(
+                and_(
+                    ShowGameSummary.date == game_date,
+                    ShowGameSummary.home_profile_username == home_username,
+                    ShowGameSummary.away_profile_username == away_username,
+                )
+            )
+            .order_by(ShowGameSummary.id.asc())
+            .limit(1)
+        )
+        return db_session.scalars(stmt).first()
 
     def _latest_processed_game_id(self, db_session: Session, username: str) -> Optional[str]:
         stmt = (
@@ -638,6 +711,24 @@ class ShowGameRefresh(Job):
         game: GameHistory,
     ) -> Optional[dict[str, dict[str, Any]]]:
         self.logger.info("show game refresh process game start game_id=%s username=%s", game.id, username)
+
+        resolved_home_username, resolved_away_username = self._resolve_game_usernames(game, username)
+        canonical_existing = self._find_summary_by_canonical_identity(
+            db_session,
+            game_date=game.date,
+            home_username=resolved_home_username,
+            away_username=resolved_away_username,
+        )
+        if canonical_existing is not None and canonical_existing.id != game.id:
+            self.logger.info(
+                "show game refresh skip duplicate perspective game_id=%s canonical_game_id=%s date=%s home=%s away=%s",
+                game.id,
+                canonical_existing.id,
+                game.date,
+                resolved_home_username,
+                resolved_away_username,
+            )
+            return {}
 
         game_log = self._fetch_game_log(username, game.id)
         if not game_log:
@@ -1025,7 +1116,6 @@ class ShowGameRefresh(Job):
         weather_degrees, weather_description, weather_wind = game_log_text_regex.extract_weather()
 
         summary_fields = {
-            "id": game_id,
             "home_profile_username": home_username,
             "away_profile_username": away_username,
             "home_name": home_username,
@@ -1052,7 +1142,14 @@ class ShowGameRefresh(Job):
 
         existing = db_session.get(ShowGameSummary, game_id)
         if existing is None:
-            summary = ShowGameSummary(**summary_fields, ball_park=ball_park)
+            existing = self._find_summary_by_canonical_identity(
+                db_session,
+                game_date=game.date,
+                home_username=home_username,
+                away_username=away_username,
+            )
+        if existing is None:
+            summary = ShowGameSummary(id=game_id, **summary_fields, ball_park=ball_park)
             db_session.add(summary)
             self.logger.info("show game summary created game_id=%s", game_id)
             return summary
@@ -1063,7 +1160,7 @@ class ShowGameRefresh(Job):
             setattr(existing, field, value)
 
         existing.ball_park = ball_park
-        self.logger.info("show game summary updated game_id=%s", game_id)
+        self.logger.info("show game summary updated game_id=%s incoming_game_id=%s", existing.id, game_id)
         return existing
 
     def _infer_runner_from_base(

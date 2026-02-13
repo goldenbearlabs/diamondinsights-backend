@@ -11,7 +11,12 @@ from apps.jobs.show_game_agg import (
 
 def _agg() -> ShowGameAgg:
     # Avoid Spaces env dependencies for pure helper tests.
-    return ShowGameAgg.__new__(ShowGameAgg)
+    agg = ShowGameAgg.__new__(ShowGameAgg)
+    agg.logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+    )
+    return agg
 
 
 def test_collect_record_candidates_extracts_expected_rows():
@@ -201,6 +206,118 @@ def test_append_and_write_records_merges_and_ranks():
     assert hh_rows[1]["exit_vel_mph"] == 108.0
 
 
+def test_merge_record_rows_dedupes_when_existing_is_empty():
+    agg = _agg()
+    new_rows = [
+        {"game_id": "g1", "event_id": 1, "distance_ft": 420.0},
+        {"game_id": "g1", "event_id": 1, "distance_ft": 420.0},
+        {"game_id": "g1", "event_id": 2, "distance_ft": 410.0},
+    ]
+
+    merged = agg._merge_record_rows([], new_rows)
+
+    assert len(merged) == 2
+    keys = {(str(r.get("game_id")), int(r.get("event_id"))) for r in merged}
+    assert keys == {("g1", 1), ("g1", 2)}
+
+
+def test_merge_pas_rows_dedupes_when_existing_is_empty():
+    agg = _agg()
+    new_rows = [
+        {
+            "game_id": "g1",
+            "event_seq": 1,
+            "batter_mlb_id": 10,
+            "pitcher_mlb_id": 20,
+            "result": "single",
+        },
+        {
+            "game_id": "g1",
+            "event_seq": 1,
+            "batter_mlb_id": 10,
+            "pitcher_mlb_id": 20,
+            "result": "single",
+        },
+        {
+            "game_id": "g1",
+            "event_seq": 2,
+            "batter_mlb_id": 11,
+            "pitcher_mlb_id": 20,
+            "result": "home_run",
+        },
+    ]
+
+    merged = agg._merge_pas_rows([], new_rows)
+
+    assert len(merged) == 2
+    keys = {
+        (
+            str(r.get("game_id")),
+            int(r.get("event_seq")),
+            int(r.get("batter_mlb_id")),
+            int(r.get("pitcher_mlb_id")),
+            str(r.get("result")),
+        )
+        for r in merged
+    }
+    assert keys == {
+        ("g1", 1, 10, 20, "single"),
+        ("g1", 2, 11, 20, "home_run"),
+    }
+
+
+def test_append_and_write_records_dedupes_home_runs_by_business_key():
+    agg = _agg()
+    agg._read_parquet_optional = lambda _key: []
+    written = {}
+
+    def fake_put_records_parquet(key, rows, schema=None):
+        written[key] = [dict(r) for r in rows]
+
+    agg._put_records_parquet = fake_put_records_parquet
+
+    new_hr = [
+        {
+            "game_id": "g100",
+            "event_id": 1,
+            "date": "2026-02-02T00:00:00Z",
+            "difficulty": "legend",
+            "home_profile_username": "home_u",
+            "away_profile_username": "away_u",
+            "hitter_username": "SomeHitter",
+            "pitcher_username": "Pitcher1",
+            "batter_mlb_id": 77,
+            "pitcher_mlb_id": 88,
+            "is_home_batting": True,
+            "distance_ft": 430.0,
+            "elevation": 500.0,
+        },
+        {
+            "game_id": "g100",
+            "event_id": 99,
+            "date": "2026-02-02T00:00:00Z",
+            "difficulty": "legend",
+            "home_profile_username": "home_u",
+            "away_profile_username": "away_u",
+            "hitter_username": "somehitter",
+            "pitcher_username": "Pitcher2",
+            "batter_mlb_id": 77,
+            "pitcher_mlb_id": 89,
+            "is_home_batting": True,
+            "distance_ft": 430,
+            "elevation": 500.0,
+        },
+    ]
+
+    agg._append_and_write_records(new_hr, [])
+
+    hr_rows = written[RECORDS_HOME_RUNS_KEY]
+    assert len(hr_rows) == 1
+    assert hr_rows[0]["game_id"] == "g100"
+    assert hr_rows[0]["distance_ft"] == 430.0
+    assert hr_rows[0]["batter_mlb_id"] == 77
+
+
 def test_run_processes_only_games_missing_from_checkpoint():
     agg = _agg()
 
@@ -211,6 +328,7 @@ def test_run_processes_only_games_missing_from_checkpoint():
     games = [
         SimpleNamespace(id="g1", home_profile_username="u1", away_profile_username="u2", ball_park_id=None),
         SimpleNamespace(id="g2", home_profile_username="u2", away_profile_username="u3", ball_park_id=None),
+        SimpleNamespace(id="g3", home_profile_username="u1", away_profile_username="u3", ball_park_id=None),
         SimpleNamespace(id="g3", home_profile_username="u1", away_profile_username="u3", ball_park_id=None),
     ]
     bundles = {
@@ -233,7 +351,7 @@ def test_run_processes_only_games_missing_from_checkpoint():
     written_checkpoints = {}
     record_calls = []
 
-    agg._fetch_all_games = lambda _db_session: games
+    agg._fetch_all_games = lambda _db_session, _usernames: games
     agg._fetch_ballpark_elevations = lambda _db_session: {}
     agg._read_checkpoint_game_ids = lambda username: set(checkpoints.get(username, set()))
     agg._load_user_state = lambda _username: {

@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Dict, Optional
+from src.schemas.quirk import QuirkResponse
 
 # This class defines the JSON structure that gets returned
 class CardResponse(BaseModel):
@@ -72,6 +73,7 @@ class CardResponse(BaseModel):
     speed: int
     baserunning_ability: int
     baserunning_aggression: int
+    quirks: Optional[list[QuirkResponse]] = None
 
     
 
