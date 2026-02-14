@@ -94,6 +94,7 @@ class ShowGameAgg(Job):
             len(ballpark_elevation_by_id),
         )
         users_changed_count = 0
+        records_written = False
         total_hr_candidates = 0
         total_hard_candidates = 0
         timings: dict[str, float] = {
@@ -123,6 +124,7 @@ class ShowGameAgg(Job):
             load_checkpoints_s += perf_counter() - t0
 
             user_state: Optional[dict[str, Any]] = None
+            existing_pas_game_ids: Optional[set[str]] = None
             user_changed = False
             user_hr_candidates: list[dict[str, Any]] = []
             user_hard_candidates: list[dict[str, Any]] = []
@@ -138,10 +140,23 @@ class ShowGameAgg(Job):
                     game: Mapping[str, Any] | ShowGameSummary,
                     game_id: str,
                 ) -> None:
-                    nonlocal user_state, user_changed
+                    nonlocal user_state, existing_pas_game_ids, user_changed
 
                     bundle, load_elapsed_s = fut.result()
                     timings["load_bundle_s"] += load_elapsed_s
+
+                    t_user = perf_counter()
+                    if user_state is None:
+                        t0 = perf_counter()
+                        user_state = self._load_user_state(username)
+                        existing_pas_game_ids = self._extract_pas_game_ids(user_state["pas_existing"])
+                        checkpoint.update(existing_pas_game_ids)
+                        timings["load_user_state_s"] += perf_counter() - t0
+
+                    if existing_pas_game_ids is not None and game_id in existing_pas_game_ids:
+                        checkpoint.add(game_id)
+                        timings["update_user_state_s"] += perf_counter() - t_user
+                        return
 
                     t0 = perf_counter()
                     self._build_facts_for_games(game, bundle)
@@ -165,20 +180,17 @@ class ShowGameAgg(Job):
                     )
                     timings["collect_records_s"] += perf_counter() - t0
 
-                    t_user = perf_counter()
-                    if user_state is None:
-                        t0 = perf_counter()
-                        user_state = self._load_user_state(username)
-                        timings["load_user_state_s"] += perf_counter() - t0
-
                     user_state["pas_new"].extend(pas)
                     self._agg_batting(user_state["batting_box_agg"], batting_box)
                     self._agg_pitching(user_state["pitching_box_agg"], pitching_box)
 
                     checkpoint.add(game_id)
+                    assert existing_pas_game_ids is not None
+                    existing_pas_game_ids.add(game_id)
                     user_changed = True
                     timings["update_user_state_s"] += perf_counter() - t_user
 
+                scheduled_game_ids: set[str] = set()
                 for game in self._fetch_all_games(db_session, [username]):
                     counters["games_scanned"] += 1
                     user_games_scanned += 1
@@ -194,7 +206,7 @@ class ShowGameAgg(Job):
                             len(in_flight),
                         )
                     game_id = str(self._game_val(game, "id") or "")
-                    if not game_id or game_id in checkpoint:
+                    if not game_id or game_id in checkpoint or game_id in scheduled_game_ids:
                         continue
 
                     counters["games_targeted"] += 1
@@ -203,6 +215,7 @@ class ShowGameAgg(Job):
 
                     fut = pool.submit(self._load_game_bundle_timed, game_id)
                     in_flight[fut] = (game, game_id)
+                    scheduled_game_ids.add(game_id)
 
                     while len(in_flight) >= bundle_fetch_max_in_flight:
                         done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
@@ -236,6 +249,7 @@ class ShowGameAgg(Job):
                 t0 = perf_counter()
                 self._append_and_write_records(user_hr_candidates, user_hard_candidates)
                 timings["write_records_s"] += perf_counter() - t0
+                records_written = True
 
             total_hr_candidates += len(user_hr_candidates)
             total_hard_candidates += len(user_hard_candidates)
@@ -251,6 +265,11 @@ class ShowGameAgg(Job):
                 len(user_hard_candidates),
                 perf_counter() - user_started,
             )
+
+        if not records_written:
+            t0 = perf_counter()
+            self._append_and_write_records([], [])
+            timings["write_records_s"] += perf_counter() - t0
 
         total_elapsed_s = perf_counter() - run_started
         self.logger.info(
@@ -303,6 +322,24 @@ class ShowGameAgg(Job):
 
         merged_hr = self._merge_record_rows(existing_hr_rows, new_hr_rows)
         merged_hard = self._merge_record_rows(existing_hard_rows, new_hard_rows)
+        merged_hr, removed_hr_event = self._dedupe_rows_by_key(
+            merged_hr,
+            self._record_event_key,
+        )
+        merged_hard, removed_hard_event = self._dedupe_rows_by_key(
+            merged_hard,
+            self._record_event_key,
+        )
+        merged_hr, removed_hr_business = self._dedupe_rows_by_key(
+            merged_hr,
+            self._home_run_business_key,
+        )
+        merged_hard, removed_hard_business = self._dedupe_rows_by_key(
+            merged_hard,
+            self._hard_hit_business_key,
+        )
+        duplicate_hr_after_scan = self._count_duplicate_rows_by_key(merged_hr, self._home_run_business_key)
+        duplicate_hard_after_scan = self._count_duplicate_rows_by_key(merged_hard, self._hard_hit_business_key)
         merge_rows_s = perf_counter() - t0
 
         write_hr_s = 0.0
@@ -352,7 +389,9 @@ class ShowGameAgg(Job):
             (
                 "show game agg timing phase=records elapsed_read_existing_s=%.3f "
                 "elapsed_merge_rows_s=%.3f elapsed_write_hr_s=%.3f elapsed_write_hard_s=%.3f "
-                "existing_hr=%s new_hr=%s merged_hr=%s existing_hard=%s new_hard=%s merged_hard=%s"
+                "existing_hr=%s new_hr=%s merged_hr=%s existing_hard=%s new_hard=%s merged_hard=%s "
+                "removed_hr_event=%s removed_hard_event=%s removed_hr_business=%s removed_hard_business=%s "
+                "duplicate_hr_after_scan=%s duplicate_hard_after_scan=%s"
             ),
             read_existing_s,
             merge_rows_s,
@@ -364,7 +403,19 @@ class ShowGameAgg(Job):
             len(existing_hard_rows),
             len(new_hard_rows),
             len(merged_hard),
+            removed_hr_event,
+            removed_hard_event,
+            removed_hr_business,
+            removed_hard_business,
+            duplicate_hr_after_scan,
+            duplicate_hard_after_scan,
         )
+        if duplicate_hr_after_scan > 0 or duplicate_hard_after_scan > 0:
+            self.logger.warning(
+                "show game agg duplicate scan found residual duplicates hr=%s hard=%s",
+                duplicate_hr_after_scan,
+                duplicate_hard_after_scan,
+            )
 
     def _home_run_record_row(self, source_row: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -411,14 +462,11 @@ class ShowGameAgg(Job):
         existing_rows: list[dict[str, Any]],
         new_rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not existing_rows:
-            return [dict(r) for r in new_rows]
-        if not new_rows:
-            return [dict(r) for r in existing_rows]
+        combined_rows = [dict(r) for r in existing_rows] + [dict(r) for r in new_rows]
+        if not combined_rows:
+            return []
 
-        existing_df = pd.DataFrame(existing_rows)
-        new_df = pd.DataFrame(new_rows)
-        merged = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+        merged = pd.DataFrame(combined_rows)
 
         if "game_id" not in merged.columns:
             merged["game_id"] = ""
@@ -430,6 +478,66 @@ class ShowGameAgg(Job):
         merged = merged.drop_duplicates(subset=["_game_id", "_event_id"], keep="first")
         merged = merged.drop(columns=["_game_id", "_event_id"])
         return merged.to_dict(orient="records")
+
+    def _dedupe_rows_by_key(
+        self,
+        rows: list[dict[str, Any]],
+        key_builder: Any,
+    ) -> tuple[list[dict[str, Any]], int]:
+        seen: set[Any] = set()
+        deduped: list[dict[str, Any]] = []
+        removed = 0
+        for row in rows:
+            key = key_builder(row)
+            if key in seen:
+                removed += 1
+                continue
+            seen.add(key)
+            deduped.append(row)
+        return deduped, removed
+
+    def _count_duplicate_rows_by_key(
+        self,
+        rows: list[dict[str, Any]],
+        key_builder: Any,
+    ) -> int:
+        seen: set[Any] = set()
+        duplicates = 0
+        for row in rows:
+            key = key_builder(row)
+            if key in seen:
+                duplicates += 1
+            else:
+                seen.add(key)
+        return duplicates
+
+    def _home_run_business_key(self, row: dict[str, Any]) -> tuple[str, str, Optional[float], Optional[int]]:
+        return (
+            str(row.get("game_id") or "").strip(),
+            str(row.get("hitter_username") or "").strip().lower(),
+            self._rounded_float(row.get("distance_ft")),
+            self._coerce_int(row.get("batter_mlb_id")),
+        )
+
+    def _hard_hit_business_key(self, row: dict[str, Any]) -> tuple[str, str, Optional[float], Optional[int]]:
+        return (
+            str(row.get("game_id") or "").strip(),
+            str(row.get("hitter_username") or "").strip().lower(),
+            self._rounded_float(row.get("exit_vel_mph")),
+            self._coerce_int(row.get("batter_mlb_id")),
+        )
+
+    def _record_event_key(self, row: dict[str, Any]) -> tuple[str, Optional[int]]:
+        return (
+            str(row.get("game_id") or "").strip(),
+            self._coerce_int(row.get("event_id")),
+        )
+
+    def _rounded_float(self, value: Any, digits: int = 3) -> Optional[float]:
+        coerced = self._coerce_float(value)
+        if coerced is None:
+            return None
+        return round(coerced, digits)
 
     def _assign_ranks(
         self,
@@ -502,14 +610,11 @@ class ShowGameAgg(Job):
         existing_rows: list[dict[str, Any]],
         new_rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not new_rows:
-            return existing_rows
-        if not existing_rows:
-            return [dict(r) for r in new_rows]
+        combined_rows = [dict(r) for r in existing_rows] + [dict(r) for r in new_rows]
+        if not combined_rows:
+            return []
 
-        existing_df = pd.DataFrame(existing_rows)
-        new_df = pd.DataFrame(new_rows)
-        merged = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+        merged = pd.DataFrame(combined_rows)
 
         for col, default in (
             ("game_id", ""),
@@ -540,6 +645,14 @@ class ShowGameAgg(Job):
             errors="ignore",
         )
         return merged.to_dict(orient="records")
+
+    def _extract_pas_game_ids(self, rows: list[dict[str, Any]]) -> set[str]:
+        out: set[str] = set()
+        for row in rows:
+            game_id = str(row.get("game_id") or "").strip()
+            if game_id:
+                out.add(game_id)
+        return out
 
     def _checkpoint_key(self, username: str) -> str:
         return f"facts/{username}/{CHECKPOINT_FILENAME}"
