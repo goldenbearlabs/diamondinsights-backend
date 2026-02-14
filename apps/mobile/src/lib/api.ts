@@ -71,6 +71,10 @@ export async function apiPutAuth<T>(path: string, body?: unknown): Promise<T> {
   return apiRequest<T>("PUT", path, body, { auth: true });
 }
 
+export async function apiPatchAuth<T>(path: string, body?: unknown): Promise<T> {
+  return apiRequest<T>("PATCH", path, body, { auth: true });
+}
+
 export async function apiDeleteAuth<T>(path: string): Promise<T> {
   return apiRequest<T>("DELETE", path, undefined, { auth: true });
 }
