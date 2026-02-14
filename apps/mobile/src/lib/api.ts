@@ -74,3 +74,24 @@ export async function apiPutAuth<T>(path: string, body?: unknown): Promise<T> {
 export async function apiDeleteAuth<T>(path: string): Promise<T> {
   return apiRequest<T>("DELETE", path, undefined, { auth: true });
 }
+
+
+
+export interface UserPredictionCreate {
+  card_id: string;
+  predicted_ovr: number;
+}
+
+export interface UserPredictionResponse {
+  user_id: number;
+  card_id: string;
+  predicted_ovr: number;
+}
+
+export function getUserPrediction(cardId: string) {
+  return apiRequest<UserPredictionResponse>("GET", `/user-predictions/${cardId}`, undefined, { auth: true });
+}
+
+export function saveUserPrediction(body: UserPredictionCreate) {
+  return apiRequest<UserPredictionResponse>("POST", "/user-predictions/", body, { auth: true });
+}
