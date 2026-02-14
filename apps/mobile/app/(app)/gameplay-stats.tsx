@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { getDownloadURL, ref } from "firebase/storage";
 import { ApiError, apiGet, apiGetAuth } from "../../src/lib/api";
@@ -612,6 +612,10 @@ export default function GameplayStatsScreen() {
   const { width } = useWindowDimensions();
   const { profileUri, setProfileUri } = useProfileImageUri();
   const router = useRouter();
+  const localParams = useLocalSearchParams<{
+    viewUsername?: string | string[];
+    viewUserId?: string | string[];
+  }>();
   const requestRef = useRef(0);
   const pitcherRequestRef = useRef(0);
   const hitterRequestRef = useRef(0);
@@ -726,6 +730,26 @@ export default function GameplayStatsScreen() {
   const [hitHitterSearchLoading, setHitHitterSearchLoading] = useState(false);
   const [hitHitterSearchError, setHitHitterSearchError] = useState<string | null>(null);
   const isSelfView = !viewUserId && !viewUsername;
+
+  useEffect(() => {
+    const rawUsername = localParams.viewUsername;
+    const rawUserId = localParams.viewUserId;
+
+    const nextUsername = Array.isArray(rawUsername) ? rawUsername[0] : rawUsername;
+    const nextUserIdRaw = Array.isArray(rawUserId) ? rawUserId[0] : rawUserId;
+    const nextUserId = nextUserIdRaw ? Number(nextUserIdRaw) : NaN;
+
+    if (nextUsername && nextUsername.trim()) {
+      setViewUsername(nextUsername.trim());
+      setViewUserId(null);
+      return;
+    }
+
+    if (Number.isFinite(nextUserId) && nextUserId > 0) {
+      setViewUserId(nextUserId);
+      setViewUsername(null);
+    }
+  }, [localParams.viewUserId, localParams.viewUsername]);
 
   useEffect(() => {
     setShowProfile(null);
