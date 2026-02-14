@@ -1,14 +1,5 @@
-import { View, Text, StyleSheet } from 'react-native';
+import PortfolioScreen from '../../src/screens/portfolio/PortfolioScreen';
 
 export default function Portfolio() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Investment Portfolio Coming Soon</Text>
-    </View>
-  );
+  return <PortfolioScreen />;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center' },
-  text: { color: 'white', fontSize: 20, fontWeight: 'bold' }
-});
