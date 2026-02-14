@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
-from sqlalchemy import or_, func, nullslast
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, selectinload
 from shared.db.database import get_db
 from shared.db.models import Card, Comment, UserPrediction, CardPrediction
@@ -218,7 +218,6 @@ def get_cards(
     These queries don't join with any other tables.
     """
 
-    query = db.query(Card).options(selectinload(Card.position_overalls), selectinload(Card.quirks))
     comment_count_sub = (
         db.query(func.count(Comment.id))
         .filter(Comment.card_id == Card.id, Comment.is_deleted == False)
@@ -252,7 +251,10 @@ def get_cards(
         .label("predicted_attributes")
     )
 
-    query = db.query(Card, comment_count_sub, prediction_count_sub, predicted_ovr_sub, predicted_attrs_sub).options(selectinload(Card.position_overalls))
+    query = db.query(Card, comment_count_sub, prediction_count_sub, predicted_ovr_sub, predicted_attrs_sub).options(
+        selectinload(Card.position_overalls),
+        selectinload(Card.quirks),
+    )
 
     if is_hitter is not None:
         query = query.filter(Card.is_hitter == is_hitter)
@@ -327,7 +329,15 @@ def get_cards(
     if rarity is not None:
         query = query.filter(Card.rarity.ilike(rarity))
 
-    cards = query.all()
+    rows = query.all()
+    cards: List[Card] = []
+    for row in rows:
+        card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes = row
+        card.comment_count = comment_count or 0
+        card.user_prediction_count = user_prediction_count or 0
+        card.predicted_ovr = predicted_ovr
+        card.predicted_attributes = predicted_attributes
+        cards.append(card)
 
     # Defensive dedupe to ensure one row per card id in all modes.
     unique_by_id: dict[str, Card] = {}
@@ -373,39 +383,3 @@ def get_cards(
     start = max(0, offset)
     end = start + max(0, limit)
     return cards[start:end]
-        rarities = [r.strip() for r in rarity.split(',')]
-        if len(rarities) == 1:
-            query = query.filter(Card.rarity.ilike(rarities[0]))
-        else:
-            rarity_filters = [Card.rarity.ilike(r) for r in rarities]
-            query = query.filter(or_(*rarity_filters))
-
-
-    # Determine sort column
-    if sort_by == "popularity":
-        sort_column = prediction_count_sub
-    elif sort_by == "predicted_ovr_delta":
-        sort_column = predicted_ovr_sub - Card.ovr
-    else:
-        sort_column = Card.ovr
-
-    if sort_by == "predicted_ovr_delta":
-        # Push NULLs (cards with no predictions) to the bottom
-        if desc:
-            query = query.order_by(nullslast(sort_column.desc()))
-        else:
-            query = query.order_by(nullslast(sort_column.asc()))
-    elif desc:
-        query = query.order_by(sort_column.desc())
-    else:
-        query = query.order_by(sort_column.asc())
-
-    cards = query.limit(limit).offset(offset).all()
-    result = []
-    for card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes in cards:
-        card.comment_count = comment_count or 0
-        card.user_prediction_count = user_prediction_count or 0
-        card.predicted_ovr = predicted_ovr
-        card.predicted_attributes = predicted_attributes
-        result.append(card)
-    return result
