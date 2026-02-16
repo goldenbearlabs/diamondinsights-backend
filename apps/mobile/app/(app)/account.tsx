@@ -16,17 +16,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { getDownloadURL, ref } from "firebase/storage";
 import { sendPasswordResetEmail } from "firebase/auth";
 
 import { ApiError, apiGetAuth, apiPostAuth, apiPutAuth } from "../../src/lib/api";
-import { auth, storage } from "../../src/lib/firebase";
-import { withCacheBuster } from "../../src/lib/profileImage";
+import { auth } from "../../src/lib/firebase";
+import { invalidateAvatarCache } from "../../src/lib/profileImage";
 import { uploadProfileImage } from "../../src/lib/storage";
+import { Avatar } from "../../src/components/Avatar";
 import { theme } from "../../src/theme/colors";
 import { useRouter } from "expo-router";
 
-const DEFAULT_PROFILE = require("../../assets/images/default_profile.png");
 const STUB_ICON = require("../../assets/images/stub.png");
 
 type UserProfile = {
@@ -90,7 +89,6 @@ export default function AccountScreen() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState<ShowProfile | null>(null);
@@ -141,29 +139,6 @@ export default function AccountScreen() {
       active = false;
     };
   }, [userId]);
-
-  useEffect(() => {
-    let active = true;
-
-    const loadImage = async () => {
-      if (!profile?.profile_img_path) {
-        setProfileImageUri(null);
-        return;
-      }
-      try {
-        const url = await getDownloadURL(ref(storage, profile.profile_img_path));
-        if (active) setProfileImageUri(withCacheBuster(url));
-      } catch {
-        if (active) setProfileImageUri(null);
-      }
-    };
-
-    loadImage();
-
-    return () => {
-      active = false;
-    };
-  }, [profile?.profile_img_path]);
 
   useEffect(() => {
     if (!profile) return;
@@ -335,12 +310,7 @@ export default function AccountScreen() {
       const updated = await apiPutAuth<UserProfile>("/users/me", updates);
       setProfile(updated);
       if (newPhotoUri) {
-        try {
-          const url = await getDownloadURL(ref(storage, updated.profile_img_path));
-          setProfileImageUri(withCacheBuster(url));
-        } catch {
-          setProfileImageUri(newPhotoUri);
-        }
+        invalidateAvatarCache(updated.profile_img_path);
         DeviceEventEmitter.emit("profile-image-updated");
       }
       setSettingsOpen(false);
@@ -404,10 +374,9 @@ export default function AccountScreen() {
           <>
             <View style={styles.profileHeader}>
               <View style={styles.avatarFrame}>
-                <Image
-                  source={profileImageUri ? { uri: profileImageUri } : DEFAULT_PROFILE}
-                  style={styles.avatarLarge}
-                  onError={() => setProfileImageUri(null)}
+                <Avatar
+                  firebasePath={profile.profile_img_path}
+                  size={120}
                 />
               </View>
               <View style={styles.profileInfo}>
