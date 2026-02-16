@@ -1,14 +1,12 @@
 // apps/mobile/src/components/chat/ChatRow.tsx
-import React, { useEffect, useState } from "react";
-import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons"; 
-import { getDownloadURL, ref } from "firebase/storage";
-import { storage, auth } from "../../lib/firebase"; 
+import { auth } from "../../lib/firebase"; 
 
+import { Avatar } from "../Avatar";
 import { theme } from "../../theme/colors";
 import { ChatMessage } from "../../types/chat";
-
-const DEFAULT_AVATAR = require("../../../assets/images/default_profile.png");
 
 interface ChatRowProps {
   message: ChatMessage;
@@ -17,8 +15,6 @@ interface ChatRowProps {
   onLike: (id: number) => void; }
 
 export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps) => {
-  const [avatarUri, setAvatarUri] = useState<string | null>(null);
-
   const currentUserUid = auth.currentUser?.uid;
   
   const likeCount = message.likedByFirebaseIds?.length || 0;
@@ -36,37 +32,6 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
     minute: "2-digit",
   });
 
-  useEffect(() => {
-    let active = true;
-
-    const fetchImage = async () => {
-      if (!message.userImage) {
-        setAvatarUri(null);
-        return;
-      }
-
-      if (message.userImage.startsWith("http")) {
-        setAvatarUri(message.userImage);
-        return;
-      }
-
-      try {
-        const url = await getDownloadURL(ref(storage, message.userImage));
-        if (active) {
-          setAvatarUri(url);
-        }
-      } catch (err) {
-        if (active) setAvatarUri(null);
-      }
-    };
-
-    fetchImage();
-
-    return () => {
-      active = false;
-    };
-  }, [message.userImage]);
-
   return (
     <TouchableOpacity 
       style={styles.container} 
@@ -74,14 +39,11 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
       delayLongPress={300}
       activeOpacity={0.7}
     >
-      {/* Avatar Image */}
-      <Image
-        source={avatarUri ? { uri: avatarUri } : DEFAULT_AVATAR}
-        style={styles.avatar}
-      />
+      <View style={styles.avatar}>
+        <Avatar firebasePath={message.userImage} size={40} />
+      </View>
 
       <View style={styles.content}>
-        {/* Header: Name + Time + Icons */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <Text style={styles.username}>{message.userName}</Text>
@@ -90,23 +52,19 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
           </View>
           
           <View style={styles.actions}>
-            {/* LIKE BUTTON */}
             <TouchableOpacity 
               onPress={() => onLike(message.id)} 
               style={styles.actionBtn}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Ionicons 
-                // Show filled heart if I liked it, outline if not
                 name={isLikedByMe ? "heart" : "heart-outline"} 
                 size={16} 
-                // Red if I liked it, muted gray otherwise
                 color={isLikedByMe ? "#ef4444" : theme.colors.muted} 
               />
               {likeCount > 0 && <Text style={styles.likeCount}>{likeCount}</Text>}
             </TouchableOpacity>
 
-            {/* REPLY BUTTON */}
             <TouchableOpacity 
               onPress={() => onReply(message)} 
               style={styles.actionBtn}
@@ -117,7 +75,6 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
           </View>
         </View>
 
-        {/* Reply Context */}
         {message.replyTo && (
           <View style={styles.replyContext}>
             <View style={styles.replyLine} />
@@ -127,7 +84,6 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
           </View>
         )}
 
-        {/* The Message Text */}
         <Text style={styles.text}>{message.text}</Text>
       </View>
     </TouchableOpacity>
@@ -141,11 +97,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     marginRight: 12,
-    backgroundColor: theme.colors.border,
   },
   content: {
     flex: 1,

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import {
-  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -14,7 +13,8 @@ import { FontAwesome5 } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { theme } from "../theme/colors";
-import { useProfileImageUri } from "../lib/profileImage";
+import { Avatar } from "./Avatar";
+import { auth } from "../lib/firebase";
 
 type MenuType = "market" | "gameplay" | null;
 
@@ -63,7 +63,6 @@ const BAR_PADDING = 16;
 export const BOTTOM_NAV_HEIGHT = 72;
 const ACCENT = "#fbbf24";
 const ACCENT_DIM = ACCENT;
-const DEFAULT_PROFILE = require("../../assets/images/default_profile.png");
 
 export const BottomNav = () => {
   const router = useRouter();
@@ -82,7 +81,8 @@ export const BottomNav = () => {
   const [communityLayout, setCommunityLayout] = useState<{ x: number; width: number } | null>(
     null
   );
-  const { profileUri, setProfileUri } = useProfileImageUri();
+  const currentUid = auth.currentUser?.uid ?? null;
+  const profilePath = currentUid ? `users/${currentUid}/profile.jpg` : null;
 
   useEffect(() => {
     setMenuType(null);
@@ -257,11 +257,11 @@ export const BottomNav = () => {
         style={styles.profileButton}
         onPress={() => router.push("/(app)/account")}
       >
-        <Image
-          source={profileUri ? { uri: profileUri } : DEFAULT_PROFILE}
-          style={styles.profileImage}
-          resizeMode="cover"
-          onError={() => setProfileUri(null)}
+        <Avatar
+          firebasePath={profilePath}
+          size={38}
+          borderColor="rgba(251, 191, 36, 0.4)"
+          borderWidth={1}
         />
       </TouchableOpacity>
 
@@ -349,17 +349,6 @@ const styles = StyleSheet.create({
     color: ACCENT,
   },
   profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(251, 191, 36, 0.4)",
-  },
-  profileImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 20,
   },
   menuOverlay: {
     flex: 1,

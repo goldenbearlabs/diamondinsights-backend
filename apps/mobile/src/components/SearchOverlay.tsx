@@ -13,13 +13,12 @@ import {
 } from "react-native";
 import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { getDownloadURL, ref } from "firebase/storage";
 
 import { apiGet } from "../lib/api";
-import { storage } from "../lib/firebase";
+import { resolveAvatarUrl } from "../lib/profileImage";
+import { Avatar } from "./Avatar";
 import { theme } from "../theme/colors";
 
-const DEFAULT_PROFILE = require("../../assets/images/default_profile.png");
 const ACCENT = "#fbbf24";
 
 export type SearchMode = "all" | "users" | "cards";
@@ -122,9 +121,8 @@ export const SearchResultsPanel = ({
     const entries = await Promise.all(
       pending.map(async (user) => {
         try {
-          const raw = user.profile_img_url;
-          const url = raw.startsWith("http") ? raw : await getDownloadURL(ref(storage, raw));
-          return [user.id, url] as const;
+          const url = await resolveAvatarUrl(user.profile_img_url);
+          return url ? ([user.id, url] as const) : null;
         } catch {
           return null;
         }
@@ -235,14 +233,14 @@ export const SearchResultsPanel = ({
                           style={styles.resultRow}
                           onPress={() => handleUserPress(user.id)}
                         >
-                          <Image
-                            source={
-                              userImages[user.id]
-                                ? { uri: userImages[user.id] }
-                                : DEFAULT_PROFILE
-                            }
-                            style={styles.avatar}
-                          />
+                          <View style={styles.avatarWrap}>
+                            <Avatar
+                              firebasePath={user.profile_img_url}
+                              size={32}
+                              borderColor="rgba(255, 255, 255, 0.12)"
+                              borderWidth={1}
+                            />
+                          </View>
                           <View style={styles.resultText}>
                             <Text style={styles.resultTitle}>{user.display_name}</Text>
                             <Text style={styles.resultMeta}>User profile</Text>
@@ -359,13 +357,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.14)",
   },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  avatarWrap: {
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
   },
   cardImage: {
     width: 36,
