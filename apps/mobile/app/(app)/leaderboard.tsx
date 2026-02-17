@@ -1,14 +1,5 @@
-import { View, Text, StyleSheet } from 'react-native';
+import PredictionLeaderboardScreen from "../../src/screens/prediction_leaderboard/PredictionLeaderboardScreen";
 
 export default function Leaderboard() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Leaderboard Screen Coming Soon</Text>
-    </View>
-  );
+  return <PredictionLeaderboardScreen />;
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center' },
-  text: { color: 'white', fontSize: 20, fontWeight: 'bold' }
-});

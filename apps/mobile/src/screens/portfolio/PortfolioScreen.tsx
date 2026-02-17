@@ -12,12 +12,15 @@ import {
   Platform,
   RefreshControl,
   Alert,
+  Modal,
+  Pressable,
+  ScrollView,
 } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
-import { apiGet, apiPostAuth, apiDeleteAuth, apiGetAuth, apiPatchAuth } from '../../lib/api';
+import { apiGet, apiPostAuth, apiDeleteAuth, apiGetAuth, apiPatchAuth, updatePortfolioHolding } from '../../lib/api';
 
 const STUB_ICON = require('../../../assets/images/stub.png');
 
@@ -50,6 +53,7 @@ type Holding = {
   quantity: number;
   avg_price: number | null;
   user_predicted_ovr: number | null;
+  notes: string | null;
   card: HoldingCard;
 };
 
@@ -98,8 +102,19 @@ export default function PortfolioScreen() {
   const [quantity, setQuantity] = useState('');
   const [avgBuyPrice, setAvgBuyPrice] = useState('');
   const [projectedOvr, setProjectedOvr] = useState('');
+  const [notes, setNotes] = useState('');
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
+
+  // Edit modal state
+  const [editingHolding, setEditingHolding] = useState<Holding | null>(null);
+  const [editQuantity, setEditQuantity] = useState('');
+  const [editAvgPrice, setEditAvgPrice] = useState('');
+  const [editProjectedOvr, setEditProjectedOvr] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // ── Fetch portfolio ────────────────────────────────────────────────────────
 
@@ -186,6 +201,7 @@ export default function PortfolioScreen() {
         quantity: qty,
         avg_price: price,
         user_predicted_ovr: ovr,
+        notes: notes.trim() || null,
       });
       // Reset form
       setSelectedCard(null);
@@ -193,6 +209,7 @@ export default function PortfolioScreen() {
       setQuantity('');
       setAvgBuyPrice('');
       setProjectedOvr('');
+      setNotes('');
       setSearchResults([]);
       // Refresh portfolio
       await fetchPortfolio();
@@ -245,6 +262,84 @@ export default function PortfolioScreen() {
       Alert.alert('Error', 'Failed to update portfolio privacy');
     }
   };
+
+  // ── Edit investment ────────────────────────────────────────────────────────
+
+  const openEditModal = (holding: Holding) => {
+    setEditingHolding(holding);
+    setEditQuantity(holding.quantity.toString());
+    setEditAvgPrice(holding.avg_price?.toString() ?? '');
+    setEditProjectedOvr(holding.user_predicted_ovr?.toString() ?? '');
+    setEditNotes(holding.notes ?? '');
+    setEditError(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingHolding(null);
+    setEditQuantity('');
+    setEditAvgPrice('');
+    setEditProjectedOvr('');
+    setEditNotes('');
+    setEditError(null);
+  };
+
+  const validateEditInputs = (): string | null => {
+    const qty = parseInt(editQuantity, 10);
+    if (!editQuantity.trim() || isNaN(qty) || qty < 1) {
+      return 'Quantity must be at least 1';
+    }
+    if (editAvgPrice.trim()) {
+      const price = parseInt(editAvgPrice, 10);
+      if (isNaN(price) || price < 0) return 'Price must be 0 or greater';
+    }
+    if (editProjectedOvr.trim()) {
+      const ovr = parseInt(editProjectedOvr, 10);
+      if (isNaN(ovr) || ovr < 0 || ovr > 99) return 'OVR must be between 0-99';
+    }
+    if (editNotes.length > 500) {
+      return 'Notes must be 500 characters or less';
+    }
+    return null;
+  };
+
+  const handleUpdateHolding = async () => {
+    if (!editingHolding) return;
+
+    const validationError = validateEditInputs();
+    if (validationError) {
+      setEditError(validationError);
+      return;
+    }
+
+    setEditSubmitting(true);
+    setEditError(null);
+
+    try {
+      const payload: Record<string, unknown> = {
+        quantity: parseInt(editQuantity, 10),
+        avg_price: editAvgPrice.trim() ? parseInt(editAvgPrice, 10) : null,
+        user_predicted_ovr: editProjectedOvr.trim() ? parseInt(editProjectedOvr, 10) : null,
+        notes: editNotes.trim() || null,
+      };
+
+      await updatePortfolioHolding(editingHolding.card_id, payload);
+      handleCancelEdit();
+      setSuccessMessage('Investment updated successfully');
+      await fetchPortfolio();
+    } catch (error) {
+      console.error('Failed to update holding:', error);
+      setEditError('Failed to update investment. Please try again.');
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  // Auto-dismiss success toast
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(null), 2500);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   // ── Render helpers ─────────────────────────────────────────────────────────
 
@@ -317,12 +412,20 @@ export default function PortfolioScreen() {
               {item.card.ovr} OVR
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={() => handleRemove(item.card_id, item.card.name)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="trash-outline" size={18} color={theme.colors.muted} />
-          </TouchableOpacity>
+          <View style={styles.investmentActions}>
+            <TouchableOpacity
+              onPress={() => openEditModal(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="create-outline" size={18} color={theme.colors.muted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleRemove(item.card_id, item.card.name)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="trash-outline" size={18} color={theme.colors.muted} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.investmentDivider} />
@@ -481,6 +584,7 @@ export default function PortfolioScreen() {
                         onPress={() => {
                           setSelectedCard(null);
                           setSearchText('');
+                          setNotes('');
                         }}
                       >
                         <Ionicons
@@ -603,6 +707,31 @@ export default function PortfolioScreen() {
                   </View>
                 </View>
 
+                {/* Notes Input */}
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.inputLabel}>Notes (Optional)</Text>
+                  <TextInput
+                    style={[styles.numberInput, styles.notesInput]}
+                    placeholder="Add a note about this investment..."
+                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    value={notes}
+                    onChangeText={(text) => {
+                      if (text.length <= 500) setNotes(text);
+                    }}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                  <Text
+                    style={[
+                      styles.editHelperText,
+                      notes.length > 450 && { color: '#fbbf24' },
+                      notes.length >= 500 && { color: '#f87171' },
+                    ]}
+                  >
+                    {notes.length}/500 characters
+                  </Text>
+                </View>
+
                 {/* Add Button */}
                 <TouchableOpacity
                   style={[
@@ -651,6 +780,163 @@ export default function PortfolioScreen() {
           }
         />
       </KeyboardAvoidingView>
+
+      {/* ── Edit Modal ──────────────────────────────────────────────── */}
+      <Modal
+        visible={editingHolding !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelEdit}
+      >
+        <Pressable style={styles.modalOverlay} onPress={handleCancelEdit}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalAvoidingView}
+          >
+            <Pressable style={styles.modalCard} onPress={() => {}}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                showsVerticalScrollIndicator={false}
+              >
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Edit Investment</Text>
+                  <TouchableOpacity onPress={handleCancelEdit} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close" size={22} color={theme.colors.muted} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Player info */}
+                {editingHolding && (
+                  <View style={styles.modalPlayerInfo}>
+                    <Image
+                      source={{ uri: editingHolding.card.baked_img }}
+                      style={styles.modalPlayerImg}
+                      resizeMode="contain"
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.modalPlayerName} numberOfLines={1}>
+                        {editingHolding.card.name}
+                      </Text>
+                      <Text style={styles.modalPlayerMeta}>
+                        {editingHolding.card.team_short_name} · {editingHolding.card.display_position} · {editingHolding.card.ovr} OVR
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Error message */}
+                {editError ? (
+                  <View style={styles.editErrorCard}>
+                    <Ionicons name="alert-circle" size={14} color="#f87171" />
+                    <Text style={styles.editErrorText}>{editError}</Text>
+                  </View>
+                ) : null}
+
+                {/* Inputs */}
+                <View style={styles.modalInputSection}>
+                  <View style={styles.inputRow}>
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Quantity</Text>
+                      <TextInput
+                        style={styles.numberInput}
+                        placeholder="0"
+                        placeholderTextColor="rgba(255,255,255,0.2)"
+                        value={editQuantity}
+                        onChangeText={setEditQuantity}
+                        keyboardType="number-pad"
+                      />
+                    </View>
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Avg Buy Price</Text>
+                      <TextInput
+                        style={styles.numberInput}
+                        placeholder="0"
+                        placeholderTextColor="rgba(255,255,255,0.2)"
+                        value={editAvgPrice}
+                        onChangeText={setEditAvgPrice}
+                        keyboardType="number-pad"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={{ marginTop: 12 }}>
+                    <Text style={styles.inputLabel}>Projected OVR</Text>
+                    <TextInput
+                      style={styles.numberInput}
+                      placeholder="0"
+                      placeholderTextColor="rgba(255,255,255,0.2)"
+                      value={editProjectedOvr}
+                      onChangeText={setEditProjectedOvr}
+                      keyboardType="number-pad"
+                    />
+                    <Text style={styles.editHelperText}>Your prediction (0-99)</Text>
+                  </View>
+
+                  <View style={{ marginTop: 12 }}>
+                    <Text style={styles.inputLabel}>Notes</Text>
+                    <TextInput
+                      style={[styles.numberInput, styles.notesInput]}
+                      placeholder="Add a note about this investment..."
+                      placeholderTextColor="rgba(255,255,255,0.2)"
+                      value={editNotes}
+                      onChangeText={(text) => {
+                        if (text.length <= 500) setEditNotes(text);
+                      }}
+                      multiline
+                      textAlignVertical="top"
+                    />
+                    <Text
+                      style={[
+                        styles.editHelperText,
+                        editNotes.length > 450 && { color: '#fbbf24' },
+                        editNotes.length >= 500 && { color: '#f87171' },
+                      ]}
+                    >
+                      {editNotes.length}/500 characters
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Actions */}
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={handleCancelEdit}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modalCancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSaveButton,
+                      editSubmitting && styles.addButtonDisabled,
+                    ]}
+                    onPress={handleUpdateHolding}
+                    disabled={editSubmitting}
+                    activeOpacity={0.7}
+                  >
+                    {editSubmitting ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : (
+                      <Text style={styles.modalSaveButtonText}>Save Changes</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
+
+      {/* ── Success Toast ───────────────────────────────────────────── */}
+      {successMessage ? (
+        <View style={styles.toast}>
+          <Ionicons name="checkmark-circle" size={18} color="#4ade80" />
+          <Text style={styles.toastText}>{successMessage}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -690,7 +976,7 @@ const styles = StyleSheet.create({
   publicBadgeTextPrivate: { color: '#9ca3af' },
 
   // Summary
-  summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 6 },
   summaryCard: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.6)',
@@ -749,7 +1035,7 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: '700',
-    marginTop: 24,
+    marginTop: 14,
     marginBottom: 12,
   },
 
@@ -942,4 +1228,154 @@ const styles = StyleSheet.create({
   emptyContainer: { alignItems: 'center', paddingTop: 50, paddingBottom: 30 },
   emptyTitle: { color: 'white', fontSize: 18, fontWeight: '700', marginTop: 16 },
   emptySubtext: { color: theme.colors.muted, fontSize: 14, marginTop: 6 },
+
+  // Investment card actions
+  investmentActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+
+  // Edit modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalAvoidingView: {
+    width: '100%',
+    maxWidth: 420,
+  },
+  modalCard: {
+    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    maxHeight: '100%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  modalPlayerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 16,
+    gap: 10,
+  },
+  modalPlayerImg: {
+    width: 36,
+    height: 50,
+    borderRadius: 3,
+  },
+  modalPlayerName: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalPlayerMeta: {
+    color: theme.colors.muted,
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  editErrorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(248, 113, 113, 0.1)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.25)',
+  },
+  editErrorText: {
+    color: '#f87171',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  modalInputSection: {
+    gap: 0,
+  },
+  editHelperText: {
+    color: theme.colors.muted,
+    fontSize: 10,
+    marginTop: 4,
+    marginLeft: 2,
+  },
+  notesInput: {
+    height: 80,
+    textAlign: 'left',
+    paddingTop: 10,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 20,
+  },
+  modalCancelButton: {
+    flex: 1,
+    borderRadius: 12,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  modalCancelButtonText: {
+    color: theme.colors.muted,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  modalSaveButton: {
+    flex: 1,
+    borderRadius: 12,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3b82f6',
+  },
+  modalSaveButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  // Success toast
+  toast: {
+    position: 'absolute',
+    bottom: 100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(74, 222, 128, 0.3)',
+  },
+  toastText: {
+    color: '#4ade80',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });

@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from shared.db.database import get_db
 from shared.db.models import Users, UserPrediction
-from src.api.routes.users import firebase_claims
-from src.schemas.user_prediction import UserPredictionCreate, UserPredictionResponse
+from src.api.routes.users import firebase_claims, firebase_claims_optional
+from src.schemas.user_prediction import (
+    LeaderboardEntry,
+    PredictionLeaderboardResponse,
+    UserPredictionCreate,
+    UserPredictionResponse,
+)
 
 router = APIRouter(prefix="/user-predictions", tags=["user_predictions"])
 
@@ -21,6 +26,82 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
+
+
+@router.get("/leaderboard", response_model=PredictionLeaderboardResponse)
+def get_prediction_leaderboard(
+    db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims_optional),
+):
+    # Subquery: count predictions per user, ordered by count desc
+    count_sq = (
+        select(
+            UserPrediction.user_id,
+            func.count().label("prediction_count"),
+        )
+        .group_by(UserPrediction.user_id)
+        .subquery()
+    )
+
+    # Ranked query joining with users table
+    rows = db.execute(
+        select(
+            Users.id,
+            Users.display_name,
+            Users.profile_img_url,
+            count_sq.c.prediction_count,
+        )
+        .join(count_sq, Users.id == count_sq.c.user_id)
+        .order_by(count_sq.c.prediction_count.desc(), Users.display_name.asc())
+        .limit(50)
+    ).all()
+
+    total_participants = db.scalar(
+        select(func.count(func.distinct(UserPrediction.user_id)))
+    ) or 0
+
+    items = [
+        LeaderboardEntry(
+            rank=idx + 1,
+            user_id=row.id,
+            display_name=row.display_name,
+            profile_img_path=row.profile_img_url,
+            prediction_count=row.prediction_count,
+            score=None,
+        )
+        for idx, row in enumerate(rows)
+    ]
+
+    # Resolve caller's rank if authenticated
+    my_rank = None
+    my_prediction_count = None
+    uid = claims.get("uid")
+    if uid:
+        caller = db.scalar(select(Users).where(Users.firebase_id == uid))
+        if caller:
+            caller_count = db.scalar(
+                select(func.count()).where(UserPrediction.user_id == caller.id)
+            ) or 0
+            if caller_count > 0:
+                my_prediction_count = caller_count
+                # Rank = number of users with strictly more predictions + 1
+                higher_count = db.scalar(
+                    select(func.count()).select_from(
+                        select(UserPrediction.user_id)
+                        .group_by(UserPrediction.user_id)
+                        .having(func.count() > caller_count)
+                        .subquery()
+                    )
+                ) or 0
+                my_rank = higher_count + 1
+
+    return PredictionLeaderboardResponse(
+        items=items,
+        total_participants=total_participants,
+        my_rank=my_rank,
+        my_prediction_count=my_prediction_count,
+    )
+
 
 @router.post("/", response_model=UserPredictionResponse)
 def upsert_prediction(
