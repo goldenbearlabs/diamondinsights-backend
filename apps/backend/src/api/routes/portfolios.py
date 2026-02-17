@@ -141,6 +141,7 @@ def add_holding(
             quantity=body.quantity,
             avg_price=body.avg_price,
             user_predicted_ovr=body.user_predicted_ovr,
+            notes=body.notes,
         )
         db.add(holding)
 
@@ -202,12 +203,14 @@ def update_holding(
             status_code=status.HTTP_404_NOT_FOUND, detail="Holding not found"
         )
 
-    if body.quantity is not None:
+    if "quantity" in body.model_fields_set:
         holding.quantity = body.quantity
-    if body.avg_price is not None:
+    if "avg_price" in body.model_fields_set:
         holding.avg_price = body.avg_price
-    if body.user_predicted_ovr is not None:
+    if "user_predicted_ovr" in body.model_fields_set:
         holding.user_predicted_ovr = body.user_predicted_ovr
+    if "notes" in body.model_fields_set:
+        holding.notes = body.notes
 
     db.commit()
     db.refresh(holding)

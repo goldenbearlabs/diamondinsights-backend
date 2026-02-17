@@ -9,12 +9,14 @@ class HoldingCreate(BaseModel):
     quantity: int = Field(..., ge=1)
     avg_price: int = Field(..., ge=0)
     user_predicted_ovr: int = Field(..., ge=0, le=99)
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class HoldingUpdate(BaseModel):
     quantity: Optional[int] = Field(None, ge=1)
     avg_price: Optional[int] = Field(None, ge=0)
     user_predicted_ovr: Optional[int] = Field(None, ge=0, le=99)
+    notes: Optional[str] = Field(None, max_length=500)
 
 
 class PortfolioPrivacyUpdate(BaseModel):
@@ -75,6 +77,7 @@ class HoldingResponse(BaseModel):
     quantity: int
     avg_price: Optional[int] = None
     user_predicted_ovr: Optional[int] = None
+    notes: Optional[str] = None
     card: HoldingCardInfo
 
     class Config:

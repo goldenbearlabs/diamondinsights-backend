@@ -99,3 +99,38 @@ export function getUserPrediction(cardId: string) {
 export function saveUserPrediction(body: UserPredictionCreate) {
   return apiRequest<UserPredictionResponse>("POST", "/user-predictions/", body, { auth: true });
 }
+
+// ── Prediction Leaderboard ──────────────────────────────────────────
+
+export interface LeaderboardEntry {
+  rank: number;
+  user_id: number;
+  display_name: string;
+  profile_img_path: string;
+  prediction_count: number;
+  score: number | null;
+}
+
+export interface PredictionLeaderboardResponse {
+  items: LeaderboardEntry[];
+  total_participants: number;
+  my_rank: number | null;
+  my_prediction_count: number | null;
+}
+
+export function getPredictionLeaderboard() {
+  return apiRequest<PredictionLeaderboardResponse>("GET", "/user-predictions/leaderboard", undefined, { auth: true });
+}
+
+// ── Portfolio Holdings ──────────────────────────────────────────────
+
+export interface UpdateHoldingBody {
+  quantity?: number;
+  avg_price?: number | null;
+  user_predicted_ovr?: number | null;
+  notes?: string | null;
+}
+
+export function updatePortfolioHolding(cardId: string, body: UpdateHoldingBody) {
+  return apiRequest<void>("PUT", `/portfolios/me/holdings/${cardId}`, body, { auth: true });
+}

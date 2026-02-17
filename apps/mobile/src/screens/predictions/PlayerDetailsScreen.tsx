@@ -132,7 +132,7 @@ export default function PlayerDetailsScreen() {
   const handleInfoPress = () => {
     Alert.alert(
       "Prediction Info",
-      "These are your personal predictions based on what overall you think this player will go up/down to after the next roster update. Your predictions will be scored after the next roster update.\n\nNote: All predictions are locked and finalized 48 hours before the next roster update.",
+      "These are your personal predictions based on what overall you think this player will go up/down to after the next roster update. Your predictions will be scored after the next roster update. Check out the Leaderboard to see how you rank!\n\nNote: All predictions are locked and finalized 48 hours before the next roster update.",
       [{ text: "Got it" }]
     );
   };
