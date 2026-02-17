@@ -2,26 +2,18 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import math
 import os
 import re
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from joblib import load as joblib_load
 from sqlalchemy import func, select, text
 
-try:
-    from sklearn.exceptions import InconsistentVersionWarning
-except Exception:
-    InconsistentVersionWarning = None
-
-from shared.db.models import Card, CardPrediction, PredictionRun, RosterUpdate
 from apps.jobs.job import Job
+from shared.db.models import Card, CardPrediction, PredictionRun, RosterUpdate
 
 
 def height_to_inches(v: Any) -> Optional[int]:
@@ -60,7 +52,8 @@ def calc_batting_metrics(s: Dict[str, Any], prefix: str) -> Dict[str, Any]:
     out = {f"{prefix}{k}": v for k, v in s.items() if k not in exclude}
 
     out[f"{prefix}avg"] = safe_div(h, ab)
-    out[f"{prefix}obp"] = safe_div(h + bb + hbp, ab)
+    # Match training_data.py exactly.
+    out[f"{prefix}obp"] = safe_div(h + bb + hbp, ab + bb + hbp)
     out[f"{prefix}slug"] = safe_div(tb, ab)
     out[f"{prefix}ops"] = float(out[f"{prefix}obp"]) + float(out[f"{prefix}slug"])
     out[f"{prefix}iso"] = float(out[f"{prefix}slug"]) - float(out[f"{prefix}avg"])
@@ -177,6 +170,9 @@ class AttrModelSpec:
     role: str
     attr_label: str
     safe_attr: str
+    old_col: str
+    new_col: str
+    delta_col: str
     model: Any
     feature_cols: List[str]
 
@@ -184,8 +180,7 @@ class AttrModelSpec:
 @dataclass(frozen=True)
 class OvrModelSpec:
     role: str
-    field_mode: str
-    train_field_updates: bool
+    kind: str
     model: Any
     feature_cols: List[str]
 
@@ -224,17 +219,9 @@ class PredictionSync(Job):
             "DRG BNT": "drag_bunting_ability",
         }
 
+        # We never apply fielding-run updates in this job version.
         self._field_run_attrs = {"SPD", "STEAL", "ARM", "ACC", "FLD", "REAC", "BLK"}
-        self._attr_safe_to_label = {self._safe_name(k): k for k in self._attr_field_map.keys()}
-
-        self._field_run_update_dates = {
-            "2025-08-15",
-            "2024-07-26",
-            "2023-10-06",
-            "2023-07-21",
-            "2022-07-29",
-            "2021-07-30",
-        }
+        self._pit_attr_labels = {"K/9", "BB/9", "H/9", "HR/9", "STA", "VEL", "BRK", "CTRL", "PCLT"}
 
     def _configure_lightgbm_logging(self) -> None:
         try:
@@ -283,27 +270,23 @@ class PredictionSync(Job):
         if features.empty:
             self.logger.info("prediction sync skipped reason=no_features year=%s", latest_year)
             return
+
         self.logger.info(
             "prediction sync features loaded year=%s rows=%s",
             latest_year,
             len(features),
         )
 
-        p_df_rates, b_df_rates, _tw_df = self._build_role_feature_frames(features)
+        p_df, b_df, _tw_df = self._build_role_feature_frames(features)
 
-        hit_deltas = self._predict_attr_deltas(b_df_rates, role="hit")
-        pit_deltas = self._predict_attr_deltas(p_df_rates, role="pit")
+        hit_attr = self._predict_attr_deltas(b_df, role="hit")
+        pit_attr = self._predict_attr_deltas(p_df, role="pit")
 
-        hit_ovr = self._predict_ovr_for_role(b_df_rates, hit_deltas, role="hit")
-        pit_ovr = self._predict_ovr_for_role(p_df_rates, pit_deltas, role="pit")
+        hit_ovr = self._predict_ovr_for_role(b_df, role="hit", attr_preds=hit_attr)
+        pit_ovr = self._predict_ovr_for_role(p_df, role="pit", attr_preds=pit_attr)
 
-        combined = self._combine_ovr_predictions(hit_ovr, pit_ovr)
+        combined = self._combine_role_predictions(hit_ovr, pit_ovr)
         if not combined:
-            self.logger.info(
-                "prediction sync no combined predictions hit_ovr=%s pit_ovr=%s",
-                list(hit_ovr.keys()),
-                list(pit_ovr.keys()),
-            )
             self.logger.info("prediction sync skipped reason=no_predictions year=%s", latest_year)
             return
 
@@ -314,7 +297,7 @@ class PredictionSync(Job):
             year=latest_year,
             live_cards=len(live_cards),
             features=len(features),
-            predictions=sum(len(v.get("preds", {})) for v in combined.values()),
+            predictions=len(combined.get("standard", {}).get("preds", {})),
         )
 
     def _get_latest_year(self, db_session) -> Optional[int]:
@@ -336,24 +319,123 @@ class PredictionSync(Job):
         s = re.sub(r"[^A-Z0-9_]+", "", s)
         return s
 
+    def _models_root_dir(self) -> Path:
+        return Path(__file__).resolve().parents[0] / "models"
+
     def _attr_models_dir(self) -> Path:
         env = os.getenv("ATTR_MODELS_DIR")
         if env:
             return Path(env).expanduser().resolve()
-        return Path(__file__).resolve().parents[0] / "models" / "attr_models"
+        return self._models_root_dir()
 
     def _ovr_models_dir(self) -> Path:
         env = os.getenv("OVR_MODELS_DIR")
         if env:
             return Path(env).expanduser().resolve()
-        return Path(__file__).resolve().parents[0] / "models" / "ovr_models"
+        return self._models_root_dir()
 
-    def _joblib_load(self, path: Path) -> Any:
-        with warnings.catch_warnings():
-            if InconsistentVersionWarning is not None:
-                warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
-            warnings.filterwarnings("ignore", message=r".*serialized model.*", category=UserWarning)
-            return joblib_load(path)
+    def _load_lgb_model(self, model_path: Path) -> Any:
+        cached = self._model_cache.get(model_path)
+        if cached is not None:
+            return cached
+
+        import lightgbm as lgb
+
+        model = lgb.Booster(model_file=str(model_path))
+        self._model_cache[model_path] = model
+        return model
+
+    def _infer_attr_role(self, attr_label: str) -> str:
+        return "pit" if attr_label in self._pit_attr_labels else "hit"
+
+    def _iter_attr_model_dirs(self, model_root: Path) -> List[Path]:
+        if not model_root.exists():
+            return []
+        dirs: List[Path] = []
+        for model_path in model_root.rglob("model.txt"):
+            parent = model_path.parent
+            if (parent / "features.json").exists():
+                dirs.append(parent)
+        return sorted(set(dirs), key=lambda p: str(p))
+
+    def _load_attr_model(self, model_dir: Path) -> Optional[AttrModelSpec]:
+        cache_key = model_dir / ".attr_spec"
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
+        model_path = model_dir / "model.txt"
+        feat_path = model_dir / "features.json"
+        meta_path = model_dir / "meta.json"
+
+        if not (model_path.exists() and feat_path.exists() and meta_path.exists()):
+            self._model_cache[cache_key] = None
+            return None
+
+        try:
+            with meta_path.open() as f:
+                meta = json.load(f) or {}
+        except Exception:
+            self._model_cache[cache_key] = None
+            return None
+
+        attr_label = str(meta.get("attr") or "").strip()
+        if not attr_label:
+            # Skip non-attr bundles (e.g. OVR_*).
+            self._model_cache[cache_key] = None
+            return None
+
+        old_col = str(meta.get("old_col") or f"{attr_label}_old")
+        new_col = str(meta.get("new_col") or f"{attr_label}_new")
+        delta_col = str(meta.get("delta_col") or f"{attr_label}_delta")
+        safe_attr = self._safe_name(attr_label)
+
+        try:
+            with feat_path.open() as f:
+                feature_cols = list(json.load(f) or [])
+            model = self._load_lgb_model(model_path)
+        except Exception:
+            self._model_cache[cache_key] = None
+            return None
+
+        spec = AttrModelSpec(
+            role=self._infer_attr_role(attr_label),
+            attr_label=attr_label,
+            safe_attr=safe_attr,
+            old_col=old_col,
+            new_col=new_col,
+            delta_col=delta_col,
+            model=model,
+            feature_cols=feature_cols,
+        )
+        self._model_cache[cache_key] = spec
+        return spec
+
+    def _load_ovr_model(self, role: str) -> Optional[OvrModelSpec]:
+        kind = "OVR_HITTER" if role == "hit" else "OVR_PITCHER"
+        model_dir = self._ovr_models_dir() / kind
+        cache_key = model_dir / ".ovr_spec"
+
+        if cache_key in self._model_cache:
+            return self._model_cache[cache_key]
+
+        model_path = model_dir / "model.txt"
+        feat_path = model_dir / "features.json"
+
+        if not (model_path.exists() and feat_path.exists()):
+            self._model_cache[cache_key] = None
+            return None
+
+        try:
+            with feat_path.open() as f:
+                feature_cols = list(json.load(f) or [])
+            model = self._load_lgb_model(model_path)
+        except Exception:
+            self._model_cache[cache_key] = None
+            return None
+
+        spec = OvrModelSpec(role=role, kind=kind, model=model, feature_cols=feature_cols)
+        self._model_cache[cache_key] = spec
+        return spec
 
     def _split_by_role(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         main_pos = df["display_position"].astype(str).str.upper().str.strip()
@@ -383,58 +465,6 @@ class PredictionSync(Job):
         to_drop = [c for c in cols if any(s in c.lower() for s in subs)]
         return df.drop(columns=to_drop, errors="ignore").copy()
 
-    def _add_split_league_shrunk_rates(
-        self,
-        df: pd.DataFrame,
-        windows: List[str],
-        split_prefixes: List[str],
-        denom_name: str,
-        numerators: List[str],
-        k_by_window: Dict[str, float],
-        split_k_divisors: Dict[str, float],
-        group_col: str = "update_date",
-        add_raw_rate: bool = True,
-    ) -> pd.DataFrame:
-        if group_col not in df.columns:
-            raise ValueError(f"Missing required column: {group_col}")
-
-        g = df[group_col]
-        new_cols: Dict[str, Any] = {}
-
-        def to_num(s: pd.Series) -> pd.Series:
-            return pd.to_numeric(s, errors="coerce").fillna(0.0)
-
-        for w in windows:
-            base_k = float(k_by_window[w])
-
-            for sp in split_prefixes:
-                divisor = float(split_k_divisors.get(sp, 1.0))
-                k = base_k / divisor
-
-                dcol = f"{w}_{sp}{denom_name}"
-                if dcol not in df.columns:
-                    continue
-
-                d = to_num(df[dcol])
-                d_sum = d.groupby(g).transform("sum")
-
-                for stat in numerators:
-                    ncol = f"{w}_{sp}{stat}"
-                    if ncol not in df.columns:
-                        continue
-
-                    n = to_num(df[ncol])
-                    n_sum = n.groupby(g).transform("sum")
-
-                    r0 = np.where(d_sum > 0, n_sum / d_sum, 0.0)
-
-                    if add_raw_rate:
-                        new_cols[f"{w}_{sp}{stat}_per_{denom_name}"] = np.where(d > 0, n / d, 0.0)
-
-                    new_cols[f"{w}_{sp}{stat}_shrunk_per_{denom_name}"] = (n + k * r0) / (d + k)
-
-        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1).copy()
-
     def _build_role_feature_frames(
         self, df: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -442,111 +472,10 @@ class PredictionSync(Job):
         if b_df.empty and not df.empty:
             b_df = df.copy()
 
-        p_df_stage1 = self._drop_by_substring(p_df, ["vslhp", "vsrhp"])
-        b_df_stage1 = self._drop_by_substring(b_df, ["vslhb", "vsrhb"])
-
-        b_windows = ["since", "m1", "szn"]
-        b_k = {"since": 45.0, "m1": 50.0, "szn": 100.0}
-        b_denom = "pa"
-        b_splits = ["", "risp_", "vslhp_", "vsrhp_"]
-        b_split_div = {"": 1.0, "risp_": 5.0, "vslhp_": 2.0, "vsrhp_": 1.9}
-        b_stats = ["r", "h", "doubles", "triples", "hr", "hbp", "tb", "rbi", "so", "bb", "ab", "lob"]
-
-        b_df_rates = self._add_split_league_shrunk_rates(
-            b_df_stage1,
-            windows=b_windows,
-            split_prefixes=b_splits,
-            denom_name=b_denom,
-            numerators=b_stats,
-            k_by_window=b_k,
-            split_k_divisors=b_split_div,
-            group_col="update_date",
-            add_raw_rate=True,
-        )
-
-        p_windows = ["since", "m1", "szn"]
-        p_k = {"since": 21.0, "m1": 30.0, "szn": 50.0}
-        p_denom = "pab"
-        p_splits = ["", "risp_", "vslhb_", "vsrhb_"]
-        p_split_div = {"": 1.0, "risp_": 5.0, "vslhb_": 2.0, "vsrhb_": 1.9}
-        p_stats = ["ph", "pdoubles", "ptriples", "phr", "pbb", "pk", "pr", "per"]
-
-        p_df_rates = self._add_split_league_shrunk_rates(
-            p_df_stage1,
-            windows=p_windows,
-            split_prefixes=p_splits,
-            denom_name=p_denom,
-            numerators=p_stats,
-            k_by_window=p_k,
-            split_k_divisors=p_split_div,
-            group_col="update_date",
-            add_raw_rate=True,
-        )
-
-        return p_df_rates, b_df_rates, tw_df
-
-    def _series_or_empty(self, df: pd.DataFrame, col: str) -> pd.Series:
-        if col in df.columns:
-            return df[col]
-        return pd.Series([""] * len(df), index=df.index, dtype="object")
-
-    def _build_position_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        out = pd.DataFrame(index=df.index)
-
-        main_raw = self._series_or_empty(df, "display_position").astype(str).str.upper().str.strip()
-        sec_raw = (
-            self._series_or_empty(df, "display_secondary_positions").astype(str).str.upper().str.strip()
-        )
-
-        def first_sec(x: str) -> str:
-            if not x or x in ("NAN", "NONE", "NULL"):
-                return ""
-            parts = [p.strip() for p in x.split(",") if p.strip()]
-            return parts[0] if parts else ""
-
-        main_filled = main_raw.mask(main_raw.eq(""), sec_raw.map(first_sec))
-        out = pd.concat([out, pd.get_dummies(main_filled, prefix="pos_main")], axis=1)
-
-        def split_pos(x: str) -> List[str]:
-            if not x or x in ("NAN", "NONE", "NULL"):
-                return []
-            return [p.strip() for p in x.split(",") if p.strip()]
-
-        sec_lists = sec_raw.map(split_pos)
-        all_pos = sorted({p for lst in sec_lists for p in lst})
-
-        for p in all_pos:
-            out[f"pos_sec_{p}"] = sec_lists.map(lambda lst, p=p: 1.0 if p in lst else 0.0)
-
-        return out
-
-    def _sanitize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        out = df.copy()
-        out.columns = (
-            out.columns.astype(str)
-            .str.replace(r"\s+", "_", regex=True)
-            .str.replace(r"[^A-Za-z0-9_]+", "_", regex=True)
-        )
-        return out
-
-    def _build_attr_input_frame(self, df: pd.DataFrame) -> pd.DataFrame:
-        X = df.copy()
-
-        pos_feats = self._build_position_features(df)
-        X = pd.concat([X, pos_feats], axis=1)
-
-        if "height" in df.columns:
-            X["height_in"] = df["height"].map(height_to_inches)
-        if "weight" in df.columns:
-            X["weight_lb"] = df["weight"].map(weight_to_lbs)
-
-        X = X.drop(
-            columns=["display_position", "display_secondary_positions", "height", "weight"],
-            errors="ignore",
-        )
-
-        X_num = X.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-        return self._sanitize_columns(X_num)
+        # Match training pre-prune steps.
+        p_df = self._drop_by_substring(p_df, ["vslhp", "vsrhp"])
+        b_df = self._drop_by_substring(b_df, ["vslhb", "vsrhb"])
+        return p_df, b_df, tw_df
 
     def _align_feature_cols(self, X: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
         out = X.copy()
@@ -555,81 +484,91 @@ class PredictionSync(Job):
             out = pd.concat([out, pd.DataFrame(0.0, index=out.index, columns=missing)], axis=1)
         return out[feature_cols]
 
-    def _load_attr_model(self, model_dir: Path) -> Optional[AttrModelSpec]:
-        if model_dir in self._model_cache:
-            cached = self._model_cache[model_dir]
-            return cached
+    def _to_numeric(self, X: pd.DataFrame) -> pd.DataFrame:
+        return (
+            X.apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
+            .astype(np.float32)
+        )
 
-        best_path = model_dir / "best_params.json"
-        model_path = model_dir / "final_model.joblib"
-        feat_path = model_dir / "feature_cols.json"
+    def _numeric_series(self, df: pd.DataFrame, col: str) -> pd.Series:
+        if col in df.columns:
+            return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        return pd.Series(0.0, index=df.index, dtype="float64")
 
-        if not (model_path.exists() and feat_path.exists()):
-            self._model_cache[model_dir] = None
-            return None
+    def _build_attr_input(self, df: pd.DataFrame, spec: AttrModelSpec) -> pd.DataFrame:
+        drop_cols = [
+            "update_id",
+            "update_date",
+            "card_id",
+            "old_ovr",
+            "new_ovr",
+            "trend_display",
+            "mlb_id",
+            "name",
+            "team",
+            "year",
+            "last_update",
+            spec.new_col,
+            spec.delta_col,
+        ]
 
-        role = ""
-        attr_label = model_dir.name
+        X = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore").copy()
 
-        if best_path.exists():
-            try:
-                with best_path.open() as f:
-                    best_obj = json.load(f)
-                role = str(best_obj.get("role", "") or "").strip().lower()
-                attr_label = str(best_obj.get("attr", attr_label) or attr_label).strip()
-            except Exception:
-                pass
+        leak_cols = [c for c in df.columns if (c.endswith("_new") or c.endswith("_delta"))]
+        leak_cols = [c for c in leak_cols if c not in {spec.new_col, spec.delta_col}]
+        if leak_cols:
+            X = X.drop(columns=[c for c in leak_cols if c in X.columns], errors="ignore")
 
-        try:
-            with feat_path.open() as f:
-                feature_cols = list(json.load(f) or [])
-        except Exception:
-            self._model_cache[model_dir] = None
-            return None
+        for c in ["display_position", "display_secondary_positions", "height", "weight"]:
+            if c in X.columns:
+                X = X.drop(columns=[c])
 
-        try:
-            model = self._joblib_load(model_path)
-        except Exception:
-            self._model_cache[model_dir] = None
-            return None
+        if spec.old_col in df.columns and spec.old_col not in X.columns:
+            X[spec.old_col] = df[spec.old_col]
 
-        safe_attr = self._safe_name(attr_label)
-        spec = AttrModelSpec(role=role, attr_label=attr_label, safe_attr=safe_attr, model=model, feature_cols=feature_cols)
-        self._model_cache[model_dir] = spec
-        return spec
+        X = self._to_numeric(X)
+        return self._align_feature_cols(X, spec.feature_cols)
 
     def _predict_attr_deltas(self, df_role: pd.DataFrame, role: str) -> pd.DataFrame:
         if df_role.empty:
-            self.logger.info("prediction sync attr deltas skipped role=%s reason=empty_df", role)
             return pd.DataFrame()
 
         model_root = self._attr_models_dir()
-        if not model_root.exists():
+        model_dirs = self._iter_attr_model_dirs(model_root)
+        if not model_dirs:
             self.logger.info(
-                "prediction sync attr deltas skipped role=%s reason=missing_attr_models dir=%s",
+                "prediction sync attr deltas skipped role=%s reason=no_attr_models dir=%s",
                 role,
                 str(model_root),
             )
             return pd.DataFrame()
 
-        X_role = self._build_attr_input_frame(df_role)
-
         preds = pd.DataFrame(index=df_role.index)
         preds["card_id"] = df_role["card_id"].values
 
         loaded = 0
-        for model_dir in sorted(p for p in model_root.iterdir() if p.is_dir()):
+        for model_dir in model_dirs:
             spec = self._load_attr_model(model_dir)
-            if not spec:
-                continue
-            if spec.role and spec.role != role:
+            if not spec or spec.role != role:
                 continue
 
-            col_name = f"pred_{spec.safe_attr}_delta"
             try:
-                X = self._align_feature_cols(X_role, spec.feature_cols)
-                p = spec.model.predict(X)
-                preds[col_name] = pd.to_numeric(pd.Series(p, index=df_role.index), errors="coerce").fillna(0.0).astype(float)
+                X = self._build_attr_input(df_role, spec)
+                delta = pd.Series(spec.model.predict(X), index=df_role.index)
+                delta = pd.to_numeric(delta, errors="coerce").fillna(0.0).astype(float)
+
+                old_vals = self._numeric_series(df_role, spec.old_col)
+
+                # Non-fielding-only run: never apply fielding attr deltas.
+                if spec.attr_label in self._field_run_attrs:
+                    delta = pd.Series(0.0, index=df_role.index)
+
+                new_vals = old_vals + delta
+
+                preds[f"pred_{spec.safe_attr}_delta"] = delta.astype(float)
+                preds[f"pred_{spec.safe_attr}_new"] = new_vals.astype(float)
                 loaded += 1
             except Exception as exc:
                 self.logger.warning(
@@ -639,207 +578,91 @@ class PredictionSync(Job):
                     str(model_dir),
                     exc,
                 )
-                continue
 
         if loaded == 0:
-            self.logger.info(
-                "prediction sync attr deltas empty role=%s reason=no_models",
-                role,
-            )
+            self.logger.info("prediction sync attr deltas empty role=%s reason=no_models", role)
+
         return preds
 
-    def _load_ovr_model(self, role: str, field_mode: str) -> Optional[OvrModelSpec]:
-        model_dir = self._ovr_models_dir() / role / field_mode
-        if not model_dir.exists():
-            self.logger.info(
-                "prediction sync ovr model missing role=%s field_mode=%s dir=%s",
-                role,
-                field_mode,
-                str(model_dir),
-            )
-            return None
+    def _build_ovr_input(self, role_df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
+        drop_cols = [
+            "update_id",
+            "update_date",
+            "card_id",
+            "trend_display",
+            "mlb_id",
+            "name",
+            "team",
+            "year",
+            "last_update",
+            "new_ovr",
+        ]
 
-        if model_dir in self._model_cache:
-            cached = self._model_cache[model_dir]
-            return cached
+        X = role_df.drop(columns=[c for c in drop_cols if c in role_df.columns], errors="ignore").copy()
 
+        leak_cols = [c for c in role_df.columns if (c.endswith("_new") or c.endswith("_delta"))]
+        if leak_cols:
+            X = X.drop(columns=[c for c in leak_cols if c in X.columns], errors="ignore")
 
-        model_path = model_dir / "ovr_model.joblib"
-        feat_path = model_dir / "feature_cols.json"
-        meta_path = model_dir / "meta.json"
+        for c in ["display_position", "display_secondary_positions", "height", "weight"]:
+            if c in X.columns:
+                X = X.drop(columns=[c])
 
-        if not (model_path.exists() and feat_path.exists()):
-            self.logger.info(
-                "prediction sync ovr model files missing role=%s field_mode=%s model=%s features=%s",
-                role,
-                field_mode,
-                str(model_path),
-                str(feat_path),
-            )
-            self._model_cache[model_dir] = None
-            return None
+        if "old_ovr" in role_df.columns and "old_ovr" not in X.columns:
+            X["old_ovr"] = role_df["old_ovr"]
 
-        try:
-            model = self._joblib_load(model_path)
-            with feat_path.open() as f:
-                feature_cols = list(json.load(f) or [])
-        except Exception:
-            self.logger.info(
-                "prediction sync ovr model load failed role=%s field_mode=%s model=%s",
-                role,
-                field_mode,
-                str(model_path),
-            )
-            self._model_cache[model_dir] = None
-            return None
-
-        train_field_updates = (field_mode == "field_on")
-        if meta_path.exists():
-            try:
-                with meta_path.open() as f:
-                    meta = json.load(f) or {}
-                if isinstance(meta, dict) and "train_field_updates" in meta:
-                    train_field_updates = bool(meta["train_field_updates"])
-            except Exception:
-                pass
-
-        spec = OvrModelSpec(
-            role=role,
-            field_mode=field_mode,
-            train_field_updates=train_field_updates,
-            model=model,
-            feature_cols=feature_cols,
-        )
-        self._model_cache[model_dir] = spec
-        return spec
-
-    def _is_field_run_date(self, role_df: pd.DataFrame) -> pd.Series:
-        if "update_date" not in role_df.columns:
-            return pd.Series(False, index=role_df.index)
-        s = role_df["update_date"]
-        if pd.api.types.is_datetime64_any_dtype(s):
-            iso = s.dt.date.astype(str)
-        else:
-            iso = s.astype(str).str.slice(0, 10)
-        return iso.isin(self._field_run_update_dates)
-
-    def _build_ovr_input(
-        self,
-        role_df: pd.DataFrame,
-        attr_deltas: pd.DataFrame,
-        feature_cols: List[str],
-        train_field_updates: bool,
-    ) -> pd.DataFrame:
-        role_idx = role_df.set_index("card_id", drop=False)
-        deltas_idx = attr_deltas.set_index("card_id", drop=False) if not attr_deltas.empty else None
-
-        def num(s: pd.Series) -> pd.Series:
-            return pd.to_numeric(s, errors="coerce").fillna(0.0)
-
-        is_field_date = self._is_field_run_date(role_idx)
-
-        def delta_series(safe_attr: str) -> pd.Series:
-            col = f"pred_{safe_attr}_delta"
-            if deltas_idx is not None and col in deltas_idx.columns:
-                return num(deltas_idx[col]).reindex(role_idx.index).fillna(0.0)
-            return pd.Series(0.0, index=role_idx.index)
-
-        def old_attr_series(attr_label: Optional[str]) -> pd.Series:
-            if not attr_label:
-                return pd.Series(0.0, index=role_idx.index)
-            old_col = f"{attr_label}_old"
-            if old_col in role_idx.columns:
-                return num(role_idx[old_col])
-            safe_old_col = self._safe_name(old_col)
-            if safe_old_col in role_idx.columns:
-                return num(role_idx[safe_old_col])
-            return pd.Series(0.0, index=role_idx.index)
-
-        col_data: Dict[str, pd.Series] = {}
-
-        for col in feature_cols:
-            if col == "old_ovr":
-                col_data[col] = num(role_idx["old_ovr"])
-                continue
-
-            if col.startswith("pred_") and col.endswith("_delta"):
-                safe_attr = col[len("pred_") : -len("_delta")]
-                col_data[col] = delta_series(safe_attr)
-                continue
-
-            if col.startswith("pred_") and col.endswith("_new"):
-                safe_attr = col[len("pred_") : -len("_new")]
-                attr_label = self._attr_safe_to_label.get(safe_attr)
-                old_vals = old_attr_series(attr_label)
-                d = delta_series(safe_attr)
-                new_vals = old_vals + d
-
-                if attr_label in self._field_run_attrs:
-                    if train_field_updates:
-                        new_vals = pd.Series(
-                            np.where(is_field_date.values, new_vals.values, old_vals.values),
-                            index=role_idx.index,
-                        )
-                    else:
-                        new_vals = old_vals
-
-                col_data[col] = new_vals
-                continue
-
-            if col.startswith("old_"):
-                safe_attr = col[len("old_") :]
-                attr_label = self._attr_safe_to_label.get(safe_attr) or safe_attr
-                col_data[col] = old_attr_series(attr_label)
-                continue
-
-            if col in role_idx.columns:
-                col_data[col] = num(role_idx[col])
-            else:
-                col_data[col] = pd.Series(0.0, index=role_idx.index)
-
-        X = pd.DataFrame(col_data, index=role_idx.index).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        return X[feature_cols]
+        X = self._to_numeric(X)
+        return self._align_feature_cols(X, feature_cols)
 
     def _predict_ovr_for_role(
-        self, role_df: pd.DataFrame, attr_deltas: pd.DataFrame, role: str
-    ) -> Dict[str, Dict[str, Any]]:
+        self,
+        role_df: pd.DataFrame,
+        role: str,
+        attr_preds: pd.DataFrame,
+    ) -> Dict[str, Any]:
         if role_df.empty:
-            self.logger.info("prediction sync ovr skipped role=%s reason=empty_df", role)
             return {}
 
-        out: Dict[str, Dict[str, Any]] = {}
+        spec = self._load_ovr_model(role)
+        if not spec:
+            self.logger.info("prediction sync ovr empty role=%s reason=no_model", role)
+            return {}
 
-        for field_mode in ["field_off", "field_on"]:
-            spec = self._load_ovr_model(role, field_mode)
-            if not spec:
-                continue
+        try:
+            role_idx = role_df.set_index("card_id", drop=False)
+            X = self._build_ovr_input(role_df, spec.feature_cols)
+            X.index = role_idx.index
 
-            try:
-                X = self._build_ovr_input(role_df, attr_deltas, spec.feature_cols, spec.train_field_updates)
-                preds = spec.model.predict(X)
-                pred_series = pd.Series(preds, index=role_df["card_id"]).astype(float)
+            delta_pred = pd.Series(spec.model.predict(X), index=role_idx.index)
+            delta_pred = pd.to_numeric(delta_pred, errors="coerce").fillna(0.0).astype(float)
 
-                attrs_cols = [c for c in spec.feature_cols if c != "old_ovr"]
-                attrs_df = X[attrs_cols].copy()
-                attrs_df.index = role_df["card_id"]
+            old_ovr = self._numeric_series(role_idx, "old_ovr").astype(float)
+            pred_ovr = (old_ovr + delta_pred).clip(lower=1.0, upper=125.0)
 
-                out[field_mode] = {"preds": pred_series, "attrs": attrs_df}
-            except Exception as exc:
-                self.logger.warning(
-                    "prediction sync ovr failed role=%s field_mode=%s err=%r",
-                    role,
-                    field_mode,
-                    exc,
-                )
+            attrs_df = X.drop(columns=["old_ovr"], errors="ignore").copy()
+            if not attr_preds.empty:
+                attr_cols = [c for c in attr_preds.columns if c != "card_id"]
+                if attr_cols:
+                    attr_idx = attr_preds.set_index("card_id", drop=False)
+                    attrs_df = attrs_df.join(attr_idx[attr_cols], how="left")
 
-        if not out:
-            self.logger.info("prediction sync ovr empty role=%s reason=no_models_or_failures", role)
-        return out
+            attrs_df = attrs_df.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+            return {"preds": pred_ovr.astype(float), "attrs": attrs_df}
+        except Exception as exc:
+            self.logger.warning("prediction sync ovr failed role=%s err=%r", role, exc)
+            return {}
 
-    def _combine_ovr_predictions(
-        self, hit_ovr: Dict[str, Dict[str, Any]], pit_ovr: Dict[str, Dict[str, Any]]
+    def _combine_role_predictions(
+        self, hit_ovr: Dict[str, Any], pit_ovr: Dict[str, Any]
     ) -> Dict[str, Dict[str, Any]]:
-        combined: Dict[str, Dict[str, Any]] = {}
+        hit_preds: pd.Series = hit_ovr.get("preds", pd.Series(dtype=float))
+        pit_preds: pd.Series = pit_ovr.get("preds", pd.Series(dtype=float))
+
+        if hit_preds.empty and pit_preds.empty:
+            return {}
+
+        hit_attrs: pd.DataFrame = hit_ovr.get("attrs", pd.DataFrame())
+        pit_attrs: pd.DataFrame = pit_ovr.get("attrs", pd.DataFrame())
 
         def is_valid(v: Any) -> bool:
             if v is None:
@@ -859,99 +682,81 @@ class PredictionSync(Job):
             except Exception:
                 return 0.0
 
-        for field_mode in ["field_off", "field_on"]:
-            hit = hit_ovr.get(field_mode, {})
-            pit = pit_ovr.get(field_mode, {})
+        card_ids = set(hit_preds.index).union(set(pit_preds.index))
+        rows: Dict[str, float] = {}
+        attrs_map: Dict[str, Dict[str, float]] = {}
 
-            hit_preds: pd.Series = hit.get("preds", pd.Series(dtype=float))
-            pit_preds: pd.Series = pit.get("preds", pd.Series(dtype=float))
-
-            if hit_preds.empty and pit_preds.empty:
+        for cid in card_ids:
+            vals: List[float] = []
+            if cid in hit_preds.index and is_valid(hit_preds.loc[cid]):
+                vals.append(float(hit_preds.loc[cid]))
+            if cid in pit_preds.index and is_valid(pit_preds.loc[cid]):
+                vals.append(float(pit_preds.loc[cid]))
+            if not vals:
                 continue
 
-            hit_attrs: pd.DataFrame = hit.get("attrs", pd.DataFrame())
-            pit_attrs: pd.DataFrame = pit.get("attrs", pd.DataFrame())
+            rows[cid] = float(np.mean(vals))
 
-            card_ids = set(hit_preds.index).union(set(pit_preds.index))
-            rows: Dict[str, float] = {}
-            attrs_map: Dict[str, Dict[str, float]] = {}
+            attrs: Dict[str, float] = {}
+            if not hit_attrs.empty and cid in hit_attrs.index:
+                for k, v in hit_attrs.loc[cid].to_dict().items():
+                    attrs[f"hit_{k}"] = clean_float(v)
+            if not pit_attrs.empty and cid in pit_attrs.index:
+                for k, v in pit_attrs.loc[cid].to_dict().items():
+                    attrs[f"pit_{k}"] = clean_float(v)
 
-            for cid in card_ids:
-                vals: List[float] = []
-                if cid in hit_preds.index and is_valid(hit_preds.loc[cid]):
-                    vals.append(float(hit_preds.loc[cid]))
-                if cid in pit_preds.index and is_valid(pit_preds.loc[cid]):
-                    vals.append(float(pit_preds.loc[cid]))
-                if not vals:
-                    continue
+            attrs_map[cid] = attrs
 
-                rows[cid] = float(np.mean(vals))
+        if not rows:
+            return {}
 
-                attrs: Dict[str, float] = {}
-                if not hit_attrs.empty and cid in hit_attrs.index:
-                    for k, v in hit_attrs.loc[cid].to_dict().items():
-                        attrs[f"hit_{k}"] = clean_float(v)
-                if not pit_attrs.empty and cid in pit_attrs.index:
-                    for k, v in pit_attrs.loc[cid].to_dict().items():
-                        attrs[f"pit_{k}"] = clean_float(v)
-
-                attrs_map[cid] = attrs
-
-            combined[field_mode] = {"preds": rows, "attrs": attrs_map}
-
-        return combined
+        return {"standard": {"preds": rows, "attrs": attrs_map}}
 
     def _persist_predictions(self, db_session, combined: Dict[str, Dict[str, Any]]) -> None:
-        base_id = int(dt.datetime.now(dt.timezone.utc).timestamp() * 1000)
-        run_map = {
-            "field_off": {"scope": "standard", "run_id": base_id},
-            "field_on": {"scope": "fielding", "run_id": base_id + 1},
-        }
+        payload = combined.get("standard") or {}
+        preds_map: Dict[str, float] = payload.get("preds", {}) or {}
+        attrs_map: Dict[str, Dict[str, float]] = payload.get("attrs", {}) or {}
 
-        for field_mode, payload in combined.items():
-            run_info = run_map.get(field_mode)
-            if not run_info:
+        if not preds_map:
+            return
+
+        run_id = int(dt.datetime.now(dt.timezone.utc).timestamp() * 1000)
+
+        rows: List[CardPrediction] = []
+        for card_id, pred in preds_map.items():
+            if pred is None:
                 continue
-
-            run_id = int(run_info["run_id"])
-            scope = str(run_info["scope"])
-
-            preds_map: Dict[str, float] = payload.get("preds", {}) or {}
-            attrs_map: Dict[str, Dict[str, float]] = payload.get("attrs", {}) or {}
-
-            rows: List[CardPrediction] = []
-            for card_id, pred in preds_map.items():
-                if pred is None:
+            try:
+                if np.isnan(pred):
                     continue
-                try:
-                    if np.isnan(pred):
-                        continue
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
-                attrs = attrs_map.get(card_id, {}) or {}
-                rows.append(
-                    CardPrediction(
-                        run_id=run_id,
-                        card_id=card_id,
-                        predicted_ovr=int(round(float(pred))),
-                        predicted_attributes=attrs,
-                        predicted_rarity=None,
-                    )
+            attrs = attrs_map.get(card_id, {}) or {}
+            rows.append(
+                CardPrediction(
+                    run_id=run_id,
+                    card_id=card_id,
+                    predicted_ovr=int(round(float(pred))),
+                    predicted_attributes=attrs,
+                    predicted_rarity=None,
                 )
+            )
 
-            if rows:
-                run = PredictionRun(
-                    id=run_id,
-                    run_at=dt.datetime.now(dt.timezone.utc),
-                    scope=scope,
-                    model_version="ovr_delta_v1",
-                    status="success",
-                    notes=f"ovr_{field_mode}",
-                )
-                db_session.add(run)
-                db_session.add_all(rows)
-                db_session.flush()
+        if not rows:
+            return
+
+        run = PredictionRun(
+            id=run_id,
+            run_at=dt.datetime.now(dt.timezone.utc),
+            scope="standard",
+            model_version="ovr_delta_v1",
+            status="success",
+            notes="ovr_field_off",
+        )
+        db_session.add(run)
+        db_session.add_all(rows)
+        db_session.flush()
 
     def _load_batting(self, db_session) -> pd.DataFrame:
         q = """
@@ -1022,6 +827,8 @@ class PredictionSync(Job):
                 "old_ovr": card.ovr or 0,
                 "new_ovr": 0,
                 "trend_display": "0",
+                # Non-fielding-only run.
+                "is_fielding": False,
                 "mlb_id": card.mlb_id or 0,
                 "name": card.name or "",
                 "team": card.team or "",
@@ -1103,8 +910,8 @@ class PredictionSync(Job):
                 "m1_": (
                     b_p[m1_mask_b],
                     p_p[m1_mask_p],
-                    br_p[br_p.game_date.between(m1_start, ud)],
-                    f_p[f_p.game_date.between(m1_start, ud)],
+                    br_p[(br_p.game_date >= m1_start) & (br_p.game_date < ud)],
+                    f_p[(f_p.game_date >= m1_start) & (f_p.game_date < ud)],
                 ),
                 "since_": (b_p[since_mask_b], p_p[since_mask_p], None, None),
             }
@@ -1135,8 +942,8 @@ class PredictionSync(Job):
         final_df["is_of"] = pos.isin(["LF", "CF", "RF"]).astype(int)
         final_df["multi_pos"] = sec.ne("").astype(int)
 
-        final_df["age_sq"] = pd.to_numeric(final_df["age"], errors="coerce").fillna(0) ** 2
         age_num = pd.to_numeric(final_df["age"], errors="coerce").fillna(0)
+        final_df["age_sq"] = age_num**2
         final_df["age_bucket_young"] = (age_num < 26).astype(int)
         final_df["age_bucket_prime"] = age_num.between(26, 30).astype(int)
         final_df["age_bucket_old"] = (age_num > 30).astype(int)

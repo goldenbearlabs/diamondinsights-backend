@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Modal,
   Pressable,
@@ -12,11 +13,12 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { apiGet } from "../../src/lib/api";
+import { ApiError, apiGet, apiGetAuth } from "../../src/lib/api";
 import { theme } from "../../src/theme/colors";
 
 type CardRanking = {
   id: string;
+  mlb_id?: number | null;
   name: string;
   series_name?: string | null;
   img?: string | null;
@@ -27,12 +29,16 @@ type CardRanking = {
   display_seconday_position?: string | null;
   meta_overall?: number | null;
   meta_overall_rounded?: number | null;
+  your_overall?: number | null;
+  your_overall_rounded?: number | null;
   true_overall?: number | null;
   true_overall_rounded?: number | null;
   meta_overall_by_position?: Record<string, number> | null;
+  your_overall_by_position?: Record<string, number> | null;
   true_overall_by_position?: Record<string, number> | null;
   bat_hand?: string | null;
   throw_hand?: string | null;
+  is_hitter?: boolean;
   ovr: number;
   contact_left?: number | null;
   contact_right?: number | null;
@@ -94,7 +100,7 @@ type AttributeKey =
   | "pitch_velocity"
   | "pitch_control"
   | "pitch_movement";
-type SortKey = "name" | "hands" | "position" | "meta" | "true" | "ovr" | AttributeKey;
+type SortKey = "name" | "hands" | "position" | "your" | "meta" | "true" | "ovr" | AttributeKey;
 
 type AttributeColumn = {
   key: AttributeKey;
@@ -159,7 +165,18 @@ export default function CardsRankingsScreen() {
 
   const [sortKey, setSortKey] = useState<SortKey>("meta");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [tableScrollY, setTableScrollY] = useState(0);
+  const tableScrollY = useRef(new Animated.Value(0)).current;
+  const pinnedRowsTranslateY = useMemo(
+    () => Animated.multiply(tableScrollY, -1),
+    [tableScrollY]
+  );
+  const onTableScroll = useMemo(
+    () => Animated.event(
+      [{ nativeEvent: { contentOffset: { y: tableScrollY } } }],
+      { useNativeDriver: true }
+    ),
+    [tableScrollY]
+  );
 
   const offset = useMemo(() => (page - 1) * PAGE_SIZE, [page]);
 
@@ -202,7 +219,7 @@ export default function CardsRankingsScreen() {
       const trimmedName = nameSearch.trim();
       if (trimmedName.length > 0) params.set("name", trimmedName);
 
-      const data = await apiGet<CardRanking[]>(`/cards/?${params.toString()}`);
+      const data = await fetchRankingCards(`/cards/?${params.toString()}`);
       const safeRows = Array.isArray(data) ? data : [];
       const uniqueById = new Map<string, CardRanking>();
       for (const card of safeRows) {
@@ -469,13 +486,15 @@ export default function CardsRankingsScreen() {
       <View style={styles.tableContainer}>
         <View style={styles.tableSplit}>
           <View style={styles.pinnedImageColumn}>
-            <View style={[styles.headerRow, styles.pinnedImageHeader]}>
-              <Text style={[styles.headerCell, styles.headerCellCentered]} numberOfLines={1}>
-                Img
-              </Text>
-            </View>
             <View style={styles.pinnedImageBody}>
-              <View style={[styles.pinnedImageRows, { transform: [{ translateY: -tableScrollY }] }]}>
+              <Animated.View
+                style={[styles.pinnedImageRows, { transform: [{ translateY: pinnedRowsTranslateY }] }]}
+              >
+                <View style={[styles.headerRow, styles.pinnedImageHeader]}>
+                  <Text style={[styles.headerCell, styles.headerCellCentered]} numberOfLines={1}>
+                    Img
+                  </Text>
+                </View>
                 {rows.map((card, index) => (
                   <View
                     key={`pinned-${card.id}`}
@@ -484,15 +503,15 @@ export default function CardsRankingsScreen() {
                     <CardImage uri={card.baked_img || card.img || null} />
                   </View>
                 ))}
-              </View>
+              </Animated.View>
             </View>
           </View>
 
           <View style={styles.tableScrollPane}>
             <ScrollView horizontal contentContainerStyle={styles.tableContent} nestedScrollEnabled>
-              <ScrollView
+              <Animated.ScrollView
                 nestedScrollEnabled
-                onScroll={(event) => setTableScrollY(event.nativeEvent.contentOffset.y)}
+                onScroll={onTableScroll}
                 scrollEventThrottle={16}
               >
                 <View>
@@ -522,6 +541,15 @@ export default function CardsRankingsScreen() {
                   direction={sortDirection}
                   onPress={onSortChange}
                   cellStyle={styles.positionCell}
+                  center
+                />
+                <SortHeader
+                  label="Your"
+                  sortKey="your"
+                  activeSortKey={sortKey}
+                  direction={sortDirection}
+                  onPress={onSortChange}
+                  cellStyle={styles.overallCell}
                   center
                 />
                 <SortHeader
@@ -594,6 +622,12 @@ export default function CardsRankingsScreen() {
                     card.true_overall_rounded,
                     card.true_overall
                   );
+                  const yourOverall = resolveOverallForPosition(
+                    card.your_overall_by_position,
+                    metricPosition,
+                    card.your_overall_rounded,
+                    card.your_overall
+                  );
 
                   const quirks = Array.isArray(card.quirks)
                     ? card.quirks
@@ -653,6 +687,15 @@ export default function CardsRankingsScreen() {
                           styles.cell,
                           styles.overallCell,
                           styles.valueCell,
+                        ]}
+                      >
+                        <Text style={styles.centerCellText}>{formatOverall(yourOverall)}</Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.cell,
+                          styles.overallCell,
+                          styles.valueCell,
                           sortKey === "meta" && styles.activeColumnCell,
                         ]}
                       >
@@ -703,7 +746,7 @@ export default function CardsRankingsScreen() {
                   })
                 )}
                 </View>
-              </ScrollView>
+              </Animated.ScrollView>
             </ScrollView>
           </View>
         </View>
@@ -837,6 +880,18 @@ function summaryLabel(values: string[], fallback: string): string {
   if (values.length === 0) return fallback;
   if (values.length <= 2) return values.join(", ");
   return `${values[0]}, ${values[1]} +${values.length - 2}`;
+}
+
+async function fetchRankingCards(path: string): Promise<CardRanking[]> {
+  try {
+    return await apiGetAuth<CardRanking[]>(path);
+  } catch (err) {
+    const isAuthMissing =
+      (err instanceof ApiError && (err.status === 401 || err.status === 403))
+      || (err instanceof Error && err.message === "Not authenticated");
+    if (!isAuthMissing) throw err;
+    return apiGet<CardRanking[]>(path);
+  }
 }
 
 function filterMenuTitle(menu: FilterMenuKey | null): string {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
+  ActivityIndicator,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -135,6 +137,11 @@ type PitchingArchetype = {
   strikeout: number;
   location: number;
   pa: number;
+};
+
+type CombinedArchetype = {
+  batting: BattingArchetype;
+  pitching: PitchingArchetype;
 };
 
 type StrikeoutMapData = {
@@ -627,6 +634,9 @@ export default function GameplayStatsScreen() {
   const [gameLogResult, setGameLogResult] = useState<GameLogResultFilter>("all");
   const [gameLogBallpark, setGameLogBallpark] = useState<string>("");
   const [skills, setSkills] = useState<ShowSkills | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [archetypeLoading, setArchetypeLoading] = useState(false);
+  const [missingPaData, setMissingPaData] = useState(false);
   const [battingArchetype, setBattingArchetype] = useState<BattingArchetype | null>(null);
   const [pitchingArchetype, setPitchingArchetype] = useState<PitchingArchetype | null>(null);
   const [strikeoutMap, setStrikeoutMap] = useState<StrikeoutMapData | null>(null);
@@ -758,6 +768,9 @@ export default function GameplayStatsScreen() {
     setGameLogResult("all");
     setGameLogBallpark("");
     setSkills(null);
+    setSkillsLoading(false);
+    setArchetypeLoading(false);
+    setMissingPaData(false);
     setBattingArchetype(null);
     setPitchingArchetype(null);
     setStrikeoutMap(null);
@@ -1112,13 +1125,14 @@ export default function GameplayStatsScreen() {
   useEffect(() => {
     let active = true;
 
-    const loadPitchingArchetype = async () => {
+    const loadCombinedArchetype = async () => {
+      setArchetypeLoading(true);
       try {
         const basePath = viewUsername
-          ? `/users/show/${encodeURIComponent(viewUsername)}/archetype/pitching`
+          ? `/users/show/${encodeURIComponent(viewUsername)}/archetype/combined`
           : viewUserId
-            ? `/users/${viewUserId}/show/archetype/pitching`
-            : "/users/me/show/archetype/pitching";
+            ? `/users/${viewUserId}/show/archetype/combined`
+            : "/users/me/show/archetype/combined";
         const params = new URLSearchParams();
         if (selectedPitcher?.mlb_id) {
           params.set("pitcher_mlb_id", String(selectedPitcher.mlb_id));
@@ -1128,61 +1142,29 @@ export default function GameplayStatsScreen() {
         }
         const path = params.toString() ? `${basePath}?${params.toString()}` : basePath;
         const data = isSelfView
-          ? await apiGetAuth<PitchingArchetype>(path)
-          : await apiGet<PitchingArchetype>(path);
+          ? await apiGetAuth<CombinedArchetype>(path)
+          : await apiGet<CombinedArchetype>(path);
         if (!active) return;
-        setPitchingArchetype(data);
+        setMissingPaData(false);
+        setBattingArchetype(data?.batting ?? null);
+        setPitchingArchetype(data?.pitching ?? null);
       } catch (err: any) {
         if (!active) return;
-        if (err instanceof ApiError && err.status === 404) {
-          setPitchingArchetype(null);
-        } else {
-          setPitchingArchetype(null);
+        if (
+          err instanceof ApiError &&
+          err.status === 404 &&
+          String(err.body || "").toLowerCase().includes("no facts file found")
+        ) {
+          setMissingPaData(true);
         }
+        setBattingArchetype(null);
+        setPitchingArchetype(null);
+      } finally {
+        if (active) setArchetypeLoading(false);
       }
     };
 
-    loadPitchingArchetype();
-
-    return () => {
-      active = false;
-    };
-  }, [viewUserId, viewUsername, isSelfView, selectedPitcher?.mlb_id, selectedHitter?.mlb_id]);
-
-  useEffect(() => {
-    let active = true;
-
-    const loadBattingArchetype = async () => {
-      try {
-        const basePath = viewUsername
-          ? `/users/show/${encodeURIComponent(viewUsername)}/archetype/batting`
-          : viewUserId
-            ? `/users/${viewUserId}/show/archetype/batting`
-            : "/users/me/show/archetype/batting";
-        const params = new URLSearchParams();
-        if (selectedPitcher?.mlb_id) {
-          params.set("pitcher_mlb_id", String(selectedPitcher.mlb_id));
-        }
-        if (selectedHitter?.mlb_id) {
-          params.set("hitter_mlb_id", String(selectedHitter.mlb_id));
-        }
-        const path = params.toString() ? `${basePath}?${params.toString()}` : basePath;
-        const data = isSelfView
-          ? await apiGetAuth<BattingArchetype>(path)
-          : await apiGet<BattingArchetype>(path);
-        if (!active) return;
-        setBattingArchetype(data);
-      } catch (err: any) {
-        if (!active) return;
-        if (err instanceof ApiError && err.status === 404) {
-          setBattingArchetype(null);
-        } else {
-          setBattingArchetype(null);
-        }
-      }
-    };
-
-    loadBattingArchetype();
+    loadCombinedArchetype();
 
     return () => {
       active = false;
@@ -1299,6 +1281,7 @@ export default function GameplayStatsScreen() {
     let active = true;
 
     const loadSkills = async () => {
+      setSkillsLoading(true);
       try {
         const basePath = viewUsername
           ? `/users/show/${encodeURIComponent(viewUsername)}/skills`
@@ -1315,14 +1298,24 @@ export default function GameplayStatsScreen() {
         const path = params.toString() ? `${basePath}?${params.toString()}` : basePath;
         const data = isSelfView ? await apiGetAuth<ShowSkills>(path) : await apiGet<ShowSkills>(path);
         if (!active) return;
+        setMissingPaData(false);
         setSkills(data);
       } catch (err: any) {
         if (!active) return;
+        if (
+          err instanceof ApiError &&
+          err.status === 404 &&
+          String(err.body || "").toLowerCase().includes("no facts file found")
+        ) {
+          setMissingPaData(true);
+        }
         if (err instanceof ApiError && err.status === 404) {
           setSkills(null);
         } else {
           setSkills(null);
         }
+      } finally {
+        if (active) setSkillsLoading(false);
       }
     };
 
@@ -1677,6 +1670,8 @@ export default function GameplayStatsScreen() {
   ]);
 
   const currentSkills = skillMode === "Hitting" ? skills?.hitting : skills?.pitching;
+  const skillsCardLoading = skillsLoading || archetypeLoading;
+  const showSkillsNA = missingPaData;
   const skillRows = useMemo(
     () => [
       { label: "AVG", value: formatRate(currentSkills?.avg) },
@@ -2268,31 +2263,55 @@ export default function GameplayStatsScreen() {
               </View>
             </View>
             <View style={styles.cardBody}>
-              {skillRows.map((row) => (
-                <View key={row.label} style={styles.skillRow}>
-                  <Text style={styles.detailLabel}>{row.label}</Text>
-                  <Text style={styles.detailValue}>{row.value}</Text>
+              {showSkillsNA ? (
+                <View style={styles.skillStatus}>
+                  <Text style={styles.skillStatusText}>N/A</Text>
                 </View>
-              ))}
+              ) : skillsCardLoading ? (
+                <View style={styles.skillStatus}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={styles.skillStatusText}>Loading stats...</Text>
+                </View>
+              ) : (
+                skillRows.map((row) => (
+                  <View key={row.label} style={styles.skillRow}>
+                    <Text style={styles.detailLabel}>{row.label}</Text>
+                    <Text style={styles.detailValue}>{row.value}</Text>
+                  </View>
+                ))
+              )}
             </View>
           </View>
 
           <View style={[styles.card, { width: cardWidth }]}>
             <Text style={styles.cardTitle}>Skills</Text>
             <View style={styles.cardBody}>
-              {renderPercentRow("Batting", battingArchetype?.overall ?? null, {
-                emphasis: true,
-              })}
-              {renderPercentRow("Timing", battingArchetype?.timing ?? null)}
-              {renderPercentRow("Location", battingArchetype?.location ?? null)}
-              {renderPercentRow("Power", battingArchetype?.power ?? null)}
-              <View style={styles.skillDivider} />
-              {renderPercentRow("Pitching", pitchingArchetype?.overall ?? null, {
-                emphasis: true,
-              })}
-              {renderPercentRow("Consistency", pitchingArchetype?.consistency ?? null)}
-              {renderPercentRow("Strikeout", pitchingArchetype?.strikeout ?? null)}
-              {renderPercentRow("Location", pitchingArchetype?.location ?? null)}
+              {showSkillsNA ? (
+                <View style={styles.skillStatus}>
+                  <Text style={styles.skillStatusText}>N/A</Text>
+                </View>
+              ) : skillsCardLoading ? (
+                <View style={styles.skillStatus}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={styles.skillStatusText}>Loading skills...</Text>
+                </View>
+              ) : (
+                <>
+                  {renderPercentRow("Batting", battingArchetype?.overall ?? null, {
+                    emphasis: true,
+                  })}
+                  {renderPercentRow("Timing", battingArchetype?.timing ?? null)}
+                  {renderPercentRow("Location", battingArchetype?.location ?? null)}
+                  {renderPercentRow("Power", battingArchetype?.power ?? null)}
+                  <View style={styles.skillDivider} />
+                  {renderPercentRow("Pitching", pitchingArchetype?.overall ?? null, {
+                    emphasis: true,
+                  })}
+                  {renderPercentRow("Consistency", pitchingArchetype?.consistency ?? null)}
+                  {renderPercentRow("Strikeout", pitchingArchetype?.strikeout ?? null)}
+                  {renderPercentRow("Location", pitchingArchetype?.location ?? null)}
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -4938,6 +4957,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  skillStatus: {
+    minHeight: 84,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  skillStatusText: {
+    color: "rgba(226, 232, 240, 0.75)",
+    fontSize: 12,
+    fontWeight: "600",
   },
   sectionTabs: {
     marginTop: 8,

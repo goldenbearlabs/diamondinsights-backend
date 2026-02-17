@@ -5,6 +5,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_c
 import json
 import math
 import os
+import random
 from datetime import datetime, timezone
 from io import BytesIO
 from time import perf_counter
@@ -74,6 +75,7 @@ class ShowGameAgg(Job):
 
         t0 = perf_counter()
         usernames = [u.strip() for u in db_session.scalars(select(ShowProfile.username)) if u and u.strip()]
+        random.shuffle(usernames)
         load_usernames_s = perf_counter() - t0
         self.logger.info(
             "show game agg timing phase=load_usernames elapsed_s=%.3f usernames=%s",

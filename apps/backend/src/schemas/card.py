@@ -17,8 +17,11 @@ class CardResponse(BaseModel):
     true_overall_rounded: Optional[int] = None
     meta_overall: Optional[float] = None
     meta_overall_rounded: Optional[int] = None
+    your_overall: Optional[float] = None
+    your_overall_rounded: Optional[int] = None
     true_overall_by_position: Optional[Dict[str, int]] = None
     meta_overall_by_position: Optional[Dict[str, int]] = None
+    your_overall_by_position: Optional[Dict[str, float]] = None
     jersey_number: int
     age: int
     bat_hand: str

@@ -53,3 +53,6 @@ class JobPusher:
     
     def show_profile_stats_updater(self) -> Payload:
         return self.push("show_profile_stats_updater")
+
+    def your_ovr_sync(self) -> Payload:
+        return self.push("your_ovr_sync")

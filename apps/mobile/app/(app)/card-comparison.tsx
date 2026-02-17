@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 
-import { apiGet } from "../../src/lib/api";
+import { ApiError, apiGet, apiGetAuth } from "../../src/lib/api";
 import { theme } from "../../src/theme/colors";
 
 type CardQuirk = {
@@ -20,6 +20,7 @@ type CardQuirk = {
 
 type CardModel = {
   id: string;
+  mlb_id?: number | null;
   name: string;
   team_short_name: string;
   ovr: number;
@@ -32,6 +33,8 @@ type CardModel = {
   true_overall_rounded?: number | null;
   meta_overall?: number | null;
   meta_overall_rounded?: number | null;
+  your_overall?: number | null;
+  your_overall_rounded?: number | null;
   age: number;
   bat_hand: string;
   throw_hand: string;
@@ -73,8 +76,9 @@ type CardModel = {
   quirks?: CardQuirk[];
 };
 
+type FieldKey = keyof CardModel | "your_overall";
 type FieldRow = {
-  key: keyof CardModel;
+  key: FieldKey;
   label: string;
 };
 
@@ -89,6 +93,7 @@ const FIELD_ROWS: FieldRow[] = [
   { key: "display_primary_position", label: "Primary Position" },
   { key: "display_secondary_positions", label: "Secondary Positions" },
   { key: "ovr", label: "OVR" },
+  { key: "your_overall", label: "Your Overall" },
   { key: "meta_overall", label: "Meta Overall" },
   { key: "meta_overall_rounded", label: "Meta OVR Rounded" },
   { key: "true_overall", label: "True Overall" },
@@ -163,7 +168,7 @@ export default function CardComparisonScreen() {
         params.set("name", trimmed);
         params.set("year", "25");
         params.set("limit", "30");
-        const payload = await apiGet<unknown>(`/cards/?${params.toString()}`);
+        const payload = await fetchComparisonCards(`/cards/?${params.toString()}`);
         if (!cancelled) {
           setSearchResults(normalizeCardResults(payload));
         }
@@ -209,7 +214,7 @@ export default function CardComparisonScreen() {
     const out = new Map<string, number>();
     FIELD_ROWS.forEach((row) => {
       const numericValues = selectedCards
-        .map((card) => numericFromValue(card[row.key]))
+        .map((card) => numericFromValue(getRowRawValue(card, row.key)))
         .filter((value): value is number => value !== null);
       if (numericValues.length > 1) out.set(String(row.key), Math.max(...numericValues));
     });
@@ -234,7 +239,8 @@ export default function CardComparisonScreen() {
     setSlots((current) => {
       const next = [...current];
       next[activeSlotIndex] = card;
-      if (next.length < MAX_CARDS && next.every((item) => item !== null)) {
+      const hasEmptySlot = next.some((item) => item === null);
+      if (next.length < MAX_CARDS && !hasEmptySlot) {
         next.push(null);
       }
       return next;
@@ -325,7 +331,7 @@ export default function CardComparisonScreen() {
                   <View key={`slot-values-${index}`} style={styles.column}>
                     {card ? (
                       FIELD_ROWS.map((row) => {
-                        const rawValue = card[row.key];
+                        const rawValue = getRowRawValue(card, row.key);
                         const displayValue = formatCompareValue(rawValue, String(row.key));
                         const numericValue = numericFromValue(rawValue);
                         const maxValue = rowMaxValue.get(String(row.key));
@@ -435,6 +441,33 @@ export default function CardComparisonScreen() {
       </Modal>
     </View>
   );
+}
+
+async function fetchComparisonCards(path: string): Promise<unknown> {
+  try {
+    return await apiGetAuth<unknown>(path);
+  } catch (err) {
+    const isAuthMissing =
+      (err instanceof ApiError && (err.status === 401 || err.status === 403))
+      || (err instanceof Error && err.message === "Not authenticated");
+    if (!isAuthMissing) throw err;
+    return apiGet<unknown>(path);
+  }
+}
+
+function getYourOverallValue(card: CardModel): number | null {
+  const rounded = card.your_overall_rounded;
+  if (typeof rounded === "number" && Number.isFinite(rounded)) return rounded;
+  const raw = card.your_overall;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  return null;
+}
+
+function getRowRawValue(card: CardModel, key: FieldKey): unknown {
+  if (key === "your_overall") {
+    return getYourOverallValue(card);
+  }
+  return card[key];
 }
 
 function numericFromValue(value: unknown): number | null {

@@ -1,21 +1,32 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import deque
+from dataclasses import dataclass
+from io import BytesIO
 import math
+import os
 import re
+import threading
+import time
 from typing import Optional, List, Dict, Any, Iterable
 
 import pandas as pd
+import pyarrow.parquet as pq
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.db.database import get_db
 from shared.db.models import Card, Pitch, ShowBallParks
+from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
 from src.api.routes.users import firebase_claims
 
 from .common import (
     _to_int,
+    _to_float,
     _load_facts_df_for_username,
+    _load_facts_df_for_username_columns,
     _filter_df_by_pitcher,
     _filter_df_by_hitter,
     _bool_col,
@@ -32,8 +43,11 @@ from .models import (
     TimingSkillOut,
     BattingArchetypeOut,
     PitchingArchetypeOut,
+    CombinedArchetypeOut,
     StrikeoutZoneMapOut,
     HitDataMapOut,
+    ShowYourOvrWeightOut,
+    ShowYourOvrWeightsOut,
 )
 from .profile import _get_authed_user, _get_profile_for_user, _get_profile_by_username
 
@@ -42,6 +56,677 @@ router = APIRouter()
 public_router = APIRouter()
 
 SHOW_CARD_YEAR = 25
+
+_DIFFICULTY_ORDER = [
+    "rookie",
+    "veteran",
+    "all star",
+    "hall of fame",
+    "legend",
+    "goat",
+]
+_DIFFICULTY_ALIASES = {
+    "all-star": "all star",
+    "allstar": "all star",
+    "hall_of_fame": "hall of fame",
+    "hof": "hall of fame",
+}
+_DIFFICULTY_STEP = 0.15
+_MIN_REFERENCE_USER_PA = 80
+_MIN_REFERENCE_KEEP_RATIO = 0.20
+_MAX_BFS_DEPTH = 2
+_MAX_BFS_NODES = 140
+_BASE_BRANCH_BY_DEPTH = {0: 32, 1: 24, 2: 16}
+_MAX_BRANCH_FACTOR = 40
+_REF_HITTING_TARGET_PA = 25000
+_REF_PITCHING_TARGET_PA = 25000
+_BFS_TIME_BUDGET_SEC = float(os.getenv("SHOW_SKILLS_BFS_BUDGET_SEC", "5"))
+_FACTS_CACHE_TTL_SEC = float(os.getenv("SHOW_SKILLS_FACTS_CACHE_TTL_SEC", "600"))
+_COMBINED_CACHE_TTL_SEC = float(os.getenv("SHOW_SKILLS_COMBINED_CACHE_TTL_SEC", "180"))
+_FACT_LOAD_WORKERS = max(2, int(os.getenv("SHOW_SKILLS_FACT_LOAD_WORKERS", "6")))
+_MAX_CANDIDATES_PER_NODE = 120
+_PITCHING_K_WEIGHT_LOC = 1.0
+_PITCHING_K_WEIGHT_OTHER = 0.80
+_PITCHING_K_WEIGHT_TIMING = 0.70
+_PITCHING_K_SD_FLOOR = 0.04
+_PITCHING_K_Z_CLAMP_PER_DIFF = 3.5
+_PITCHING_K_Z_CLAMP_FINAL = 4.5
+_POWER_SD_FLOOR = 0.02
+_POWER_Z_CLAMP_BASE = 3.5
+_POWER_Z_CLAMP_PER_DIFF = 3.0
+_POWER_Z_CLAMP_FINAL = 4.5
+_POWER_MIN_DIFF_PA = 20
+
+_SKILL_FACT_COLUMNS: tuple[str, ...] = (
+    "game_id",
+    "result",
+    "is_strikeout",
+    "is_sac_fly",
+    "is_sac_bunt",
+    "is_double_play",
+    "is_perfect_perfect",
+    "batted_ball_type",
+    "hit_direction",
+    "fielder_pos",
+    "batter_side",
+    "k_timing",
+    "k_is_chase",
+    "k_is_looking",
+    "k_loc_height",
+    "k_loc_width",
+    "difficulty_id",
+    "ballpark_id",
+    "batter_mlb_id",
+    "pitcher_mlb_id",
+    "is_out",
+    "is_error",
+    "times_seen_pitcher",
+    "home_profile_username",
+    "away_profile_username",
+    "home_team_id",
+    "away_team_id",
+    "home_name",
+    "away_name",
+    "is_home_batting",
+)
+
+_facts_cache_lock = threading.Lock()
+_facts_cache: dict[tuple[str, tuple[str, ...]], tuple[float, pd.DataFrame]] = {}
+_combined_cache_lock = threading.Lock()
+_combined_archetype_cache: dict[
+    tuple[str, Optional[int], Optional[int]], tuple[float, CombinedArchetypeOut]
+] = {}
+_YOUR_OVR_CACHE_TTL_SEC = float(os.getenv("SHOW_YOUR_OVR_CACHE_TTL_SEC", "300"))
+_your_ovr_cache_lock = threading.Lock()
+_your_ovr_cache: dict[str, tuple[float, ShowYourOvrWeightsOut]] = {}
+
+
+@dataclass
+class _SkillContext:
+    root_df: pd.DataFrame
+    ref_hitting_df: pd.DataFrame
+    ref_pitching_df: pd.DataFrame
+
+
+def _normalize_username(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _facts_cache_key(username: str, columns: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    return (_normalize_username(username), columns)
+
+
+def _load_facts_df_cached(username: str, columns: tuple[str, ...]) -> pd.DataFrame:
+    now = time.monotonic()
+    key = _facts_cache_key(username, columns)
+    with _facts_cache_lock:
+        cached = _facts_cache.get(key)
+        if cached and cached[0] > now:
+            return cached[1].copy(deep=False)
+        if cached and cached[0] <= now:
+            _facts_cache.pop(key, None)
+
+    loaded = _load_facts_df_for_username_columns(username, columns)
+    with _facts_cache_lock:
+        _facts_cache[key] = (now + _FACTS_CACHE_TTL_SEC, loaded)
+    return loaded.copy(deep=False)
+
+
+def _load_skill_facts_df(username: str) -> pd.DataFrame:
+    return _load_facts_df_cached(username, _SKILL_FACT_COLUMNS)
+
+
+def _load_combined_from_cache(
+    username: str,
+    pitcher_mlb_id: Optional[int],
+    hitter_mlb_id: Optional[int],
+) -> Optional[CombinedArchetypeOut]:
+    key = (_normalize_username(username), _to_int(pitcher_mlb_id), _to_int(hitter_mlb_id))
+    now = time.monotonic()
+    with _combined_cache_lock:
+        cached = _combined_archetype_cache.get(key)
+        if cached and cached[0] > now:
+            return cached[1]
+        if cached and cached[0] <= now:
+            _combined_archetype_cache.pop(key, None)
+    return None
+
+
+def _store_combined_cache(
+    username: str,
+    pitcher_mlb_id: Optional[int],
+    hitter_mlb_id: Optional[int],
+    value: CombinedArchetypeOut,
+) -> None:
+    key = (_normalize_username(username), _to_int(pitcher_mlb_id), _to_int(hitter_mlb_id))
+    now = time.monotonic()
+    with _combined_cache_lock:
+        _combined_archetype_cache[key] = (now + _COMBINED_CACHE_TTL_SEC, value)
+
+
+def _resolve_your_ovr_key(spaces: SpacesConnector, username: str) -> Optional[str]:
+    key = f"facts/{username}/your_ovr.parquet"
+    legacy_key = f"di-storage/facts/{username}/your_ovr.parquet"
+    if spaces.exists(key):
+        return key
+    if spaces.exists(legacy_key):
+        return legacy_key
+    return None
+
+
+def _to_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    text = str(v or "").strip().lower()
+    if text in {"1", "true", "t", "yes", "y"}:
+        return True
+    return False
+
+
+def _load_your_ovr_weights_cached(username: str) -> ShowYourOvrWeightsOut:
+    uname = _normalize_username(username)
+    now = time.monotonic()
+    with _your_ovr_cache_lock:
+        cached = _your_ovr_cache.get(uname)
+        if cached and cached[0] > now:
+            return cached[1]
+        if cached and cached[0] <= now:
+            _your_ovr_cache.pop(uname, None)
+
+    cfg = SpacesConfig.from_env()
+    spaces = SpacesConnector(cfg)
+    key = _resolve_your_ovr_key(spaces, username)
+    if not key:
+        payload = ShowYourOvrWeightsOut(
+            username=username,
+            updated_at=None,
+            total_weights=0,
+            hitting_weights=0,
+            pitching_weights=0,
+            weights=[],
+        )
+        with _your_ovr_cache_lock:
+            _your_ovr_cache[uname] = (now + _YOUR_OVR_CACHE_TTL_SEC, payload)
+        return payload
+
+    raw = spaces.get_bytes(key)
+    if not raw:
+        payload = ShowYourOvrWeightsOut(
+            username=username,
+            updated_at=None,
+            total_weights=0,
+            hitting_weights=0,
+            pitching_weights=0,
+            weights=[],
+        )
+        with _your_ovr_cache_lock:
+            _your_ovr_cache[uname] = (now + _YOUR_OVR_CACHE_TTL_SEC, payload)
+        return payload
+
+    buf = BytesIO(raw)
+    parquet = pq.ParquetFile(buf)
+    desired_columns = ["mlb_id", "role", "weight", "pa", "meets_min_pa", "updated_at"]
+    available = set(parquet.schema.names)
+    cols = [c for c in desired_columns if c in available]
+    if not cols:
+        payload = ShowYourOvrWeightsOut(
+            username=username,
+            updated_at=None,
+            total_weights=0,
+            hitting_weights=0,
+            pitching_weights=0,
+            weights=[],
+        )
+        with _your_ovr_cache_lock:
+            _your_ovr_cache[uname] = (now + _YOUR_OVR_CACHE_TTL_SEC, payload)
+        return payload
+
+    buf.seek(0)
+    df = pd.read_parquet(buf, columns=cols)
+    for col in desired_columns:
+        if col not in df.columns:
+            df[col] = None
+
+    items: list[ShowYourOvrWeightOut] = []
+    updated_at: Optional[str] = None
+
+    for row in df.to_dict(orient="records"):
+        mlb_id = _to_int(row.get("mlb_id"))
+        if mlb_id is None:
+            continue
+
+        role = str(row.get("role") or "").strip().lower()
+        if role not in {"hitting", "pitching"}:
+            continue
+
+        weight = _to_float(row.get("weight"))
+        if weight is None or not math.isfinite(weight):
+            continue
+
+        pa = _to_int(row.get("pa")) or 0
+        meets_min_pa = _to_bool(row.get("meets_min_pa"))
+
+        maybe_updated = str(row.get("updated_at") or "").strip() or None
+        if maybe_updated and (updated_at is None or maybe_updated > updated_at):
+            updated_at = maybe_updated
+
+        items.append(
+            ShowYourOvrWeightOut(
+                mlb_id=mlb_id,
+                role=role,
+                weight=float(weight),
+                pa=max(0, int(pa)),
+                meets_min_pa=meets_min_pa,
+            )
+        )
+
+    items.sort(key=lambda item: (item.role, -item.weight, -item.pa, item.mlb_id))
+    hitting_count = sum(1 for item in items if item.role == "hitting")
+    pitching_count = sum(1 for item in items if item.role == "pitching")
+    payload = ShowYourOvrWeightsOut(
+        username=username,
+        updated_at=updated_at,
+        total_weights=len(items),
+        hitting_weights=hitting_count,
+        pitching_weights=pitching_count,
+        weights=items,
+    )
+    with _your_ovr_cache_lock:
+        _your_ovr_cache[uname] = (now + _YOUR_OVR_CACHE_TTL_SEC, payload)
+    return payload
+
+
+def _difficulty_index(value: object) -> int:
+    if value is None:
+        return 0
+
+    if isinstance(value, (int, float)):
+        try:
+            raw = int(value)
+        except Exception:
+            raw = 0
+        if 0 <= raw <= 5:
+            return raw
+        if 1 <= raw <= 6:
+            return raw - 1
+        return 0
+
+    text = str(value).strip().lower().replace("_", " ").replace("-", " ")
+    text = " ".join(text.split())
+    if not text:
+        return 0
+
+    if text.isdigit():
+        raw = int(text)
+        if 0 <= raw <= 5:
+            return raw
+        if 1 <= raw <= 6:
+            return raw - 1
+
+    text = _DIFFICULTY_ALIASES.get(text, text)
+    try:
+        return _DIFFICULTY_ORDER.index(text)
+    except ValueError:
+        return 0
+
+
+def _difficulty_multiplier_series(df: pd.DataFrame) -> pd.Series:
+    col = df.get("difficulty_id")
+    if col is None:
+        return pd.Series([1.0] * len(df), index=df.index, dtype=float)
+    values = [1.0 + (_DIFFICULTY_STEP * _difficulty_index(v)) for v in col.tolist()]
+    return pd.Series(values, index=df.index, dtype=float)
+
+
+def _apply_difficulty_event_adjustment(evt: pd.Series, df: pd.DataFrame) -> pd.Series:
+    if evt.empty:
+        return evt
+    mult = _difficulty_multiplier_series(df)
+    adjusted = evt.copy()
+    adjusted = adjusted.mask(evt > 0, evt * mult)
+    adjusted = adjusted.mask(evt < 0, evt / mult)
+    return adjusted.clip(lower=-1.0, upper=1.0)
+
+
+def _difficulty_adjusted_pa_profile(sub: pd.DataFrame) -> dict[str, float]:
+    pa = len(sub)
+    if pa == 0:
+        return {
+            "pa_eff": 0.0,
+            "avg": 0.0,
+            "obp": 0.0,
+            "slg": 0.0,
+            "ops": 0.0,
+            "k_rate": 0.0,
+            "bb_rate": 0.0,
+        }
+
+    results = _str_col(sub, "result").str.lower()
+    mult = _difficulty_multiplier_series(sub)
+
+    singles = results == "single"
+    doubles = results == "double"
+    triples = results == "triple"
+    homeruns = results.isin(_HR_RESULTS)
+    walks = results.isin(_WALK_RESULTS)
+    hbp = results.isin(_HBP_RESULTS)
+    strikeouts = _bool_col(sub, "is_strikeout") | results.isin(["strikeout", "strike out"])
+    sac_flies = _bool_col(sub, "is_sac_fly")
+    sac_bunts = _bool_col(sub, "is_sac_bunt")
+
+    weighted_hits = float(((singles | doubles | triples | homeruns).astype(float) * mult).sum())
+    weighted_tb = float(
+        (singles.astype(float) * mult).sum()
+        + (2.0 * doubles.astype(float) * mult).sum()
+        + (3.0 * triples.astype(float) * mult).sum()
+        + (4.0 * homeruns.astype(float) * mult).sum()
+    )
+    weighted_walks = float((walks.astype(float) * mult).sum())
+    weighted_hbp = float((hbp.astype(float) * mult).sum())
+    weighted_strikeouts = float((strikeouts.astype(float) / mult.clip(lower=1e-6)).sum())
+
+    is_ab = ~(walks | hbp | sac_flies | sac_bunts)
+    non_hit_ab = is_ab & ~(singles | doubles | triples | homeruns)
+    weighted_non_hit_ab = float(non_hit_ab.astype(float).sum())
+    weighted_ab = weighted_hits + weighted_non_hit_ab
+    weighted_pa = weighted_ab + weighted_walks + weighted_hbp + float(sac_flies.astype(float).sum())
+
+    avg = weighted_hits / weighted_ab if weighted_ab > 0 else 0.0
+    obp = (weighted_hits + weighted_walks + weighted_hbp) / weighted_pa if weighted_pa > 0 else 0.0
+    slg = weighted_tb / weighted_ab if weighted_ab > 0 else 0.0
+    ops = obp + slg
+    k_rate = weighted_strikeouts / weighted_pa if weighted_pa > 0 else 0.0
+    bb_rate = weighted_walks / weighted_pa if weighted_pa > 0 else 0.0
+
+    return {
+        "pa_eff": weighted_pa,
+        "avg": avg,
+        "obp": obp,
+        "slg": slg,
+        "ops": ops,
+        "k_rate": k_rate,
+        "bb_rate": bb_rate,
+    }
+
+
+def _dynamic_branch_factor(depth: int, root_pa: int, node_pa: int) -> int:
+    base = _BASE_BRANCH_BY_DEPTH.get(depth, 2)
+    bonus = 0
+    if root_pa < _MIN_REFERENCE_USER_PA:
+        bonus += 2
+    if root_pa < (_MIN_REFERENCE_USER_PA // 2):
+        bonus += 2
+    if node_pa < _MIN_REFERENCE_USER_PA:
+        bonus += 1
+    return max(2, min(_MAX_BRANCH_FACTOR, base + bonus))
+
+
+def _ranked_opponents(df: pd.DataFrame, username: str) -> list[str]:
+    name = _normalize_username(username)
+    if not name or df.empty:
+        return []
+
+    candidates = [
+        ("home_profile_username", "away_profile_username"),
+        ("home_team_id", "away_team_id"),
+        ("home_name", "away_name"),
+    ]
+
+    for home_col, away_col in candidates:
+        if home_col not in df.columns or away_col not in df.columns:
+            continue
+        home = _str_col(df, home_col).str.lower()
+        away = _str_col(df, away_col).str.lower()
+        is_home = home == name
+        is_away = away == name
+        has_match = is_home | is_away
+        if not has_match.any():
+            continue
+
+        opp = pd.Series([""] * len(df), index=df.index, dtype=object)
+        opp = opp.mask(is_home, away)
+        opp = opp.mask(is_away, home)
+        opp = opp.fillna("").astype(str).str.strip().str.lower()
+        valid = has_match & opp.ne("") & opp.ne(name)
+        if not valid.any():
+            return []
+
+        game_ids = _str_col(df, "game_id").str.strip()
+        tmp = pd.DataFrame({"opponent": opp[valid], "game_id": game_ids[valid]}, index=opp[valid].index)
+        grouped = tmp.groupby("opponent", sort=False).agg(
+            pa=("opponent", "size"),
+            games=("game_id", lambda s: int((s[s != ""]).nunique())),
+        )
+        grouped = grouped.sort_values(by=["games", "pa", "opponent"], ascending=[False, False, True])
+        return grouped.index.tolist()
+    return []
+
+
+def _downweight_small_sample(sub: pd.DataFrame, source_pa: int) -> pd.DataFrame:
+    if sub.empty or source_pa >= _MIN_REFERENCE_USER_PA:
+        return sub
+
+    ratio = max(_MIN_REFERENCE_KEEP_RATIO, float(source_pa) / float(_MIN_REFERENCE_USER_PA))
+    keep_count = max(1, int(round(len(sub) * ratio)))
+    if keep_count >= len(sub):
+        return sub
+
+    game_ids = _str_col(sub, "game_id")
+    event_seq = _str_col(sub, "event_seq")
+    stable_key = game_ids + "|" + event_seq + "|" + _str_col(sub, "result")
+    hashes = pd.util.hash_pandas_object(stable_key, index=False)
+    keep_idx = hashes.sort_values().index[:keep_count]
+    return sub.loc[keep_idx]
+
+
+def _dedupe_by_game_id(sub: pd.DataFrame, seen: set[str]) -> pd.DataFrame:
+    if sub.empty or "game_id" not in sub.columns:
+        return sub
+
+    game_ids = _str_col(sub, "game_id").str.strip()
+    keep_mask = game_ids.eq("") | ~game_ids.isin(seen)
+    kept = sub[keep_mask]
+    for gid in game_ids[keep_mask]:
+        if gid:
+            seen.add(gid)
+    return kept
+
+
+def _load_facts_df_safe(
+    username: str,
+    cache: dict[str, pd.DataFrame],
+    *,
+    columns: tuple[str, ...] = _SKILL_FACT_COLUMNS,
+    deadline: Optional[float] = None,
+) -> pd.DataFrame:
+    if deadline is not None and time.monotonic() >= deadline:
+        return pd.DataFrame()
+    uname = _normalize_username(username)
+    if uname in cache:
+        return cache[uname]
+    try:
+        cache[uname] = _load_facts_df_cached(uname, columns)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            cache[uname] = pd.DataFrame()
+        else:
+            raise
+    except Exception:
+        cache[uname] = pd.DataFrame()
+    return cache[uname]
+
+
+def _load_many_facts_df_safe(
+    usernames: list[str],
+    cache: dict[str, pd.DataFrame],
+    *,
+    columns: tuple[str, ...] = _SKILL_FACT_COLUMNS,
+    deadline: Optional[float] = None,
+) -> dict[str, pd.DataFrame]:
+    out: dict[str, pd.DataFrame] = {}
+    pending: list[str] = []
+
+    for raw in usernames:
+        uname = _normalize_username(raw)
+        if not uname:
+            continue
+        if uname in cache:
+            out[uname] = cache[uname]
+            continue
+        pending.append(uname)
+
+    if not pending:
+        return out
+    if deadline is not None and time.monotonic() >= deadline:
+        return out
+
+    workers = max(1, min(_FACT_LOAD_WORKERS, len(pending)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_map = {pool.submit(_load_facts_df_safe, uname, cache, columns=columns, deadline=deadline): uname for uname in pending}
+        for fut in as_completed(future_map):
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            uname = future_map[fut]
+            try:
+                out[uname] = fut.result()
+            except Exception:
+                out[uname] = pd.DataFrame()
+                cache[uname] = out[uname]
+    return out
+
+
+def _estimated_reference_rows(sub: pd.DataFrame) -> float:
+    pa = len(sub)
+    if pa <= 0:
+        return 0.0
+    if pa >= _MIN_REFERENCE_USER_PA:
+        return float(pa)
+    ratio = max(_MIN_REFERENCE_KEEP_RATIO, float(pa) / float(_MIN_REFERENCE_USER_PA))
+    return float(pa) * ratio
+
+
+def _build_skill_context(
+    username: str,
+    root_df_full: pd.DataFrame,
+    *,
+    pitcher_mlb_id: Optional[int] = None,
+    hitter_mlb_id: Optional[int] = None,
+) -> _SkillContext:
+    root_name = _normalize_username(username)
+    cache: dict[str, pd.DataFrame] = {root_name: root_df_full}
+    root_df = _filter_df_by_hitter(_filter_df_by_pitcher(root_df_full, pitcher_mlb_id), hitter_mlb_id)
+    root_pa = len(root_df)
+    deadline = time.monotonic() + _BFS_TIME_BUDGET_SEC
+
+    queue: deque[tuple[str, int]] = deque([(root_name, 0)])
+    seen_users: set[str] = {root_name}
+    sample_users: list[str] = [root_name]
+    est_hit_rows = 0.0
+    est_pitch_rows = 0.0
+
+    while queue and len(sample_users) < _MAX_BFS_NODES:
+        if time.monotonic() >= deadline:
+            break
+        if est_hit_rows >= _REF_HITTING_TARGET_PA and est_pitch_rows >= _REF_PITCHING_TARGET_PA:
+            break
+        node, depth = queue.popleft()
+        if depth >= _MAX_BFS_DEPTH:
+            continue
+        node_df_full = _load_facts_df_safe(node, cache, deadline=deadline)
+        if node_df_full.empty:
+            continue
+
+        node_df = _filter_df_by_hitter(_filter_df_by_pitcher(node_df_full, pitcher_mlb_id), hitter_mlb_id)
+        if node != root_name and not node_df.empty:
+            node_hit_mask, node_pitch_mask, _ = _user_masks(node_df, node)
+            est_hit_rows += _estimated_reference_rows(node_df[node_hit_mask])
+            est_pitch_rows += _estimated_reference_rows(node_df[node_pitch_mask])
+
+        branch = _dynamic_branch_factor(depth, root_pa=root_pa, node_pa=len(node_df))
+        ranked = _ranked_opponents(node_df_full, node)
+        if not ranked:
+            continue
+        candidates: list[str] = []
+        for opp in ranked:
+            opp_norm = _normalize_username(opp)
+            if not opp_norm or opp_norm in seen_users:
+                continue
+            candidates.append(opp_norm)
+            if len(candidates) >= _MAX_CANDIDATES_PER_NODE:
+                break
+
+        if not candidates:
+            continue
+
+        loaded = _load_many_facts_df_safe(candidates, cache, deadline=deadline)
+        added = 0
+        for opp in candidates:
+            if time.monotonic() >= deadline:
+                break
+            if opp in seen_users:
+                continue
+            opp_df = loaded.get(opp, pd.DataFrame())
+            if opp_df.empty:
+                continue
+            seen_users.add(opp)
+            sample_users.append(opp)
+            queue.append((opp, depth + 1))
+            added += 1
+            if len(sample_users) >= _MAX_BFS_NODES or added >= branch:
+                break
+
+    root_game_ids = set(_str_col(root_df, "game_id").str.strip().tolist()) if "game_id" in root_df.columns else set()
+    root_game_ids.discard("")
+    seen_hit_games = set(root_game_ids)
+    seen_pitch_games = set(root_game_ids)
+    hit_parts: list[pd.DataFrame] = []
+    pitch_parts: list[pd.DataFrame] = []
+
+    for uname in sample_users[1:]:
+        if time.monotonic() >= deadline and (hit_parts or pitch_parts):
+            break
+        node_df_full = _load_facts_df_safe(uname, cache, deadline=deadline)
+        if node_df_full.empty:
+            continue
+        node_df = _filter_df_by_hitter(_filter_df_by_pitcher(node_df_full, pitcher_mlb_id), hitter_mlb_id)
+        if node_df.empty:
+            continue
+
+        user_hitting, user_pitching, _ = _user_masks(node_df, uname)
+        hit_src = node_df[user_hitting]
+        pitch_src = node_df[user_pitching]
+        if hit_src.empty and pitch_src.empty:
+            continue
+
+        hit_sub = _dedupe_by_game_id(hit_src, seen_hit_games)
+        pitch_sub = _dedupe_by_game_id(pitch_src, seen_pitch_games)
+        hit_sub = _downweight_small_sample(hit_sub, source_pa=len(hit_src))
+        pitch_sub = _downweight_small_sample(pitch_sub, source_pa=len(pitch_src))
+
+        if not hit_sub.empty:
+            hit_parts.append(hit_sub)
+        if not pitch_sub.empty:
+            pitch_parts.append(pitch_sub)
+
+    if hit_parts:
+        ref_hitting_df = pd.concat(hit_parts, ignore_index=True)
+    else:
+        _, _, opp_hitting = _user_masks(root_df, root_name)
+        ref_hitting_df = root_df[opp_hitting].copy()
+
+    if pitch_parts:
+        ref_pitching_df = pd.concat(pitch_parts, ignore_index=True)
+    else:
+        _, opp_pitching = _pitching_masks(root_df, root_name)
+        ref_pitching_df = root_df[opp_pitching].copy()
+
+    return _SkillContext(
+        root_df=root_df,
+        ref_hitting_df=ref_hitting_df,
+        ref_pitching_df=ref_pitching_df,
+    )
 
 def _blank_strikeout_stats() -> dict[str, float]:
     return {
@@ -133,7 +818,13 @@ def _compute_strikeout_stats(user_df: pd.DataFrame) -> dict[str, float]:
     )
 
 
-def _compute_pa_stats(df: pd.DataFrame, username: str) -> tuple[PlateAppearanceStatsOut, PlateAppearanceStatsOut]:
+def _compute_pa_stats(
+    df: pd.DataFrame,
+    username: str,
+    *,
+    reference_hitting_df: Optional[pd.DataFrame] = None,
+    reference_pitching_df: Optional[pd.DataFrame] = None,
+) -> tuple[PlateAppearanceStatsOut, PlateAppearanceStatsOut]:
     if df.empty:
         empty = PlateAppearanceStatsOut(
             plate_appearances=0,
@@ -150,7 +841,7 @@ def _compute_pa_stats(df: pd.DataFrame, username: str) -> tuple[PlateAppearanceS
 
     hitting_mask, pitching_mask, _ = _user_masks(df, username)
 
-    def calc(mask: pd.Series) -> PlateAppearanceStatsOut:
+    def calc(mask: pd.Series, reference_df: Optional[pd.DataFrame]) -> PlateAppearanceStatsOut:
         sub = df[mask]
         pa = len(sub)
         if pa == 0:
@@ -208,19 +899,50 @@ def _compute_pa_stats(df: pd.DataFrame, username: str) -> tuple[PlateAppearanceS
         if walk_count > 0:
             kbb = strikeout_count / float(walk_count)
 
+        user_adj = _difficulty_adjusted_pa_profile(sub)
+        sample_adj = _difficulty_adjusted_pa_profile(
+            reference_df if reference_df is not None else pd.DataFrame()
+        )
+
+        avg_adj = float(user_adj["avg"])
+        obp_adj = float(user_adj["obp"])
+        slg_adj = float(user_adj["slg"])
+        ops_adj = float(user_adj["ops"])
+        kbb_adj = kbb
+
+        if sample_adj["pa_eff"] > 0:
+            # Small samples get stronger pull to the sampled population baseline.
+            prior_pa = min(220.0, max(30.0, float(max(0, 120 - pa)) + 35.0))
+            denom = user_adj["pa_eff"] + prior_pa
+            if denom > 0:
+                avg_adj = (user_adj["avg"] * user_adj["pa_eff"] + sample_adj["avg"] * prior_pa) / denom
+                obp_adj = (user_adj["obp"] * user_adj["pa_eff"] + sample_adj["obp"] * prior_pa) / denom
+                slg_adj = (user_adj["slg"] * user_adj["pa_eff"] + sample_adj["slg"] * prior_pa) / denom
+                ops_adj = obp_adj + slg_adj
+                smooth_k_rate = (
+                    user_adj["k_rate"] * user_adj["pa_eff"] + sample_adj["k_rate"] * prior_pa
+                ) / denom
+                smooth_bb_rate = (
+                    user_adj["bb_rate"] * user_adj["pa_eff"] + sample_adj["bb_rate"] * prior_pa
+                ) / denom
+                if smooth_bb_rate > 1e-6:
+                    kbb_adj = smooth_k_rate / smooth_bb_rate
+                else:
+                    kbb_adj = None
+
         return PlateAppearanceStatsOut(
             plate_appearances=pa,
             hits=hits,
             walks=walk_count,
             strikeouts=strikeout_count,
-            avg=avg,
-            obp=obp,
-            slg=slg,
-            ops=ops,
-            kbb=kbb,
+            avg=avg_adj,
+            obp=obp_adj,
+            slg=slg_adj,
+            ops=ops_adj,
+            kbb=kbb_adj,
         )
 
-    return calc(hitting_mask), calc(pitching_mask)
+    return calc(hitting_mask, reference_hitting_df), calc(pitching_mask, reference_pitching_df)
 
 
 def _compute_aggregate_stats(
@@ -1654,20 +2376,34 @@ def _power_counts(df: pd.DataFrame) -> dict[str, float]:
         sac_bunt_flags = pd.Series([False] * pa)
     sac_bunts = sac_bunt_flags.fillna(False).astype(bool)
 
-    hits = int(singles.sum() + doubles.sum() + triples.sum() + homeruns.sum())
-    hr = int(homeruns.sum())
-    total_bases = int(
-        singles.sum()
-        + (2 * doubles.sum())
-        + (3 * triples.sum())
-        + (4 * homeruns.sum())
+    mult = _difficulty_multiplier_series(df)
+    hit_mask = singles | doubles | triples | homeruns
+    weighted_hits = float((hit_mask.astype(float) * mult).sum())
+    weighted_hr = float((homeruns.astype(float) * mult).sum())
+    weighted_total_bases = float(
+        (singles.astype(float) * mult).sum()
+        + (2.0 * doubles.astype(float) * mult).sum()
+        + (3.0 * triples.astype(float) * mult).sum()
+        + (4.0 * homeruns.astype(float) * mult).sum()
     )
-    ab = int(pa - walks.sum() - hbp.sum() - sac_flies.sum() - sac_bunts.sum())
-    if ab < 0:
-        ab = 0
+    ab_mask = ~(walks | hbp | sac_flies | sac_bunts)
+    non_hit_ab = ab_mask & ~hit_mask
+    weighted_non_hit_ab = float(non_hit_ab.astype(float).sum())
+    weighted_ab = weighted_hits + weighted_non_hit_ab
+    weighted_pa = (
+        weighted_ab
+        + float((walks.astype(float) * mult).sum())
+        + float((hbp.astype(float) * mult).sum())
+        + float(sac_flies.astype(float).sum())
+    )
 
-    iso = (total_bases - hits) / ab if ab else 0.0
-    hr_rate = hr / pa if pa else 0.0
+    hits = int(hit_mask.sum())
+    hr = int(homeruns.sum())
+    total_bases = int(hit_mask.astype(int).sum() + doubles.astype(int).sum() + 2 * triples.astype(int).sum() + 3 * homeruns.astype(int).sum())
+    ab = int(ab_mask.sum())
+
+    iso = (weighted_total_bases - weighted_hits) / weighted_ab if weighted_ab > 0 else 0.0
+    hr_rate = weighted_hr / weighted_pa if weighted_pa > 0 else 0.0
     power_rate = 0.7 * iso + 0.3 * hr_rate
 
     return {
@@ -1702,17 +2438,19 @@ def _group_power_rates(df: pd.DataFrame, group_cols: Iterable[str]) -> pd.Series
     if sh is None:
         sh = pd.Series([False] * len(df), index=df.index)
 
+    mult = _difficulty_multiplier_series(df)
+    hit_mask = (results == "single") | (results == "double") | (results == "triple") | results.isin(["homerun", "home_run", "home run"])
+
     data = pd.DataFrame(
         {
-            "pa": 1,
-            "single": (results == "single").astype(int),
-            "double": (results == "double").astype(int),
-            "triple": (results == "triple").astype(int),
-            "hr": results.isin(["homerun", "home_run", "home run"]).astype(int),
-            "walk": (results == "walk").astype(int),
-            "hbp": results.isin(["hit_by_pitch", "hit by pitch", "hbp"]).astype(int),
-            "sf": sf.fillna(False).astype(bool).astype(int),
-            "sh": sh.fillna(False).astype(bool).astype(int),
+            "single_w": (results == "single").astype(float) * mult,
+            "double_w": (results == "double").astype(float) * mult,
+            "triple_w": (results == "triple").astype(float) * mult,
+            "hr_w": results.isin(["homerun", "home_run", "home run"]).astype(float) * mult,
+            "non_hit_ab": (~hit_mask & ~((results == "walk") | results.isin(["hit_by_pitch", "hit by pitch", "hbp"]) | sf.fillna(False).astype(bool) | sh.fillna(False).astype(bool))).astype(float),
+            "walk_w": (results == "walk").astype(float) * mult,
+            "hbp_w": results.isin(["hit_by_pitch", "hit by pitch", "hbp"]).astype(float) * mult,
+            "sf": sf.fillna(False).astype(bool).astype(float),
         },
         index=df.index,
     )
@@ -1721,32 +2459,35 @@ def _group_power_rates(df: pd.DataFrame, group_cols: Iterable[str]) -> pd.Series
         data[col] = df[col]
 
     grouped = data.groupby(list(group_cols)).sum(numeric_only=True)
-    ab = grouped["pa"] - grouped["walk"] - grouped["hbp"] - grouped["sf"] - grouped["sh"]
-    ab = ab.clip(lower=0)
-
-    hits = grouped["single"] + grouped["double"] + grouped["triple"] + grouped["hr"]
+    hits = grouped["single_w"] + grouped["double_w"] + grouped["triple_w"] + grouped["hr_w"]
     total_bases = (
-        grouped["single"]
-        + (2 * grouped["double"])
-        + (3 * grouped["triple"])
-        + (4 * grouped["hr"])
+        grouped["single_w"]
+        + (2 * grouped["double_w"])
+        + (3 * grouped["triple_w"])
+        + (4 * grouped["hr_w"])
     )
+    ab = hits + grouped["non_hit_ab"]
+    pa_eff = ab + grouped["walk_w"] + grouped["hbp_w"] + grouped["sf"]
 
     iso = pd.Series(0.0, index=grouped.index)
     iso = iso.where(ab <= 0, (total_bases - hits) / ab)
 
     hr_rate = pd.Series(0.0, index=grouped.index)
-    hr_rate = hr_rate.where(grouped["pa"] <= 0, grouped["hr"] / grouped["pa"])
+    hr_rate = hr_rate.where(pa_eff <= 0, grouped["hr_w"] / pa_eff)
 
     return 0.7 * iso + 0.3 * hr_rate
 
 
 def _compute_power_skill(
-    df: pd.DataFrame, username: str, db: Session, pa_smooth: int = 150
+    df: pd.DataFrame,
+    username: str,
+    db: Session,
+    pa_smooth: int = 150,
+    reference_hitting_df: Optional[pd.DataFrame] = None,
 ) -> PowerSkillOut:
     user_hitting, _, opponent_hitting = _user_masks(df, username)
     user_df = df[user_hitting]
-    opp_df = df[opponent_hitting]
+    opp_df = reference_hitting_df if reference_hitting_df is not None else df[opponent_hitting]
 
     user_counts = _power_counts(user_df)
     sample_counts = _power_counts(opp_df)
@@ -1765,7 +2506,7 @@ def _compute_power_skill(
         )
 
     diff_score = 0.0
-    if pa_user > 0 and "difficulty_id" in df.columns:
+    if pa_user > 0 and "difficulty_id" in user_df.columns:
         difficulties = user_df.get("difficulty_id")
         if difficulties is not None:
             for diff in difficulties.dropna().unique().tolist():
@@ -1777,25 +2518,41 @@ def _compute_power_skill(
                 user_rate_d = float(user_d_counts["power_rate"])
                 sample_rate_d = float(opp_d_counts["power_rate"])
                 pa_user_d = int(user_d_counts["pa"])
+                pa_opp_d = int(opp_d_counts["pa"])
+
+                if pa_user_d < _POWER_MIN_DIFF_PA or pa_opp_d < _POWER_MIN_DIFF_PA:
+                    continue
 
                 sample_rates_d = _group_power_rates(opp_d, ["game_id"])
                 sample_sd_d = float(sample_rates_d.std(ddof=0)) if len(sample_rates_d) else sample_sd
-                denom = sample_sd_d if sample_sd_d > 0 else 1e-6
-                rel_d = (user_rate_d - sample_rate_d) / denom
+                denom = max(sample_sd_d, _POWER_SD_FLOOR)
+                rel_d = _clamp(
+                    (user_rate_d - sample_rate_d) / denom,
+                    -_POWER_Z_CLAMP_PER_DIFF,
+                    _POWER_Z_CLAMP_PER_DIFF,
+                )
                 diff_score += (pa_user_d / pa_user) * rel_d
 
     elev_robust = 0.5
-    if "ballpark_id" in df.columns:
-        ballpark_ids = pd.to_numeric(df["ballpark_id"], errors="coerce")
-        unique_ids = sorted({int(v) for v in ballpark_ids.dropna().unique().tolist()})
+    if "ballpark_id" in user_df.columns and "ballpark_id" in opp_df.columns:
+        user_ballpark_ids = pd.to_numeric(user_df["ballpark_id"], errors="coerce")
+        opp_ballpark_ids = pd.to_numeric(opp_df["ballpark_id"], errors="coerce")
+        unique_ids = sorted(
+            {
+                int(v)
+                for v in pd.concat([user_ballpark_ids, opp_ballpark_ids], ignore_index=True)
+                .dropna()
+                .unique()
+                .tolist()
+            }
+        )
         if unique_ids:
             elevations = {
                 row.id: (row.elevation if row.elevation is not None else None)
                 for row in db.scalars(select(ShowBallParks).where(ShowBallParks.id.in_(unique_ids))).all()
             }
-            elev_series = ballpark_ids.map(elevations)
-            opp_elev = elev_series[opponent_hitting]
-            user_elev = elev_series[user_hitting]
+            opp_elev = opp_ballpark_ids.map(elevations)
+            user_elev = user_ballpark_ids.map(elevations)
 
             opp_elev_non_null = opp_elev.dropna()
             user_elev_non_null = user_elev.dropna()
@@ -1842,11 +2599,17 @@ def _compute_power_skill(
             one_card_penalty = _clamp01((top_share - 0.25) / 0.35)
             card_score = 0.7 * depth + 0.3 * (1.0 - one_card_penalty)
 
-    base_z = 0.0
-    if sample_sd > 0:
-        base_z = (smoothed_rate - sample_mean_rate) / (sample_sd + 1e-6)
+    base_z = _clamp(
+        (smoothed_rate - sample_mean_rate) / max(sample_sd, _POWER_SD_FLOOR),
+        -_POWER_Z_CLAMP_BASE,
+        _POWER_Z_CLAMP_BASE,
+    )
 
-    final_z = base_z + 0.8 * diff_score + 0.6 * (elev_robust - 0.5) + 0.6 * (card_score - 0.5)
+    final_z = _clamp(
+        base_z + 0.8 * diff_score + 0.6 * (elev_robust - 0.5) + 0.6 * (card_score - 0.5),
+        -_POWER_Z_CLAMP_FINAL,
+        _POWER_Z_CLAMP_FINAL,
+    )
     power = int(round(100.0 * _sigmoid(final_z / 2.0)))
 
     return PowerSkillOut(
@@ -1967,7 +2730,8 @@ def _timing_event_scores(df: pd.DataFrame) -> pd.Series:
 
     direction = _direction_scores(df)
     evt = contact + direction
-    return evt.clip(lower=-1.0, upper=1.0)
+    evt = evt.clip(lower=-1.0, upper=1.0)
+    return _apply_difficulty_event_adjustment(evt, df)
 
 
 def _location_event_scores(df: pd.DataFrame) -> pd.Series:
@@ -2025,8 +2789,8 @@ def _location_event_scores(df: pd.DataFrame) -> pd.Series:
 
     evt_non_k = type_score + pp_bonus + outcome_bump
     evt = evt.mask(non_k, evt_non_k)
-
-    return evt.clip(lower=-1.0, upper=1.0)
+    evt = evt.clip(lower=-1.0, upper=1.0)
+    return _apply_difficulty_event_adjustment(evt, df)
 
 
 def _group_k_scores(df: pd.DataFrame, group_cols: Iterable[str]) -> pd.Series:
@@ -2060,7 +2824,11 @@ def _group_k_scores(df: pd.DataFrame, group_cols: Iterable[str]) -> pd.Series:
 
     grouped = data.groupby(list(group_cols)).sum(numeric_only=True)
     denom = grouped["pa"].replace(0, 1)
-    kscore = (1.0 * grouped["k_loc"] + 0.55 * grouped["k_other"] + 0.35 * grouped["k_timing"]) / denom
+    kscore = (
+        _PITCHING_K_WEIGHT_LOC * grouped["k_loc"]
+        + _PITCHING_K_WEIGHT_OTHER * grouped["k_other"]
+        + _PITCHING_K_WEIGHT_TIMING * grouped["k_timing"]
+    ) / denom
     return kscore
 
 
@@ -2074,36 +2842,42 @@ def _gimme_rate(df: pd.DataFrame) -> float:
 
 
 def _compute_pitching_archetype(
-    df: pd.DataFrame, username: str, db: Session, pa_smooth: int = 150
+    df: pd.DataFrame,
+    username: str,
+    db: Session,
+    pa_smooth: int = 150,
+    reference_pitching_df: Optional[pd.DataFrame] = None,
 ) -> PitchingArchetypeOut:
     user_pitching, opp_pitching = _pitching_masks(df, username)
     user_df = df[user_pitching]
-    opp_df = df[opp_pitching]
+    opp_df = reference_pitching_df if reference_pitching_df is not None else df[opp_pitching]
 
     pa_user = len(user_df)
     if pa_user == 0:
         return PitchingArchetypeOut(overall=55, consistency=50, strikeout=50, location=50, pa=0)
 
-    results = _str_col(df, "result").str.lower()
-    is_pp = _bool_col(df, "is_perfect_perfect")
-    is_out = _bool_col(df, "is_out")
-    is_error = _bool_col(df, "is_error")
+    def consistency_event_scores(sub: pd.DataFrame) -> pd.Series:
+        results = _str_col(sub, "result").str.lower()
+        is_pp = _bool_col(sub, "is_perfect_perfect")
+        is_out = _bool_col(sub, "is_out")
+        is_error = _bool_col(sub, "is_error")
 
-    evt_cons = pd.Series(0.0, index=df.index)
-    evt_cons = evt_cons.mask(is_pp, -0.70)
-    evt_cons = evt_cons.mask(~is_pp & results.isin(["homerun", "home_run", "home run"]), -0.55)
-    evt_cons = evt_cons.mask(~is_pp & (results == "triple"), -0.35)
-    evt_cons = evt_cons.mask(~is_pp & (results == "double"), -0.25)
-    evt_cons = evt_cons.mask(~is_pp & (results == "single"), -0.10)
-    evt_cons = evt_cons.mask(~is_pp & is_out, 0.08)
-    evt_cons = evt_cons + (is_error.astype(float) * -0.05)
-    evt_cons = evt_cons.clip(lower=-1.0, upper=1.0)
+        evt = pd.Series(0.0, index=sub.index)
+        evt = evt.mask(is_pp, -0.70)
+        evt = evt.mask(~is_pp & results.isin(["homerun", "home_run", "home run"]), -0.55)
+        evt = evt.mask(~is_pp & (results == "triple"), -0.35)
+        evt = evt.mask(~is_pp & (results == "double"), -0.25)
+        evt = evt.mask(~is_pp & (results == "single"), -0.10)
+        evt = evt.mask(~is_pp & is_out, 0.08)
+        evt = evt + (is_error.astype(float) * -0.05)
+        evt = evt.clip(lower=-1.0, upper=1.0)
+        return _apply_difficulty_event_adjustment(evt, sub)
 
-    user_evt = evt_cons[user_pitching]
-    opp_evt = evt_cons[opp_pitching]
+    user_evt = consistency_event_scores(user_df)
+    opp_evt = consistency_event_scores(opp_df)
 
     cons_z = 0.0
-    if "difficulty_id" in df.columns:
+    if "difficulty_id" in user_df.columns and "difficulty_id" in opp_df.columns:
         user_diffs = user_df.get("difficulty_id")
         opp_diffs = opp_df.get("difficulty_id")
         if user_diffs is not None and opp_diffs is not None:
@@ -2120,17 +2894,25 @@ def _compute_pitching_archetype(
                 cons_z += (len(user_d) / pa_user) * z_d
 
     elev_adj = 0.0
-    if "ballpark_id" in df.columns:
-        ballpark_ids = pd.to_numeric(df["ballpark_id"], errors="coerce")
-        unique_ids = sorted({int(v) for v in ballpark_ids.dropna().unique().tolist()})
+    if "ballpark_id" in user_df.columns and "ballpark_id" in opp_df.columns:
+        user_ballpark_ids = pd.to_numeric(user_df["ballpark_id"], errors="coerce")
+        opp_ballpark_ids = pd.to_numeric(opp_df["ballpark_id"], errors="coerce")
+        unique_ids = sorted(
+            {
+                int(v)
+                for v in pd.concat([user_ballpark_ids, opp_ballpark_ids], ignore_index=True)
+                .dropna()
+                .unique()
+                .tolist()
+            }
+        )
         if unique_ids:
             elevations = {
                 row.id: (row.elevation if row.elevation is not None else None)
                 for row in db.scalars(select(ShowBallParks).where(ShowBallParks.id.in_(unique_ids))).all()
             }
-            elev_series = ballpark_ids.map(elevations)
-            opp_elev = elev_series[opp_pitching]
-            user_elev = elev_series[user_pitching]
+            opp_elev = opp_ballpark_ids.map(elevations)
+            user_elev = user_ballpark_ids.map(elevations)
             opp_elev_non_null = opp_elev.dropna()
             user_elev_non_null = user_elev.dropna()
             if len(opp_elev_non_null) >= 10 and len(user_elev_non_null) >= 10:
@@ -2182,12 +2964,16 @@ def _compute_pitching_archetype(
         k_loc_mask = is_strikeout & (k_is_chase | k_is_looking) & ~k_timing_mask
         k_other_mask = is_strikeout & ~k_timing_mask & ~k_loc_mask
         return (
-            (1.0 * k_loc_mask.sum() + 0.55 * k_other_mask.sum() + 0.35 * k_timing_mask.sum())
+            (
+                _PITCHING_K_WEIGHT_LOC * k_loc_mask.sum()
+                + _PITCHING_K_WEIGHT_OTHER * k_other_mask.sum()
+                + _PITCHING_K_WEIGHT_TIMING * k_timing_mask.sum()
+            )
             / float(pa)
         )
 
     k_z = 0.0
-    if "difficulty_id" in df.columns:
+    if "difficulty_id" in user_df.columns and "difficulty_id" in opp_df.columns:
         user_diffs = user_df.get("difficulty_id")
         opp_diffs = opp_df.get("difficulty_id")
         if user_diffs is not None and opp_diffs is not None:
@@ -2203,14 +2989,19 @@ def _compute_pitching_archetype(
                 opp_scores = _group_k_scores(opp_d, ["game_id"])
                 opp_mu = float(opp_scores.mean()) if len(opp_scores) else 0.0
                 opp_sd = float(opp_scores.std(ddof=0)) if len(opp_scores) else 0.0
-                denom = opp_sd if opp_sd > 0 else 1e-6
-                z_d = (user_kscore - opp_mu) / denom
+                denom = max(opp_sd, _PITCHING_K_SD_FLOOR)
+                z_d = _clamp(
+                    (user_kscore - opp_mu) / denom,
+                    -_PITCHING_K_Z_CLAMP_PER_DIFF,
+                    _PITCHING_K_Z_CLAMP_PER_DIFF,
+                )
                 k_z += (len(user_d) / pa_user) * z_d
 
+    k_z = _clamp(k_z, -_PITCHING_K_Z_CLAMP_FINAL, _PITCHING_K_Z_CLAMP_FINAL)
     strikeout = int(round(100.0 * _sigmoid(k_z / 2.0)))
 
     loc_z = 0.0
-    if "difficulty_id" in df.columns:
+    if "difficulty_id" in user_df.columns and "difficulty_id" in opp_df.columns:
         user_diffs = user_df.get("difficulty_id")
         opp_diffs = opp_df.get("difficulty_id")
         if user_diffs is not None and opp_diffs is not None:
@@ -2300,26 +3091,28 @@ def _compute_pitching_archetype(
     )
 
 
-def _compute_timing_skill(df: pd.DataFrame, username: str, pa_smooth: int = 200) -> TimingSkillOut:
+def _compute_timing_skill(
+    df: pd.DataFrame,
+    username: str,
+    pa_smooth: int = 200,
+    reference_hitting_df: Optional[pd.DataFrame] = None,
+) -> TimingSkillOut:
     user_hitting, _, opponent_hitting = _user_masks(df, username)
     user_df = df[user_hitting]
-    opp_df = df[opponent_hitting]
+    opp_df = reference_hitting_df if reference_hitting_df is not None else df[opponent_hitting]
 
     pa_user = len(user_df)
     if pa_user == 0:
         return TimingSkillOut(timing=50, location=50, pa=0, timing_z=0.0, k_pen=0.0, pp_bonus=0.0)
 
-    evt = _timing_event_scores(df)
-    location_evt = _location_event_scores(df)
-
-    user_evt = evt[user_hitting]
-    opp_evt = evt[opponent_hitting]
+    user_evt = _timing_event_scores(user_df)
+    opp_evt = _timing_event_scores(opp_df)
     user_mean = float(user_evt.mean()) if len(user_evt) else 0.0
     opp_mean = float(opp_evt.mean()) if len(opp_evt) else 0.0
     timing_user_smoothed = (user_mean * pa_user + opp_mean * pa_smooth) / (pa_user + pa_smooth)
 
     timing_z = 0.0
-    if "difficulty_id" in df.columns and len(user_evt):
+    if "difficulty_id" in user_df.columns and "difficulty_id" in opp_df.columns and len(user_evt):
         user_diffs = user_df.get("difficulty_id")
         if user_diffs is not None:
             diffs = [d for d in user_diffs.dropna().unique().tolist()]
@@ -2378,11 +3171,11 @@ def _compute_timing_skill(df: pd.DataFrame, username: str, pa_smooth: int = 200)
     final_z = timing_z + k_pen + pp_bonus
     timing = int(round(100.0 * _sigmoid(final_z / 2.0)))
 
-    user_loc_evt = location_evt[user_hitting]
-    opp_loc_evt = location_evt[opponent_hitting]
+    user_loc_evt = _location_event_scores(user_df)
+    opp_loc_evt = _location_event_scores(opp_df)
 
     loc_z = 0.0
-    if "difficulty_id" in df.columns and len(user_loc_evt):
+    if "difficulty_id" in user_df.columns and "difficulty_id" in opp_df.columns and len(user_loc_evt):
         user_diffs = user_df.get("difficulty_id")
         if user_diffs is not None:
             diffs = [d for d in user_diffs.dropna().unique().tolist()]
@@ -2454,7 +3247,7 @@ def _compute_timing_skill(df: pd.DataFrame, username: str, pa_smooth: int = 200)
                     variety_adj = -0.7 * _clamp(eff01 - 0.3, -0.3, 0.3)
 
     adj_bonus = 0.0
-    if "times_seen_pitcher" in user_df.columns and "game_id" in df.columns:
+    if "times_seen_pitcher" in user_df.columns and "game_id" in user_df.columns:
         times = pd.to_numeric(user_df.get("times_seen_pitcher"), errors="coerce")
         mean1 = float(user_loc_evt[times == 1].mean()) if (times == 1).any() else None
         mean2p = float(user_loc_evt[times >= 2].mean()) if (times >= 2).any() else None
@@ -2490,6 +3283,87 @@ def _compute_timing_skill(df: pd.DataFrame, username: str, pa_smooth: int = 200)
         k_pen=float(k_pen),
         pp_bonus=float(pp_bonus),
     )
+
+
+def _local_reference_samples(df: pd.DataFrame, username: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    _, _, opp_hitting = _user_masks(df, username)
+    _, opp_pitching = _pitching_masks(df, username)
+    return df[opp_hitting], df[opp_pitching]
+
+
+def _compute_combined_archetype_for_df(
+    *,
+    df_full: pd.DataFrame,
+    username: str,
+    db: Session,
+    pitcher_mlb_id: Optional[int] = None,
+    hitter_mlb_id: Optional[int] = None,
+) -> CombinedArchetypeOut:
+    ctx = _build_skill_context(
+        username,
+        df_full,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
+
+    power_skill = _compute_power_skill(
+        ctx.root_df,
+        username,
+        db,
+        reference_hitting_df=ctx.ref_hitting_df,
+    )
+    timing_skill = _compute_timing_skill(
+        ctx.root_df,
+        username,
+        reference_hitting_df=ctx.ref_hitting_df,
+    )
+    pa = max(power_skill.pa, timing_skill.pa)
+    batting_overall = _compute_overall_hitting(
+        power=power_skill.power,
+        timing=timing_skill.timing,
+        location=timing_skill.location,
+        pa=pa,
+    )
+    batting = BattingArchetypeOut(
+        overall=batting_overall,
+        power=power_skill.power,
+        timing=timing_skill.timing,
+        location=timing_skill.location,
+        pa=pa,
+    )
+
+    pitching = _compute_pitching_archetype(
+        ctx.root_df,
+        username,
+        db,
+        reference_pitching_df=ctx.ref_pitching_df,
+    )
+
+    return CombinedArchetypeOut(batting=batting, pitching=pitching)
+
+
+def _get_combined_archetype_cached(
+    *,
+    username: str,
+    db: Session,
+    pitcher_mlb_id: Optional[int] = None,
+    hitter_mlb_id: Optional[int] = None,
+) -> CombinedArchetypeOut:
+    cached = _load_combined_from_cache(username, pitcher_mlb_id, hitter_mlb_id)
+    if cached is not None:
+        return cached
+
+    computed = _compute_combined_archetype_for_df(
+        df_full=_load_skill_facts_df(username),
+        username=username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
+    _store_combined_cache(username, pitcher_mlb_id, hitter_mlb_id, computed)
+    return computed
+
+
 @router.get("/skills", response_model=ShowSkillsOut)
 def get_show_skills(
     db: Session = Depends(get_db),
@@ -2504,10 +3378,16 @@ def get_show_skills(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
     username = sp.username
-    df = _load_facts_df_for_username(username)
+    df = _load_skill_facts_df(username)
     df = _filter_df_by_pitcher(df, pitcher_mlb_id)
     df = _filter_df_by_hitter(df, hitter_mlb_id)
-    hitting, pitching = _compute_pa_stats(df, username)
+    ref_hitting_df, ref_pitching_df = _local_reference_samples(df, username)
+    hitting, pitching = _compute_pa_stats(
+        df,
+        username,
+        reference_hitting_df=ref_hitting_df,
+        reference_pitching_df=ref_pitching_df,
+    )
 
     return ShowSkillsOut(hitting=hitting, pitching=pitching)
 
@@ -2528,6 +3408,18 @@ def get_show_stats(
     return _compute_aggregate_stats(df, sp.username, view=view)
 
 
+@router.get("/your-ovr", response_model=ShowYourOvrWeightsOut)
+def get_show_your_ovr(
+    db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims),
+) -> ShowYourOvrWeightsOut:
+    user = _get_authed_user(db, claims)
+    sp = _get_profile_for_user(db, user.id)
+    if not sp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+    return _load_your_ovr_weights_cached(sp.username)
+
+
 @router.get("/archetype/power", response_model=PowerSkillOut)
 def get_show_power_skill(
     db: Session = Depends(get_db),
@@ -2540,8 +3432,14 @@ def get_show_power_skill(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
     username = sp.username
-    df = _load_facts_df_for_username(username)
-    return _compute_power_skill(df, username, db)
+    df = _load_skill_facts_df(username)
+    ctx = _build_skill_context(username, df)
+    return _compute_power_skill(
+        ctx.root_df,
+        username,
+        db,
+        reference_hitting_df=ctx.ref_hitting_df,
+    )
 
 
 @router.get("/archetype/timing", response_model=TimingSkillOut)
@@ -2556,8 +3454,13 @@ def get_show_timing_skill(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
     username = sp.username
-    df = _load_facts_df_for_username(username)
-    return _compute_timing_skill(df, username)
+    df = _load_skill_facts_df(username)
+    ctx = _build_skill_context(username, df)
+    return _compute_timing_skill(
+        ctx.root_df,
+        username,
+        reference_hitting_df=ctx.ref_hitting_df,
+    )
 
 
 @router.get("/archetype/batting", response_model=BattingArchetypeOut)
@@ -2574,26 +3477,13 @@ def get_show_batting_archetype(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
     username = sp.username
-    df = _load_facts_df_for_username(username)
-    df = _filter_df_by_pitcher(df, pitcher_mlb_id)
-    df = _filter_df_by_hitter(df, hitter_mlb_id)
-    power_skill = _compute_power_skill(df, username, db)
-    timing_skill = _compute_timing_skill(df, username)
-    pa = max(power_skill.pa, timing_skill.pa)
-    overall = _compute_overall_hitting(
-        power=power_skill.power,
-        timing=timing_skill.timing,
-        location=timing_skill.location,
-        pa=pa,
+    combined = _get_combined_archetype_cached(
+        username=username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
     )
-
-    return BattingArchetypeOut(
-        overall=overall,
-        power=power_skill.power,
-        timing=timing_skill.timing,
-        location=timing_skill.location,
-        pa=pa,
-    )
+    return combined.batting
 
 
 @router.get("/archetype/pitching", response_model=PitchingArchetypeOut)
@@ -2609,11 +3499,32 @@ def get_show_pitching_archetype(
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
-    username = sp.username
-    df = _load_facts_df_for_username(username)
-    df = _filter_df_by_pitcher(df, pitcher_mlb_id)
-    df = _filter_df_by_hitter(df, hitter_mlb_id)
-    return _compute_pitching_archetype(df, username, db)
+    combined = _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
+    return combined.pitching
+
+
+@router.get("/archetype/combined", response_model=CombinedArchetypeOut)
+def get_show_combined_archetype(
+    db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims),
+    pitcher_mlb_id: Optional[int] = Query(default=None, ge=0),
+    hitter_mlb_id: Optional[int] = Query(default=None, ge=0),
+) -> CombinedArchetypeOut:
+    user = _get_authed_user(db, claims)
+    sp = _get_profile_for_user(db, user.id)
+    if not sp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+    return _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
 
 
 @router.get("/strikeout-map", response_model=StrikeoutZoneMapOut)
@@ -2708,10 +3619,16 @@ def get_show_skills_by_username(
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
+    df = _load_skill_facts_df(sp.username)
     df = _filter_df_by_pitcher(df, pitcher_mlb_id)
     df = _filter_df_by_hitter(df, hitter_mlb_id)
-    hitting, pitching = _compute_pa_stats(df, sp.username)
+    ref_hitting_df, ref_pitching_df = _local_reference_samples(df, sp.username)
+    hitting, pitching = _compute_pa_stats(
+        df,
+        sp.username,
+        reference_hitting_df=ref_hitting_df,
+        reference_pitching_df=ref_pitching_df,
+    )
     return ShowSkillsOut(hitting=hitting, pitching=pitching)
 
 
@@ -2738,25 +3655,13 @@ def get_show_batting_archetype_by_username(
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
-    df = _filter_df_by_pitcher(df, pitcher_mlb_id)
-    df = _filter_df_by_hitter(df, hitter_mlb_id)
-    power_skill = _compute_power_skill(df, sp.username, db)
-    timing_skill = _compute_timing_skill(df, sp.username)
-    pa = max(power_skill.pa, timing_skill.pa)
-    overall = _compute_overall_hitting(
-        power=power_skill.power,
-        timing=timing_skill.timing,
-        location=timing_skill.location,
-        pa=pa,
+    combined = _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
     )
-    return BattingArchetypeOut(
-        overall=overall,
-        power=power_skill.power,
-        timing=timing_skill.timing,
-        location=timing_skill.location,
-        pa=pa,
-    )
+    return combined.batting
 
 
 @public_router.get("/show/{username}/archetype/pitching", response_model=PitchingArchetypeOut)
@@ -2769,10 +3674,31 @@ def get_show_pitching_archetype_by_username(
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
-    df = _filter_df_by_pitcher(df, pitcher_mlb_id)
-    df = _filter_df_by_hitter(df, hitter_mlb_id)
-    return _compute_pitching_archetype(df, sp.username, db)
+    combined = _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
+    return combined.pitching
+
+
+@public_router.get("/show/{username}/archetype/combined", response_model=CombinedArchetypeOut)
+def get_show_combined_archetype_by_username(
+    username: str,
+    db: Session = Depends(get_db),
+    pitcher_mlb_id: Optional[int] = Query(default=None, ge=0),
+    hitter_mlb_id: Optional[int] = Query(default=None, ge=0),
+) -> CombinedArchetypeOut:
+    sp = _get_profile_by_username(db, username)
+    if not sp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+    return _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
 
 
 @public_router.get("/show/{username}/strikeout-map", response_model=StrikeoutZoneMapOut)
@@ -2862,10 +3788,16 @@ def get_show_skills_for_user(
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
+    df = _load_skill_facts_df(sp.username)
     df = _filter_df_by_pitcher(df, pitcher_mlb_id)
     df = _filter_df_by_hitter(df, hitter_mlb_id)
-    hitting, pitching = _compute_pa_stats(df, sp.username)
+    ref_hitting_df, ref_pitching_df = _local_reference_samples(df, sp.username)
+    hitting, pitching = _compute_pa_stats(
+        df,
+        sp.username,
+        reference_hitting_df=ref_hitting_df,
+        reference_pitching_df=ref_pitching_df,
+    )
     return ShowSkillsOut(hitting=hitting, pitching=pitching)
 
 
@@ -2892,25 +3824,13 @@ def get_show_batting_archetype_for_user(
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
-    df = _filter_df_by_pitcher(df, pitcher_mlb_id)
-    df = _filter_df_by_hitter(df, hitter_mlb_id)
-    power_skill = _compute_power_skill(df, sp.username, db)
-    timing_skill = _compute_timing_skill(df, sp.username)
-    pa = max(power_skill.pa, timing_skill.pa)
-    overall = _compute_overall_hitting(
-        power=power_skill.power,
-        timing=timing_skill.timing,
-        location=timing_skill.location,
-        pa=pa,
+    combined = _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
     )
-    return BattingArchetypeOut(
-        overall=overall,
-        power=power_skill.power,
-        timing=timing_skill.timing,
-        location=timing_skill.location,
-        pa=pa,
-    )
+    return combined.batting
 
 
 @public_router.get("/{user_id}/show/archetype/pitching", response_model=PitchingArchetypeOut)
@@ -2923,10 +3843,31 @@ def get_show_pitching_archetype_for_user(
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
-    df = _filter_df_by_pitcher(df, pitcher_mlb_id)
-    df = _filter_df_by_hitter(df, hitter_mlb_id)
-    return _compute_pitching_archetype(df, sp.username, db)
+    combined = _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
+    return combined.pitching
+
+
+@public_router.get("/{user_id}/show/archetype/combined", response_model=CombinedArchetypeOut)
+def get_show_combined_archetype_for_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    pitcher_mlb_id: Optional[int] = Query(default=None, ge=0),
+    hitter_mlb_id: Optional[int] = Query(default=None, ge=0),
+) -> CombinedArchetypeOut:
+    sp = _get_profile_for_user(db, user_id)
+    if not sp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+    return _get_combined_archetype_cached(
+        username=sp.username,
+        db=db,
+        pitcher_mlb_id=pitcher_mlb_id,
+        hitter_mlb_id=hitter_mlb_id,
+    )
 
 
 @public_router.get("/{user_id}/show/strikeout-map", response_model=StrikeoutZoneMapOut)

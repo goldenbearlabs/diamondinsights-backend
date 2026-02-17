@@ -26,6 +26,54 @@ from shared.db.database import engine  # noqa: E402
 
 OUTPUT_PATH = SCRIPT_DIR.parent / "training_data.csv"
 
+ATTR_FIELD_MAP = {
+    "CON L": "contact_left",
+    "CON R": "contact_right",
+    "POW L": "power_left",
+    "POW R": "power_right",
+    "VIS": "plate_vision",
+    "DISC": "plate_discipline",
+    "CLT": "batting_clutch",
+    "SPD": "speed",
+    "STEAL": "baserunning_ability",
+    "FLD": "fielding_ability",
+    "ARM": "arm_strength",
+    "REAC": "reaction_time",
+    "ACC": "arm_accuracy",
+    "BLK": "blocking",
+    "K/9": "k_per_bf",
+    "BB/9": "bb_per_bf",
+    "H/9": "hits_per_bf",
+    "HR/9": "hr_per_bf",
+    "STA": "stamina",
+    "VEL": "pitch_velocity",
+    "BRK": "pitch_movement",
+    "CTRL": "pitch_control",
+    "PCLT": "pitching_clutch",
+    "BNT": "bunting_ability",
+    "DRG BNT": "drag_bunting_ability",
+}
+ATTR_NAMES = list(ATTR_FIELD_MAP.keys())
+
+
+def _safe_attr_name(attr):
+    s = str(attr).strip().upper()
+    s = s.replace("/", "_")
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^A-Z0-9_]+", "", s)
+    return s
+
+
+ATTR_SAFE_NAME_MAP = {_safe_attr_name(a): a for a in ATTR_NAMES}
+
+
+def normalize_attr_name(name):
+    raw = str(name or "").strip().upper()
+    if raw in ATTR_FIELD_MAP:
+        return raw
+    return ATTR_SAFE_NAME_MAP.get(_safe_attr_name(raw), raw)
+
+
 def height_to_inches(v):
     if not isinstance(v, str):
         return None
@@ -51,12 +99,17 @@ def load_base():
         SELECT 
             cu.update_id, cu.update_date, cu.card_id, 
             cu.old_ovr, cu.new_ovr, cu.trend_display,
+            ru.is_fielding,
             c.mlb_id, c.name, c.team, c.display_position, 
             c.display_secondary_positions, c.age, c.year,
             c.height, c.weight
         FROM card_updates cu
+        JOIN roster_updates ru
+          ON ru.id = cu.update_id
+         AND ru.date = cu.update_date
         JOIN cards c ON c.id = cu.card_id
-        ORDER BY cu.card_id, cu.update_date
+        WHERE ru.is_major = true
+        ORDER BY cu.card_id, cu.update_date, cu.update_id
     """
     df = pd.read_sql(text(q), engine, parse_dates=["update_date"])
 
@@ -70,11 +123,13 @@ def load_base():
 
 def load_attribute_changes():
     q = """
-        SELECT update_id, update_date, card_id, name, new_value, old_value, delta
+        SELECT id, update_id, update_date, card_id, name, new_value, old_value, delta
         FROM card_attribute_changes
     """
     df = pd.read_sql(text(q), engine, parse_dates=["update_date"])
     df = make_naive(df, "update_date")
+
+    df["name"] = df["name"].apply(normalize_attr_name)
 
     df["delta"] = df["delta"].astype(str).str.replace("+", "", regex=False)
     df["delta"] = pd.to_numeric(df["delta"], errors="coerce")
@@ -82,6 +137,20 @@ def load_attribute_changes():
     df["old_value"] = pd.to_numeric(df["old_value"], errors="coerce")
     df["new_value"] = pd.to_numeric(df["new_value"], errors="coerce")
 
+    return df
+
+def load_current_card_attrs():
+    attr_select = ",\n                   ".join(
+        [f'c.{field} AS "{attr}"' for attr, field in ATTR_FIELD_MAP.items()]
+    )
+    q = f"""
+        SELECT c.id AS card_id,
+               {attr_select}
+        FROM cards c
+    """
+    df = pd.read_sql(text(q), engine)
+    for attr in ATTR_NAMES:
+        df[attr] = pd.to_numeric(df[attr], errors="coerce")
     return df
 
 def load_batting():
@@ -265,42 +334,128 @@ def agg_fielding(df, prefix):
         f"{prefix}field_pct": safe_div(chances - errors, chances),
     }
 
-def _merge_attr_changes(base: pd.DataFrame, attr_changes: pd.DataFrame) -> pd.DataFrame:
-    if attr_changes.empty:
+def _merge_full_attr_states(
+    base: pd.DataFrame,
+    attr_changes: pd.DataFrame,
+    current_attrs: pd.DataFrame,
+) -> pd.DataFrame:
+    if base.empty:
         return base
 
-    attr_pivot = attr_changes.pivot_table(
-        index=["update_id", "update_date", "card_id"],
-        columns="name",
-        values=["new_value", "old_value", "delta"],
-        aggfunc="first",
+    key_cols = ["update_id", "update_date", "card_id"]
+    major_keys = base[key_cols].drop_duplicates()
+    major_key_set = {
+        (r.card_id, r.update_date, int(r.update_id))
+        for r in major_keys.itertuples(index=False)
+    }
+
+    timeline = major_keys.copy()
+    if not attr_changes.empty:
+        change_keys = attr_changes[key_cols].drop_duplicates()
+        timeline = pd.concat([timeline, change_keys], ignore_index=True).drop_duplicates()
+
+    timeline = timeline.sort_values(["card_id", "update_date", "update_id"])
+    if timeline.empty:
+        return base
+
+    card_ids = set(timeline["card_id"].astype(str))
+    attr_state_df = current_attrs[current_attrs["card_id"].astype(str).isin(card_ids)].copy()
+    for attr in ATTR_NAMES:
+        attr_state_df[attr] = pd.to_numeric(attr_state_df[attr], errors="coerce").fillna(0)
+
+    card_state_map = (
+        attr_state_df.set_index("card_id")[ATTR_NAMES].to_dict(orient="index")
+        if not attr_state_df.empty
+        else {}
     )
 
-    val_map = {"new_value": "new", "old_value": "old", "delta": "delta"}
-    attr_pivot.columns = [f"{col[1]}_{val_map[col[0]]}" for col in attr_pivot.columns]
-    attr_pivot = attr_pivot.reset_index()
+    changes_by_update = {}
+    if not attr_changes.empty:
+        ac = attr_changes[attr_changes["card_id"].astype(str).isin(card_ids)].copy()
+        ac = ac.sort_values(["card_id", "update_date", "update_id", "id"])
+        for r in ac.itertuples(index=False):
+            attr_name = normalize_attr_name(r.name)
+            if attr_name not in ATTR_FIELD_MAP:
+                continue
+            key = (r.card_id, r.update_date, int(r.update_id))
+            changes_by_update.setdefault(key, {})[attr_name] = {
+                "old": r.old_value,
+                "new": r.new_value,
+                "delta": r.delta,
+            }
 
-    out = pd.merge(base, attr_pivot, on=["update_id", "update_date", "card_id"], how="left")
+    rows = []
+    for card_id, g in timeline.groupby("card_id", sort=False):
+        state_after = {
+            attr: float(card_state_map.get(card_id, {}).get(attr, 0))
+            for attr in ATTR_NAMES
+        }
+        g_desc = g.sort_values(["update_date", "update_id"], ascending=[False, False])
 
-    all_attr_cols = [c for c in attr_pivot.columns if c not in ["update_id", "update_date", "card_id"]]
-    delta_cols = [c for c in all_attr_cols if c.endswith("_delta")]
+        for u in g_desc.itertuples(index=False):
+            key = (u.card_id, u.update_date, int(u.update_id))
+            changes = changes_by_update.get(key, {})
 
+            new_state = dict(state_after)
+            old_state = dict(state_after)
+
+            for attr_name, vals in changes.items():
+                old_val = vals["old"]
+                new_val = vals["new"]
+                delta_val = vals["delta"]
+
+                if pd.notna(new_val):
+                    new_state[attr_name] = float(new_val)
+                elif pd.notna(old_val) and pd.notna(delta_val):
+                    new_state[attr_name] = float(old_val) + float(delta_val)
+
+                if pd.notna(old_val):
+                    old_state[attr_name] = float(old_val)
+                elif pd.notna(new_val) and pd.notna(delta_val):
+                    old_state[attr_name] = float(new_val) - float(delta_val)
+
+            if key in major_key_set:
+                row = {
+                    "update_id": int(u.update_id),
+                    "update_date": u.update_date,
+                    "card_id": u.card_id,
+                }
+                for attr_name in ATTR_NAMES:
+                    new_val = float(new_state.get(attr_name, 0))
+                    old_val = float(old_state.get(attr_name, new_val))
+                    row[f"{attr_name}_new"] = new_val
+                    row[f"{attr_name}_old"] = old_val
+                    row[f"{attr_name}_delta"] = new_val - old_val
+                rows.append(row)
+
+            state_after = old_state
+
+    attr_full = pd.DataFrame(rows)
+    if attr_full.empty:
+        return base
+
+    out = pd.merge(base, attr_full, on=key_cols, how="left")
+    delta_cols = [c for c in out.columns if c.endswith("_delta")]
     if delta_cols:
         out[delta_cols] = out[delta_cols].fillna(0)
-
     return out
 
 def main():
     print("Loading Data...")
     base = load_base()
     attr_changes = load_attribute_changes()
+    current_attrs = load_current_card_attrs()
     batting = load_batting()
     pitching = load_pitching()
     baserunning = load_baserunning()
     fielding = load_fielding()
     print("Data Loaded.")
 
-    base = _merge_attr_changes(base, attr_changes)
+    relevant_card_ids = set(base["card_id"].astype(str).unique())
+    attr_changes = attr_changes[attr_changes["card_id"].astype(str).isin(relevant_card_ids)]
+    current_attrs = current_attrs[current_attrs["card_id"].astype(str).isin(relevant_card_ids)]
+
+    base = _merge_full_attr_states(base, attr_changes, current_attrs)
 
     rows = []
 
