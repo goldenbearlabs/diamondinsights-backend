@@ -446,6 +446,11 @@ class PitchingArchetypeOut(BaseModel):
     pa: int
 
 
+class CombinedArchetypeOut(BaseModel):
+    batting: BattingArchetypeOut
+    pitching: PitchingArchetypeOut
+
+
 class StrikeoutZoneMapOut(BaseModel):
     zones: List[List[int]]
     outside: Dict[str, int]
@@ -465,3 +470,20 @@ class HitDataMapOut(BaseModel):
     pa: int
     stat: str
     stats: Dict[str, float]
+
+
+class ShowYourOvrWeightOut(BaseModel):
+    mlb_id: int
+    role: str
+    weight: float
+    pa: int = 0
+    meets_min_pa: bool = False
+
+
+class ShowYourOvrWeightsOut(BaseModel):
+    username: str
+    updated_at: Optional[str] = None
+    total_weights: int
+    hitting_weights: int
+    pitching_weights: int
+    weights: List[ShowYourOvrWeightOut] = Field(default_factory=list)

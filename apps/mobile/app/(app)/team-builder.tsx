@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { apiGet } from "../../src/lib/api";
+import { apiGetAuth } from "../../src/lib/api";
 import { FloatingBackground } from "../../src/homescreencomponents/FloatingBackground";
 import { theme } from "../../src/theme/colors";
 
@@ -32,8 +32,11 @@ type TeamCard = {
   true_overall_rounded?: number | null;
   meta_overall?: number | null;
   meta_overall_rounded?: number | null;
+  your_overall?: number | null;
+  your_overall_rounded?: number | null;
   true_overall_by_position?: Record<string, number> | null;
   meta_overall_by_position?: Record<string, number> | null;
+  your_overall_by_position?: Record<string, number> | null;
   contact_left?: number | null;
   contact_right?: number | null;
   power_left?: number | null;
@@ -58,7 +61,7 @@ type TeamCard = {
 
 type RosterMode = "batters" | "pitchers";
 type PositionFilterMode = "primary" | "secondary" | "all";
-type ValueMetric = "ovr" | "true" | "meta";
+type ValueMetric = "ovr" | "true" | "meta" | "your";
 
 type SlotSection = "lineup" | "bench" | "rotation" | "bullpen";
 
@@ -300,6 +303,7 @@ const VALUE_METRIC_OPTIONS = [
   { key: "ovr", label: "Overall", chip: "OVR" },
   { key: "true", label: "True Overall", chip: "TRUE" },
   { key: "meta", label: "Meta Overall", chip: "META" },
+  { key: "your", label: "Your Overall", chip: "YOUR" },
 ] as const;
 
 const MODE_OPTIONS: { key: RosterMode; label: string }[] = [
@@ -369,10 +373,21 @@ const averagedMetric = (left: number | null | undefined, right: number | null | 
 };
 
 const getTrueOverallValue = (card: TeamCard) =>
-  card.true_overall_rounded ?? card.true_overall ?? null;
+  card.true_overall ?? card.true_overall_rounded ?? null;
 
 const getMetaOverallValue = (card: TeamCard) =>
-  card.meta_overall_rounded ?? card.meta_overall ?? null;
+  card.meta_overall ?? card.meta_overall_rounded ?? null;
+
+const getYourOverallValue = (card: TeamCard) =>
+  card.your_overall ?? card.your_overall_rounded ?? null;
+
+const getYourWeightFromCard = (card: TeamCard): number => {
+  const meta = getMetaOverallValue(card);
+  const your = getYourOverallValue(card);
+  if (typeof meta !== "number" || !Number.isFinite(meta) || Math.abs(meta) < 1e-9) return 1;
+  if (typeof your !== "number" || !Number.isFinite(your)) return 1;
+  return your / meta;
+};
 
 const getPositionMapValue = (
   map: Record<string, number> | null | undefined,
@@ -393,10 +408,21 @@ const getMetricValueForPosition = (
   if (metric === "true") {
     return getPositionMapValue(card.true_overall_by_position, position) ?? getTrueOverallValue(card);
   }
-  return getPositionMapValue(card.meta_overall_by_position, position) ?? getMetaOverallValue(card);
+  if (metric === "meta") {
+    return getPositionMapValue(card.meta_overall_by_position, position) ?? getMetaOverallValue(card);
+  }
+  const yourFromMap = getPositionMapValue(card.your_overall_by_position, position);
+  if (yourFromMap !== null) return yourFromMap;
+  const metaFromMap = getPositionMapValue(card.meta_overall_by_position, position);
+  if (metaFromMap !== null) return metaFromMap * getYourWeightFromCard(card);
+  return getYourOverallValue(card);
 };
 
-const getSlotMetricValue = (card: TeamCard, metric: ValueMetric, slotMeta: SlotMeta): number | null => {
+const getSlotMetricValue = (
+  card: TeamCard,
+  metric: ValueMetric,
+  slotMeta: SlotMeta
+): number | null => {
   if (slotMeta.targetPosition === "BENCH") {
     return getMetricValueForPosition(card, metric, getPrimaryPosition(card));
   }
@@ -494,6 +520,10 @@ const getAttributesForMode = (card: TeamCard, mode: RosterMode) => {
   return getHitterAttributes(card);
 };
 
+const fetchCardsForBuilder = async (path: string): Promise<TeamCard[]> => {
+  return apiGetAuth<TeamCard[]>(path);
+};
+
 const getModeSlotKeys = (mode: RosterMode): AnySlotKey[] => {
   if (mode === "batters") return [...BATTING_LINEUP_SLOT_KEYS, ...BENCH_SLOT_KEYS];
   return [...ROTATION_SLOT_KEYS, ...BULLPEN_SLOT_KEYS];
@@ -533,7 +563,11 @@ const getLineupAdjacencyScore = (leftCard: TeamCard, rightCard: TeamCard) => {
   return 14;
 };
 
-const getLineupSpotScore = (card: TeamCard, metric: ValueMetric, spotIndex: number) => {
+const getLineupSpotScore = (
+  card: TeamCard,
+  metric: ValueMetric,
+  spotIndex: number
+) => {
   const metricValue = getHitterMetricValue(card, metric);
   const contact = getContactAverage(card);
   const power = getPowerAverage(card);
@@ -570,7 +604,10 @@ const getLineupSpotScore = (card: TeamCard, metric: ValueMetric, spotIndex: numb
   return production * depthWeight;
 };
 
-const evaluateLineupSequence = (entries: LineupEntry[], metric: ValueMetric) => {
+const evaluateLineupSequence = (
+  entries: LineupEntry[],
+  metric: ValueMetric
+) => {
   let score = 0;
   for (let index = 0; index < entries.length; index += 1) {
     const current = entries[index];
@@ -982,6 +1019,8 @@ export default function TeamBuilder() {
     [teamMetric]
   );
 
+  const generateDisabled = generating;
+
   const averageOverall = useMemo(() => {
     const metricValues = currentModeSlotKeys
       .map((slotKey) => {
@@ -1019,9 +1058,7 @@ export default function TeamBuilder() {
 
   const sortedFilteredResults = useMemo(() => {
     if (!activeSlotMeta) return filteredResults;
-    return [...filteredResults].sort((a, b) =>
-      compareCardsForSlot(a, b, sortMetric, activeSlotMeta)
-    );
+    return [...filteredResults].sort((a, b) => compareCardsForSlot(a, b, sortMetric, activeSlotMeta));
   }, [filteredResults, sortMetric, activeSlotMeta]);
 
   const filterDescription = useMemo(() => {
@@ -1093,14 +1130,14 @@ export default function TeamBuilder() {
           offset: String(offset),
         });
         if (trimmed) params.set("name", trimmed);
-        return `/cards?${params.toString()}`;
+        return `/cards/?${params.toString()}`;
       };
 
-      const firstBatch = await apiGet<TeamCard[]>(buildUrl(0));
+      const firstBatch = await fetchCardsForBuilder(buildUrl(0));
       let cards = firstBatch;
 
       if (!trimmed && firstBatch.length === 100) {
-        const secondBatch = await apiGet<TeamCard[]>(buildUrl(100));
+        const secondBatch = await fetchCardsForBuilder(buildUrl(100));
         cards = [...firstBatch, ...secondBatch];
       }
 
@@ -1112,7 +1149,11 @@ export default function TeamBuilder() {
       setResults(Array.from(unique.values()).filter((card) => card.year === 25));
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
-      setError("Could not load cards. Try again.");
+      if (err instanceof Error && err.message === "Not authenticated") {
+        setError("Sign in to load personalized cards.");
+      } else {
+        setError("Could not load cards. Try again.");
+      }
       console.error("Failed to fetch cards for team builder:", err);
     } finally {
       if (requestId === requestIdRef.current) {
@@ -1174,7 +1215,7 @@ export default function TeamBuilder() {
         offset: String(offset),
       });
 
-      const batch = await apiGet<TeamCard[]>(`/cards?${params.toString()}`);
+      const batch = await fetchCardsForBuilder(`/cards/?${params.toString()}`);
       collected.push(...batch);
 
       if (batch.length < pageSize) break;
@@ -1282,7 +1323,11 @@ export default function TeamBuilder() {
       setRoster((previous) => ({ ...previous, ...generatedBatters.generated, ...generatedPitchers }));
     } catch (err) {
       console.error("Failed to generate greedy team:", err);
-      setError("Could not generate team right now.");
+      if (err instanceof Error && err.message === "Not authenticated") {
+        setError("Sign in to generate a personalized team.");
+      } else {
+        setError("Could not generate team right now.");
+      }
     } finally {
       setGenerating(false);
     }
@@ -1433,6 +1478,12 @@ export default function TeamBuilder() {
                     {formatMetric(getSlotMetricValue(card, "meta", slotMeta))}
                   </Text>
                 </View>
+                <View style={[styles.metricPill, styles.metricPillYour]}>
+                  <Text style={styles.metricLabel}>YOUR</Text>
+                  <Text style={styles.metricValue}>
+                    {formatMetric(getSlotMetricValue(card, "your", slotMeta))}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -1486,12 +1537,12 @@ export default function TeamBuilder() {
           </Text>
 
           <TouchableOpacity
-            style={[styles.generateButton, generating && styles.generateButtonDisabled]}
+            style={[styles.generateButton, generateDisabled && styles.generateButtonDisabled]}
             onPress={() => void handleGenerateGreedy()}
-            disabled={generating}
+            disabled={generateDisabled}
             activeOpacity={0.85}
           >
-            {generating ? (
+            {generateDisabled ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
               <Ionicons name="flash" size={14} color="white" />
@@ -1659,6 +1710,14 @@ export default function TeamBuilder() {
                         </Text>
                         <Text style={styles.resultMetricText}>
                           META {formatMetric(activeSlotMeta ? getSlotMetricValue(item, "meta", activeSlotMeta) : getMetaOverallValue(item))}
+                        </Text>
+                        <Text style={styles.resultMetricText}>
+                          YOUR{" "}
+                          {formatMetric(
+                            activeSlotMeta
+                              ? getSlotMetricValue(item, "your", activeSlotMeta)
+                              : getMetricValueForPosition(item, "your", getPrimaryPosition(item))
+                          )}
                         </Text>
                       </View>
                     </View>
@@ -1931,6 +1990,10 @@ const styles = StyleSheet.create({
   metricPillMeta: {
     borderColor: "rgba(251,191,36,0.6)",
     backgroundColor: "rgba(251,191,36,0.15)",
+  },
+  metricPillYour: {
+    borderColor: "rgba(20,184,166,0.6)",
+    backgroundColor: "rgba(20,184,166,0.16)",
   },
   metricLabel: {
     color: "rgba(248,250,252,0.9)",

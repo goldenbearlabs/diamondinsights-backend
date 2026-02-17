@@ -3,8 +3,11 @@ from typing import List, Optional
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, selectinload
 from shared.db.database import get_db
-from shared.db.models import Card, Comment, UserPrediction, CardPrediction
+from shared.db.models import Card, Comment, UserPrediction, CardPrediction, Users
 from src.schemas.card import CardResponse
+from src.api.routes.users import firebase_claims_optional
+from src.api.routes.show_profiles.profile import _get_profile_for_user
+from src.api.routes.show_profiles.analytics import _load_your_ovr_weights_cached
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -120,8 +123,69 @@ def _metric_value(
     return None
 
 
+def _your_weight_map_for_claims(db: Session, claims: dict) -> dict[str, float]:
+    uid = (claims or {}).get("uid")
+    if not uid:
+        return {}
+
+    user = db.query(Users).filter(Users.firebase_id == uid).first()
+    if not user:
+        return {}
+
+    sp = _get_profile_for_user(db, user.id)
+    if not sp:
+        return {}
+
+    payload = _load_your_ovr_weights_cached(sp.username)
+    out: dict[str, float] = {}
+    for item in payload.weights:
+        try:
+            out[f"{item.role}:{int(item.mlb_id)}"] = float(item.weight)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _your_weight_for_card(card: Card, your_weight_map: dict[str, float]) -> float:
+    mlb_id = getattr(card, "mlb_id", None)
+    if not isinstance(mlb_id, int):
+        return 1.0
+    role = "pitching" if getattr(card, "is_hitter", True) is False else "hitting"
+    return float(your_weight_map.get(f"{role}:{mlb_id}", 1.0))
+
+
+def _attach_card_your_overall_fields(card: Card, your_weight_map: dict[str, float]) -> None:
+    weight = _your_weight_for_card(card, your_weight_map)
+
+    meta_exact_raw = card.meta_overall if card.meta_overall is not None else card.meta_overall_rounded
+    meta_exact = None
+    if meta_exact_raw is not None:
+        try:
+            meta_exact = float(meta_exact_raw)
+        except (TypeError, ValueError):
+            meta_exact = None
+    your_exact = None if meta_exact is None else (meta_exact * weight)
+    your_rounded = _rounded_number(your_exact)
+
+    your_by_position: dict[str, float] = {}
+    for position, value in (card.meta_overall_by_position or {}).items():
+        try:
+            weighted = float(value) * weight
+        except (TypeError, ValueError):
+            continue
+        your_by_position[position] = weighted
+
+    card.your_overall = your_exact
+    card.your_overall_rounded = your_rounded
+    card.your_overall_by_position = your_by_position
+
+
 @router.get("/{card_id}", response_model=CardResponse)
-def get_card(card_id: str, db: Session = Depends(get_db)):
+def get_card(
+    card_id: str,
+    db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims_optional),
+):
     """
     gets a single card by its id |
     Response Time: ~190ms
@@ -185,9 +249,12 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
     card.user_prediction_count = user_prediction_count or 0
     card.predicted_ovr = predicted_ovr
     card.predicted_attributes = predicted_attributes
+    your_weight_map = _your_weight_map_for_claims(db, claims)
+    _attach_card_your_overall_fields(card, your_weight_map)
     return card
 
 
+@router.get("", response_model=List[CardResponse], include_in_schema=False)
 @router.get("/", response_model=List[CardResponse])
 def get_cards(
     is_hitter: Optional[bool] = Query(None),
@@ -211,6 +278,7 @@ def get_cards(
     limit: int = Query(50, le=100),
     offset: int = 0,
     db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims_optional),
 ):
     """
     gets multiple cards (with optional filters) |
@@ -347,6 +415,7 @@ def get_cards(
     cards = list(unique_by_id.values())
 
     selected_positions_for_metric: List[str] = position_values
+    your_weight_map = _your_weight_map_for_claims(db, claims)
     normalized_sort_by = (sort_by or "ovr").strip().lower()
     normalized_sort_dir = (sort_dir or ("desc" if desc else "asc")).strip().lower()
     reverse = normalized_sort_dir != "asc"
@@ -366,6 +435,12 @@ def get_cards(
             return -1 if value is None else value
         if normalized_sort_by == "ovr":
             return card.ovr if card.ovr is not None else -1
+        if normalized_sort_by == "your":
+            base = _metric_value(card, "meta", selected_positions_for_metric, include_secondary)
+            if base is None:
+                return -1
+            weighted = _rounded_number(float(base) * _your_weight_for_card(card, your_weight_map))
+            return -1 if weighted is None else weighted
 
         value = getattr(card, normalized_sort_by, None)
         rounded = _rounded_number(value)
@@ -379,6 +454,9 @@ def get_cards(
         cards.sort(key=sort_key, reverse=reverse)
     else:
         cards.sort(key=lambda card: card.ovr if card.ovr is not None else -1, reverse=desc)
+
+    for card in cards:
+        _attach_card_your_overall_fields(card, your_weight_map)
 
     start = max(0, offset)
     end = start + max(0, limit)

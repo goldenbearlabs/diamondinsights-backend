@@ -159,6 +159,10 @@ class Router:
                             case "show_profile_stats_updater":
                                 from apps.jobs.show_profile_refresh import ShowProfileStatsUpdater
                                 ShowProfileStatsUpdater().run(session)
+
+                            case "your_ovr_sync":
+                                from apps.jobs.your_ovr_sync import YourOvrSync
+                                YourOvrSync().run(session)
                             
                             case _:
                                 raise ValueError(f"Unknown job type: {payload.job_type}")

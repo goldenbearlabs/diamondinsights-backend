@@ -38,6 +38,7 @@ class FakeQueue:
         ("chat_cleaner", {}, {}),
         ("image_cleaner", {}, {}),
         ("show_profile_stats_updater", {}, {}),
+        ("your_ovr_sync", {}, {}),
     ],
 )
 def test_job_pusher_methods_enqueue(method, kwargs, expected_args, monkeypatch):

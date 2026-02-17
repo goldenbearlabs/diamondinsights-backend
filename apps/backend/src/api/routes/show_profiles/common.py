@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 from io import BytesIO
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Sequence
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -33,50 +33,57 @@ def _to_float(v) -> Optional[float]:
         return None
 
 
-def _load_pas_df(spaces: SpacesConnector, key: str) -> pd.DataFrame:
+_DEFAULT_PAS_COLUMNS: list[str] = [
+    "game_id",
+    "result",
+    "is_strikeout",
+    "is_sac_fly",
+    "is_sac_bunt",
+    "runs_scored",
+    "rbi",
+    "is_double_play",
+    "is_perfect_perfect",
+    "batted_ball_type",
+    "hit_direction",
+    "fielder_pos",
+    "batter_side",
+    "pitcher_throws",
+    "k_timing",
+    "k_is_chase",
+    "k_is_looking",
+    "k_loc_height",
+    "k_loc_width",
+    "difficulty_id",
+    "ballpark_id",
+    "batter_mlb_id",
+    "pitcher_mlb_id",
+    "k_pitch_type",
+    "is_out",
+    "is_error",
+    "times_seen_pitcher",
+    "num_pitchers",
+    "num_abs_with_hitter",
+    "outs_before",
+    "runner_on_first",
+    "runner_on_second",
+    "runner_on_third",
+    "home_profile_username",
+    "away_profile_username",
+    "home_team_id",
+    "away_team_id",
+    "home_name",
+    "away_name",
+    "is_home_batting",
+]
+
+
+def _load_pas_df(
+    spaces: SpacesConnector,
+    key: str,
+    desired_columns: Optional[Sequence[str]] = None,
+) -> pd.DataFrame:
     raw = spaces.get_bytes(key)
-    desired = [
-        "game_id",
-        "result",
-        "is_strikeout",
-        "is_sac_fly",
-        "is_sac_bunt",
-        "runs_scored",
-        "rbi",
-        "is_double_play",
-        "is_perfect_perfect",
-        "batted_ball_type",
-        "hit_direction",
-        "fielder_pos",
-        "batter_side",
-        "pitcher_throws",
-        "k_timing",
-        "k_is_chase",
-        "k_is_looking",
-        "k_loc_height",
-        "k_loc_width",
-        "difficulty_id",
-        "ballpark_id",
-        "batter_mlb_id",
-        "pitcher_mlb_id",
-        "k_pitch_type",
-        "is_out",
-        "is_error",
-        "times_seen_pitcher",
-        "num_pitchers",
-        "num_abs_with_hitter",
-        "outs_before",
-        "runner_on_first",
-        "runner_on_second",
-        "runner_on_third",
-        "home_profile_username",
-        "away_profile_username",
-        "home_team_id",
-        "away_team_id",
-        "home_name",
-        "away_name",
-        "is_home_batting",
-    ]
+    desired = list(desired_columns) if desired_columns is not None else list(_DEFAULT_PAS_COLUMNS)
     buf = BytesIO(raw)
     parquet = pq.ParquetFile(buf)
     available = set(parquet.schema.names)
@@ -104,6 +111,13 @@ def _load_facts_df_for_username(username: str) -> pd.DataFrame:
     spaces = SpacesConnector(cfg)
     key = _resolve_facts_key(spaces, username)
     return _load_pas_df(spaces, key)
+
+
+def _load_facts_df_for_username_columns(username: str, columns: Sequence[str]) -> pd.DataFrame:
+    cfg = SpacesConfig.from_env()
+    spaces = SpacesConnector(cfg)
+    key = _resolve_facts_key(spaces, username)
+    return _load_pas_df(spaces, key, desired_columns=columns)
 
 
 def _filter_df_by_pitcher(df: pd.DataFrame, pitcher_mlb_id: Optional[int]) -> pd.DataFrame:
