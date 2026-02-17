@@ -16,16 +16,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { getDownloadURL, ref } from "firebase/storage";
 import { sendPasswordResetEmail } from "firebase/auth";
 
 import { ApiError, apiGetAuth, apiPostAuth, apiPutAuth } from "../../src/lib/api";
-import { auth, storage } from "../../src/lib/firebase";
-import { withCacheBuster } from "../../src/lib/profileImage";
+import { auth } from "../../src/lib/firebase";
+import { invalidateAvatarCache } from "../../src/lib/profileImage";
 import { uploadProfileImage } from "../../src/lib/storage";
+import { Avatar } from "../../src/components/Avatar";
 import { theme } from "../../src/theme/colors";
+import { useRouter } from "expo-router";
 
-const DEFAULT_PROFILE = require("../../assets/images/default_profile.png");
+const STUB_ICON = require("../../assets/images/stub.png");
 
 type UserProfile = {
   id: number;
@@ -56,17 +57,46 @@ type ShowProfile = {
   }>;
 };
 
+type PortfolioHolding = {
+  card_id: string;
+  quantity: number;
+  avg_price: number | null;
+  card: {
+    id: string;
+    name: string;
+    baked_img: string;
+    ovr: number;
+    predicted_ovr: number | null;
+  };
+};
+
+type UserPortfolio = {
+  id: number;
+  name: string;
+  is_public: boolean;
+  holdings: PortfolioHolding[];
+};
+
+const formatPortfolioStubs = (n: number): string => {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+};
+
 export default function AccountScreen() {
   const params = useLocalSearchParams<{ userId?: string | string[] }>();
   const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
+  const router = useRouter();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [showProfile, setShowProfile] = useState<ShowProfile | null>(null);
   const [showLoading, setShowLoading] = useState(false);
   const [showError, setShowError] = useState<string | null>(null);
+  const [portfolioData, setPortfolioData] = useState<UserPortfolio | null>(null);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"Investing" | "Gameplay">("Gameplay");
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -111,29 +141,6 @@ export default function AccountScreen() {
   }, [userId]);
 
   useEffect(() => {
-    let active = true;
-
-    const loadImage = async () => {
-      if (!profile?.profile_img_path) {
-        setProfileImageUri(null);
-        return;
-      }
-      try {
-        const url = await getDownloadURL(ref(storage, profile.profile_img_path));
-        if (active) setProfileImageUri(withCacheBuster(url));
-      } catch {
-        if (active) setProfileImageUri(null);
-      }
-    };
-
-    loadImage();
-
-    return () => {
-      active = false;
-    };
-  }, [profile?.profile_img_path]);
-
-  useEffect(() => {
     if (!profile) return;
     let active = true;
 
@@ -165,6 +172,45 @@ export default function AccountScreen() {
       active = false;
     };
   }, [profile?.id, profile?.is_me]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPortfolio = async () => {
+      if (!profile) return;
+      setPortfolioLoading(true);
+      setPortfolioError(null);
+      try {
+        const path = profile.is_me 
+          ? "/portfolios/me" 
+          : `/users/${profile.id}/portfolio`;
+        const data = await apiGetAuth<UserPortfolio>(path);
+        if (!active) return;
+        setPortfolioData(data);
+      } catch (err: any) {
+        if (!active) return;
+        if (err instanceof ApiError && err.status === 403) {
+          setPortfolioData(null);
+          setPortfolioError("private");
+        } else if (err instanceof ApiError && err.status === 404) {
+          setPortfolioData(null);
+          setPortfolioError("none");
+        } else {
+          setPortfolioError(err?.message ?? "Failed to load portfolio");
+        }
+      } finally {
+        if (active) setPortfolioLoading(false);
+      }
+    };
+
+    if (activeTab === "Investing") {
+      loadPortfolio();
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.id, profile?.is_me, activeTab]);
 
   const openSettings = () => {
     if (!profile) return;
@@ -264,12 +310,7 @@ export default function AccountScreen() {
       const updated = await apiPutAuth<UserProfile>("/users/me", updates);
       setProfile(updated);
       if (newPhotoUri) {
-        try {
-          const url = await getDownloadURL(ref(storage, updated.profile_img_path));
-          setProfileImageUri(withCacheBuster(url));
-        } catch {
-          setProfileImageUri(newPhotoUri);
-        }
+        invalidateAvatarCache(updated.profile_img_path);
         DeviceEventEmitter.emit("profile-image-updated");
       }
       setSettingsOpen(false);
@@ -333,10 +374,9 @@ export default function AccountScreen() {
           <>
             <View style={styles.profileHeader}>
               <View style={styles.avatarFrame}>
-                <Image
-                  source={profileImageUri ? { uri: profileImageUri } : DEFAULT_PROFILE}
-                  style={styles.avatarLarge}
-                  onError={() => setProfileImageUri(null)}
+                <Avatar
+                  firebasePath={profile.profile_img_path}
+                  size={120}
                 />
               </View>
               <View style={styles.profileInfo}>
@@ -395,7 +435,67 @@ export default function AccountScreen() {
 
             <View style={styles.tabCard}>
               {activeTab === "Investing" ? (
-                <Text style={styles.sectionText}>Coming soon.</Text>
+                portfolioLoading ? (
+                  <View style={styles.loadingInline}>
+                    <ActivityIndicator color={theme.colors.text} />
+                  </View>
+                ) : portfolioError === "private" ? (
+                  <View style={styles.portfolioPrivateContainer}>
+                    <Ionicons name="lock-closed" size={24} color="rgba(255,255,255,0.2)" />
+                    <Text style={styles.sectionText}>
+                      {profile?.display_name}'s portfolio is private
+                    </Text>
+                  </View>
+                ) : portfolioError === "none" ? (
+                  <Text style={styles.sectionText}>No portfolio found</Text>
+                ) : portfolioError ? (
+                  <Text style={styles.errorText}>{portfolioError}</Text>
+                ) : portfolioData ? (
+                  <TouchableOpacity
+                    style={styles.portfolioOverview}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      if (profile?.is_me) {
+                        router.push("/(app)/portfolio");
+                      } else if (profile) {
+                        router.push({
+                          pathname: "/portfolio/[userId]",
+                          params: {
+                            userId: profile.id.toString(),
+                            username: profile.display_name,
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    <View style={styles.portfolioOverviewRow}>
+                      <View style={styles.portfolioOverviewStat}>
+                        <Text style={styles.portfolioOverviewLabel}>Total Invested</Text>
+                        <View style={styles.portfolioOverviewValueRow}>
+                          <Image source={STUB_ICON} style={styles.stubIconSmall} />
+                          <Text style={styles.portfolioOverviewValue}>
+                            {formatPortfolioStubs(
+                              portfolioData.holdings.reduce(
+                                (sum, h) => sum + h.quantity * (h.avg_price ?? 0),
+                                0
+                              )
+                            )}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.portfolioOverviewDivider} />
+                      <View style={styles.portfolioOverviewStat}>
+                        <Text style={styles.portfolioOverviewLabel}>Total Cards</Text>
+                        <Text style={styles.portfolioOverviewValue}>
+                          {portfolioData.holdings.length}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
+                    </View>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.sectionText}>No investments yet</Text>
+                )
               ) : showLoading ? (
                 <View style={styles.loadingInline}>
                   <ActivityIndicator color={theme.colors.text} />
@@ -920,5 +1020,50 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 13,
     fontWeight: "700",
+  },
+  portfolioPrivateContainer: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+  },
+  portfolioOverview: {
+    marginTop: 4,
+  },
+  portfolioOverviewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  portfolioOverviewStat: {
+    flex: 1,
+    alignItems: "center",
+  },
+  portfolioOverviewLabel: {
+    color: theme.colors.muted,
+    fontSize: 10,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  portfolioOverviewValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  portfolioOverviewValue: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  portfolioOverviewDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  stubIconSmall: {
+    width: 14,
+    height: 14,
+    resizeMode: "contain",
   },
 });

@@ -16,10 +16,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { getDownloadURL, ref } from "firebase/storage";
 import { ApiError, apiGet, apiGetAuth } from "../../src/lib/api";
-import { storage } from "../../src/lib/firebase";
-import { useProfileImageUri } from "../../src/lib/profileImage";
+import { auth } from "../../src/lib/firebase";
+import { useProfileImageUri, resolveAvatarUrl } from "../../src/lib/profileImage";
+import { Avatar } from "../../src/components/Avatar";
 import {
   HitDataSection,
   type HitDataMap,
@@ -28,8 +28,6 @@ import {
 } from "../../src/components/HitDataSection";
 import { StrikeoutMap } from "../../src/components/StrikeoutMap";
 import { theme } from "../../src/theme/colors";
-
-const DEFAULT_PROFILE = require("../../assets/images/default_profile.png");
 
 type ShowProfile = {
   username: string;
@@ -616,7 +614,7 @@ type PitchingCardSortKey = PitchingCardColumn["key"];
 
 export default function GameplayStatsScreen() {
   const { width } = useWindowDimensions();
-  const { profileUri, setProfileUri } = useProfileImageUri();
+  useProfileImageUri(); // keep subscription active for cache warming
   const router = useRouter();
   const localParams = useLocalSearchParams<{
     viewUsername?: string | string[];
@@ -1104,10 +1102,9 @@ export default function GameplayStatsScreen() {
     const entries = await Promise.all(
       pending.map(async (user) => {
         try {
-          const raw = user.profile_img_url ?? "";
-          const url = raw.startsWith("http") ? raw : await getDownloadURL(ref(storage, raw));
+          const url = await resolveAvatarUrl(user.profile_img_url ?? "");
           const key = getSearchKey(user);
-          return key ? ([key, url] as const) : null;
+          return key && url ? ([key, url] as const) : null;
         } catch {
           return null;
         }
@@ -1689,7 +1686,6 @@ export default function GameplayStatsScreen() {
   const username =
     resolvedUsername ??
     (loading ? "Loading..." : "Not linked");
-  const activeProfileUri = isSelfView ? profileUri : viewProfileImage;
   const detailRows = useMemo(
     () => [
       { label: "Games Played", value: String(gameSummary?.games_played ?? 0) },
@@ -2214,14 +2210,14 @@ export default function GameplayStatsScreen() {
         </View>
 
         <TouchableOpacity style={styles.profileTab} onPress={() => setSearchOpen(true)}>
-          <Image
-            source={activeProfileUri ? { uri: activeProfileUri } : DEFAULT_PROFILE}
-            style={styles.profileImage}
-            resizeMode="cover"
-            onError={() => {
-              if (isSelfView) setProfileUri(null);
-            }}
-          />
+          <View style={styles.profileImageWrap}>
+            <Avatar
+              firebasePath={isSelfView
+                ? (auth.currentUser?.uid ? `users/${auth.currentUser.uid}/profile.jpg` : null)
+                : (viewProfileImage || null)}
+              size={32}
+            />
+          </View>
           <View style={styles.profileText}>
             <Text style={styles.profileLabel}>MLB The Show</Text>
             <Text style={styles.profileName} numberOfLines={1}>
@@ -2722,10 +2718,14 @@ export default function GameplayStatsScreen() {
                   style={styles.searchRow}
                   onPress={() => handleSelectUser(null)}
                 >
-                  <Image
-                    source={profileUri ? { uri: profileUri } : DEFAULT_PROFILE}
-                    style={styles.searchAvatar}
-                  />
+                  <View style={styles.searchAvatarWrap}>
+                    <Avatar
+                      firebasePath={auth.currentUser?.uid ? `users/${auth.currentUser.uid}/profile.jpg` : null}
+                      size={30}
+                      borderColor="rgba(255, 255, 255, 0.12)"
+                      borderWidth={1}
+                    />
+                  </View>
                   <View style={styles.searchText}>
                     <Text style={styles.searchName}>My Stats</Text>
                     <Text style={styles.searchMeta}>View your profile</Text>
@@ -2753,10 +2753,14 @@ export default function GameplayStatsScreen() {
                       style={styles.searchRow}
                       onPress={() => handleSelectUser(user)}
                     >
-                      <Image
-                        source={image ? { uri: image } : DEFAULT_PROFILE}
-                        style={styles.searchAvatar}
-                      />
+                      <View style={styles.searchAvatarWrap}>
+                        <Avatar
+                          firebasePath={user.profile_img_url}
+                          size={30}
+                          borderColor="rgba(255, 255, 255, 0.12)"
+                          borderWidth={1}
+                        />
+                      </View>
                       <View style={styles.searchText}>
                         <Text style={styles.searchName}>{user.username}</Text>
                         <Text style={styles.searchMeta}>
@@ -4809,10 +4813,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
-  profileImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  profileImageWrap: {
   },
   profileText: {
     maxWidth: 200,
@@ -6089,13 +6090,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148, 163, 184, 0.14)",
   },
-  searchAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  searchAvatarWrap: {
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
   },
   searchText: {
     flex: 1,
