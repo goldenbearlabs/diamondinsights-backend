@@ -5,9 +5,17 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
+from redis import Redis
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from src.core.cache import (
+    CACHE_DEFAULT_TTL_SEC,
+    build_cache_key,
+    get_cache_client,
+    get_cached_json,
+    set_cached_json,
+)
 from shared.db.database import get_db
 from shared.db.models import Card, Users
 
@@ -71,6 +79,7 @@ def search(
     cards_only: bool = Query(default=False),
     limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> SearchResponse:
     q_norm = _normalize_search(q)
     if not q_norm:
@@ -83,9 +92,14 @@ def search(
     elif cards_only and not users_only:
         search_users = False
 
+    cache_key = build_cache_key("search", q_norm, users_only, cards_only, limit)
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return SearchResponse.model_validate(cached)
+
     users_out: List[UserSearchOut] = []
     cards_out: List[CardSearchOut] = []
-
+ 
     if search_users:
         users_stmt = (
             select(Users)
@@ -110,4 +124,6 @@ def search(
         cards = db.scalars(cards_stmt).all()
         cards_out = [CardSearchOut.from_orm(c) for c in cards]
 
-    return SearchResponse(users=users_out, cards=cards_out)
+    response = SearchResponse(users=users_out, cards=cards_out)
+    set_cached_json(cache, cache_key, response.model_dump(mode="json"), ttl_sec=CACHE_DEFAULT_TTL_SEC)
+    return response

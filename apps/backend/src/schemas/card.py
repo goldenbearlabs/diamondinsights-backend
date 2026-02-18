@@ -2,7 +2,6 @@ from pydantic import BaseModel
 from src.schemas.quirk import QuirkResponse
 from typing import Any, Dict, Optional
 
-# This class defines the JSON structure that gets returned
 class CardResponse(BaseModel):
     id: str
     name: str
@@ -43,7 +42,6 @@ class CardResponse(BaseModel):
     mlb_id: Optional[int] = None
     year: int
 
-    # pitching attributes
     stamina: int
     pitching_clutch: int
     hits_per_bf: int
@@ -54,7 +52,6 @@ class CardResponse(BaseModel):
     pitch_control: int
     pitch_movement: int
 
-    #hitting attributes
     contact_left: int
     contact_right: int
     power_left:int
@@ -66,7 +63,6 @@ class CardResponse(BaseModel):
     drag_bunting_ability: int
     hitting_durability: int
 
-    #fielding
     fielding_durability: int
     fielding_ability: int
     arm_strength: int
