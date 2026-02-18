@@ -134,3 +134,82 @@ export interface UpdateHoldingBody {
 export function updatePortfolioHolding(cardId: string, body: UpdateHoldingBody) {
   return apiRequest<void>("PUT", `/portfolios/me/holdings/${cardId}`, body, { auth: true });
 }
+
+// ── Flipping ───────────────────────────────────────────────────────
+
+export type FlippingSortBy =
+  | "profit"
+  | "spread"
+  | "profit_per_min"
+  | "margin"
+  | "orders"
+  | "buys"
+  | "sells"
+  | "buys_sells"
+  | "buy"
+  | "sell"
+  | "ovr"
+  | "name";
+
+export interface FlippingRow {
+  card_id: string;
+  name: string | null;
+  team: string | null;
+  ovr: number;
+  series: string | null;
+  year: number | null;
+  baked_img: string | null;
+  best_sell_price: number;
+  best_buy_price: number;
+  effective_buy_price: number;
+  quicksell_price: number;
+  uses_quicksell_buy: boolean;
+  after_tax_sell_price: number;
+  spread: number;
+  profit: number;
+  profit_margin_pct: number | null;
+  orders_1h: number;
+  buys_1h: number;
+  sells_1h: number;
+  avg_completed_price_1h: number | null;
+  latest_completed_order_at: string | null;
+}
+
+export interface GetFlippingRowsParams {
+  limit?: number;
+  offset?: number;
+  sort_by?: FlippingSortBy;
+  sort_dir?: "asc" | "desc";
+  profitable_only?: boolean;
+  min_buy?: number;
+  max_buy?: number;
+  min_sell?: number;
+  max_sell?: number;
+  min_ovr?: number;
+  max_ovr?: number;
+  series?: string;
+  name?: string;
+}
+
+export function getFlippingRows(params: GetFlippingRowsParams = {}) {
+  const query = new URLSearchParams();
+
+  if (params.limit != null) query.set("limit", String(params.limit));
+  if (params.offset != null) query.set("offset", String(params.offset));
+  if (params.sort_by) query.set("sort_by", params.sort_by);
+  if (params.sort_dir) query.set("sort_dir", params.sort_dir);
+  if (params.profitable_only != null) {
+    query.set("profitable_only", params.profitable_only ? "true" : "false");
+  }
+  if (params.min_buy != null) query.set("min_buy", String(params.min_buy));
+  if (params.max_buy != null) query.set("max_buy", String(params.max_buy));
+  if (params.min_sell != null) query.set("min_sell", String(params.min_sell));
+  if (params.max_sell != null) query.set("max_sell", String(params.max_sell));
+  if (params.min_ovr != null) query.set("min_ovr", String(params.min_ovr));
+  if (params.max_ovr != null) query.set("max_ovr", String(params.max_ovr));
+  if (params.series) query.set("series", params.series);
+  if (params.name) query.set("name", params.name);
+
+  const search = query.toString();
+  return apiGet<FlippingRow[]>(`/flipping${search ? `?${search}` : ""}`);
+}
