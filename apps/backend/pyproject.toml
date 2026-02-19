@@ -1,3 +1,25 @@
 [project]
-authors = [{ name = "Luke Wismer", email="luke.wismer@goldenbearlabs.com"},
-            {name = "Ethan Carer", email="ethan.carter@goldenbearlabs.com"}]
+name = "diamondinsights-backend"
+description = "FastAPI backend for our digital ocean server"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic==1.17.2",
+    "boto3==1.42.41",
+    "fakeredis>=2.34.0",
+    "fastapi==0.125.0",
+    "firebase-admin==7.1.0",
+    "numpy==2.4.0",
+    "pandas==2.3.3",
+    "psycopg2-binary==2.9.11",
+    "pyarrow==23.0.0",
+    "pydantic[email]==2.12.5",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "python-dotenv==1.2.1",
+    "redis==7.1.0",
+    "requests==2.32.5",
+    "sqlalchemy==2.0.44",
+    "uvicorn==0.38.0",
+    "websockets>=10.4",
+]
