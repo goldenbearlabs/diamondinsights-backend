@@ -9,6 +9,7 @@ import PredictionAttributeBar from '../../predictionscomponents/PredictionAttrib
 import { theme } from '../../theme/colors';
 import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
+import Svg, { Path, G } from 'react-native-svg';
 import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
 import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
 import { MarketSpreadChart } from '../../components/playerdetails/MarketSpreadChart';
@@ -58,6 +59,7 @@ export default function PlayerDetailsScreen() {
   const [loadingPred, setLoadingPred] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [activeTab, setActiveTab] = useState<'attributes' | 'market' | 'stats' | 'pro'>('attributes');
+  const [activeAttrTab, setActiveAttrTab] = useState<'attributes' | 'quirks' | 'pitches'>('attributes');
   
   const [buyPrice, setBuyPrice] = useState<number | null>(null);
   const [sellPrice, setSellPrice] = useState<number | null>(null);
@@ -70,6 +72,10 @@ export default function PlayerDetailsScreen() {
   type CardQuirk = { card_id: string; name: string; description: string; img: string };
   const [quirks, setQuirks] = useState<CardQuirk[]>([]);
   const [loadingQuirks, setLoadingQuirks] = useState(false);
+
+  type Pitch = { card_id: string; name: string; speed: number; control: number; movement: number };
+  const [pitches, setPitches] = useState<Pitch[]>([]);
+  const [loadingPitches, setLoadingPitches] = useState(false);
 
   type SplitStats = { split: string; [key: string]: any };
   type SeasonStats = {
@@ -164,6 +170,17 @@ export default function PlayerDetailsScreen() {
       .finally(() => setLoadingStats(false));
   }, [card?.id, activeWindow]);
 
+  useEffect(() => {
+    if (!card?.id) return;
+    // reset inner attributes tab when card changes
+    setActiveAttrTab('attributes');
+    setLoadingPitches(true);
+    apiGet<Pitch[]>(`/pitches/${card.id}`)
+      .then(res => setPitches(res))
+      .catch(() => setPitches([]))
+      .finally(() => setLoadingPitches(false));
+  }, [card?.id]);
+
   const SPLIT_LABELS: Record<string, string> = {
     vslhp: 'vs LHP', vsrhp: 'vs RHP', vslhb: 'vs LHB', vsrhb: 'vs RHB', risp: 'RISP', overall: 'Overall',
   };
@@ -172,6 +189,41 @@ export default function PlayerDetailsScreen() {
     if (val == null) return '-';
     if (decimals === 3) return val.toFixed(3).replace(/^0/, '');
     return val.toFixed(decimals);
+  };
+
+  const PitchGauge = ({ value, color, label }: { value: number; color: string; label: string }) => {
+    const radius = 36;
+    const strokeWidth = 10;
+    const padding = Math.ceil(strokeWidth / 2) + 2;
+    const cx = radius + padding;
+    const cy = radius + padding;
+    const width = cx * 2;
+    const height = cy + 4;
+    const max = 99;
+    const clamped = Math.max(0, Math.min(value, max));
+    const pct = clamped / max;
+
+    const arcLen = Math.PI * radius; // length of semicircle
+    const path = `M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}`;
+
+    return (
+      <View style={{ width: width, alignItems: 'center' }}>
+        <Svg width={width} height={height}>
+          <Path d={path} stroke="rgba(255,255,255,0.08)" strokeWidth={strokeWidth} fill="none" strokeLinecap="round" />
+          <Path
+            d={path}
+            stroke={color}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={`${arcLen} ${arcLen}`}
+            strokeDashoffset={arcLen * (1 - pct)}
+          />
+        </Svg>
+        <Text style={{ color: 'white', fontWeight: '700', marginTop: 8 }}>{label}</Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{value}</Text>
+      </View>
+    );
   };
 
   const handleInfoPress = () => {
@@ -263,6 +315,8 @@ export default function PlayerDetailsScreen() {
             </View>
           </View>
 
+          {/* thin divider under main tabs */}
+          
           {/* COMMENTS SECTION */}
           <CardCommentsSection cardId={card.id} />
 
@@ -382,92 +436,133 @@ export default function PlayerDetailsScreen() {
               </View>
             </TouchableOpacity>
           </View>
+          <View style={styles.tabsDivider} />
 
           {activeTab === 'attributes' && (
             <>
               <Text style={styles.sectionTitle}>Attributes</Text>
-              <View style={styles.glassCard}>
-                
-                {/* pitching attributes */}
+
+              {/* Inner attribute tabs: Attributes | Quirks | Pitches (pitchers only) */}
+              <View style={[styles.windowFilterRow, styles.innerTabPills]}>
+                <TouchableOpacity style={[styles.windowPill, activeAttrTab === 'attributes' && styles.windowPillActive]} onPress={() => setActiveAttrTab('attributes')}>
+                  <Text style={[styles.windowPillText, activeAttrTab === 'attributes' && styles.windowPillTextActive]}>Attributes</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.windowPill, activeAttrTab === 'quirks' && styles.windowPillActive]} onPress={() => setActiveAttrTab('quirks')}>
+                  <Text style={[styles.windowPillText, activeAttrTab === 'quirks' && styles.windowPillTextActive]}>Quirks</Text>
+                </TouchableOpacity>
                 {showPitching && (
-                  <>
-                    <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
-                    <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
-                    <AttributeBar label="Stamina" value={card.stamina || 0} barColor={PITCHING_COLOR} />
-                    <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} barColor={PITCHING_COLOR} />
-                    <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} /> 
-                    <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
-                    <AttributeBar label="BB/9" value={card.bb_per_bf || 0} barColor={PITCHING_COLOR} />
-                    {showBatting && <View style={{ height: 24 }} />}
-                  </>
+                  <TouchableOpacity style={[styles.windowPill, activeAttrTab === 'pitches' && styles.windowPillActive]} onPress={() => setActiveAttrTab('pitches')}>
+                    <Text style={[styles.windowPillText, activeAttrTab === 'pitches' && styles.windowPillTextActive]}>Pitches</Text>
+                  </TouchableOpacity>
                 )}
-
-                {/* batting */}
-                {showBatting && (
-                   <>
-                  <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
-                  <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
-                    <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Contact</Text>
-                    <AttributeBar label="Contact R" value={card.contact_right || 0} barColor={BATTING_COLOR} />
-                    <AttributeBar label="Contact L" value={card.contact_left || 0} barColor={BATTING_COLOR} />
-                    <AttributeBar label="Vision" value={card.plate_vision || 0} barColor={BATTING_COLOR} />
-                    <AttributeBar label="Clutch" value={card.batting_clutch || 0} barColor={BATTING_COLOR} />
-                    <View style={{ height: 12 }} />
-                    <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Power</Text>
-                    <AttributeBar label="Power R" value={card.power_right || 0} barColor={BATTING_COLOR} />
-                    <AttributeBar label="Power L" value={card.power_left || 0} barColor={BATTING_COLOR} />
-                    <View style={{ height: 16 }} />
-                  </>
-                )}
-
-                {/* Fielding  */}
-                 <Text style={[styles.subHeader, { color: FIELDING_COLOR }]}>Fielding</Text>
-                 <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
-                 <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} />
-                 <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} />
-                 <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} />
-                 <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
-                 <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} />
-
-                {/* Running (hitters only) */}
-                {card.is_hitter && (
-                  <>
-                    <View style={{ height: 16 }} />
-                    <Text style={[styles.subHeader, { color: RUNNING_COLOR }]}>Running</Text>
-                    <View style={[styles.subHeaderDivider, { backgroundColor: RUNNING_COLOR }]} />
-                    <AttributeBar label="Speed" value={card.speed || 0} barColor={RUNNING_COLOR} />
-                    <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} />
-                    <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} />
-                  </>
-                )}
-
               </View>
 
-              {/* Quirks */}
-              <Text style={styles.sectionTitle}>Quirks</Text>
-              <View style={styles.glassCard}>
-                {loadingQuirks ? (
-                  <ActivityIndicator color="white" />
-                ) : quirks.length === 0 ? (
-                  <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 8 }}>No quirks</Text>
-                ) : (
-                  quirks.map((quirk, index) => (
-                    <View
-                      key={quirk.name}
-                      style={[
-                        styles.quirkRow,
-                        index < quirks.length - 1 && styles.quirkRowBorder,
-                      ]}
-                    >
-                      <Image source={{ uri: quirk.img }} style={styles.quirkImg} />
-                      <View style={styles.quirkText}>
-                        <Text style={styles.quirkName}>{quirk.name}</Text>
-                        <Text style={styles.quirkDescription}>{quirk.description}</Text>
+              {/* Attributes inner tab */}
+              {activeAttrTab === 'attributes' && (
+                <View style={styles.glassCard}>
+                  {/* pitching attributes */}
+                  {showPitching && (
+                    <>
+                      <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                      <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                      <AttributeBar label="Stamina" value={card.stamina || 0} barColor={PITCHING_COLOR} />
+                      <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} barColor={PITCHING_COLOR} />
+                      <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} /> 
+                      <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
+                      <AttributeBar label="BB/9" value={card.bb_per_bf || 0} barColor={PITCHING_COLOR} />
+                      {showBatting && <View style={{ height: 24 }} />}
+                    </>
+                  )}
+
+                  {/* batting */}
+                  {showBatting && (
+                    <>
+                      <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                      <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                      <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Contact</Text>
+                      <AttributeBar label="Contact R" value={card.contact_right || 0} barColor={BATTING_COLOR} />
+                      <AttributeBar label="Contact L" value={card.contact_left || 0} barColor={BATTING_COLOR} />
+                      <AttributeBar label="Vision" value={card.plate_vision || 0} barColor={BATTING_COLOR} />
+                      <AttributeBar label="Clutch" value={card.batting_clutch || 0} barColor={BATTING_COLOR} />
+                      <View style={{ height: 12 }} />
+                      <Text style={[styles.subHeaderSmall, { color: BATTING_COLOR }]}>Power</Text>
+                      <AttributeBar label="Power R" value={card.power_right || 0} barColor={BATTING_COLOR} />
+                      <AttributeBar label="Power L" value={card.power_left || 0} barColor={BATTING_COLOR} />
+                      <View style={{ height: 16 }} />
+                    </>
+                  )}
+
+                  {/* Fielding  */}
+                  <Text style={[styles.subHeader, { color: FIELDING_COLOR }]}>Fielding</Text>
+                  <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
+                  <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} />
+                  <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} />
+                  <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} />
+                  <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
+                  <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} />
+
+                  {/* Running (hitters only) */}
+                  {card.is_hitter && (
+                    <>
+                      <View style={{ height: 16 }} />
+                      <Text style={[styles.subHeader, { color: RUNNING_COLOR }]}>Running</Text>
+                      <View style={[styles.subHeaderDivider, { backgroundColor: RUNNING_COLOR }]} />
+                      <AttributeBar label="Speed" value={card.speed || 0} barColor={RUNNING_COLOR} />
+                      <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} />
+                      <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} />
+                    </>
+                  )}
+                </View>
+              )}
+
+              {/* Quirks inner tab */}
+              {activeAttrTab === 'quirks' && (
+                <View style={styles.glassCard}>
+                  {loadingQuirks ? (
+                    <ActivityIndicator color="white" />
+                  ) : quirks.length === 0 ? (
+                    <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 8 }}>No quirks</Text>
+                  ) : (
+                    quirks.map((quirk, index) => (
+                      <View
+                        key={quirk.name}
+                        style={[
+                          styles.quirkRow,
+                          index < quirks.length - 1 && styles.quirkRowBorder,
+                        ]}
+                      >
+                        <Image source={{ uri: quirk.img }} style={styles.quirkImg} />
+                        <View style={styles.quirkText}>
+                          <Text style={styles.quirkName}>{quirk.name}</Text>
+                          <Text style={styles.quirkDescription}>{quirk.description}</Text>
+                        </View>
                       </View>
-                    </View>
-                  ))
-                )}
-              </View>
+                    ))
+                  )}
+                </View>
+              )}
+
+              {/* Pitches inner tab (pitchers only) */}
+              {activeAttrTab === 'pitches' && showPitching && (
+                <View style={styles.glassCard}>
+                  {loadingPitches ? (
+                    <ActivityIndicator color="white" />
+                  ) : pitches.length === 0 ? (
+                    <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 8 }}>No pitch data</Text>
+                  ) : (
+                    pitches.map(p => (
+                      <View key={p.name} style={{ marginBottom: 12 }}>
+                        <Text style={[styles.subHeader, { textAlign: 'center', marginBottom: 8 }]}>{p.name}</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 8 }}>
+                          <PitchGauge label="Velocity" value={p.speed} color="#ef4444" />
+                          <PitchGauge label="Control" value={p.control} color="#60a5fa" />
+                          <PitchGauge label="Movement" value={p.movement} color="#a855f7" />
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </View>
+              )}
 
             </>
           )}
@@ -826,6 +921,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  innerTabPills: {
+    marginBottom: 14,
+  },
   windowPill: {
     flex: 1,
     paddingVertical: 7,
@@ -997,5 +1095,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop: 12,
     marginBottom: 8,
+  },
+  tabsDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 12,
   },
 });
