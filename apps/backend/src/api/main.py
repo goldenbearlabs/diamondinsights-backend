@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from src.api.routes import cards, listings, completed_orders, quirks, market_candles, mlb_game_batting_stats, \
                                     players, users, records, show_profiles, search, chat, card_predictions, user_predictions, \
-                                    card_comments, portfolios, flipping, mlb_season_stats
+                                    card_comments, portfolios, flipping, mlb_season_stats, pitches
 from src.core.config import *
 
 api_router = APIRouter()
@@ -25,3 +25,4 @@ api_router.include_router(user_predictions.router)
 api_router.include_router(card_comments.router)
 api_router.include_router(portfolios.router)
 api_router.include_router(flipping.router)
+api_router.include_router(pitches.router)
