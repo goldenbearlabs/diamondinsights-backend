@@ -1,4 +1,4 @@
-.PHONY: help up down ps logs logs-backend build test \
+.PHONY: help up down ps logs logs-backend build test backend-test \
 	migrate revision run-job training-data \
 	runner-up runner-down runner-ps runner-logs runner-restart runner-build runner-pull runner-update runner-install \
 	server-up server-down server-ps server-logs \
@@ -12,6 +12,7 @@ RUNNER_ENV ?= .env
 SERVER_ENV ?= .env
 MONITORING_ENV ?= .env
 JOB_ARGS ?=
+BACKEND_TEST_PATH ?= apps/backend/tests/unit
 
 COMPOSE_BASE = docker compose -f infra/docker/docker-compose.yml --env-file $(ENV_FILE)
 COMPOSE_RUNNER = docker compose -f infra/docker/docker-compose.runner.yml --env-file $(RUNNER_ENV)
@@ -23,6 +24,7 @@ help:
 	@printf "  make up|down|ps|logs|logs-backend|build\n"
 	@printf "  make migrate | revision REV_MSG='desc'\n"
 	@printf "  make run-job JOB_MODULE=apps.jobs.card_sync JOB_CLASS=CardSync [JOB_ARGS='reload_all_years=True']\n"
+	@printf "  make backend-test [BACKEND_TEST_PATH=apps/backend/tests]\n"
 	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|card_position_overall_sync|show_profile_stats_updater|show_game_refresh|show_game_agg|your_ovr_sync\n"
 	@printf "  make runner-up|runner-down|runner-ps|runner-logs\n"
 	@printf "  make server-up|server-down|server-ps|server-logs\n"
@@ -51,6 +53,9 @@ logs-backend:
 test:
 	python3 -m pytest
 	python3 scripts/update_test_coverage.py
+
+backend-test:
+	python3 -m pytest -c apps/backend/pytest.ini -q $(BACKEND_TEST_PATH)
 
 build:
 	$(COMPOSE_BASE) build
