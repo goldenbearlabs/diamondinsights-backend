@@ -118,6 +118,7 @@ shared-test-unit:
 	else \
 		$(UV_BACKEND) pytest -c $(SHARED_PYTEST_CONFIG) -q $(SHARED_UNIT_TEST_PATH) \
 			--cov=shared \
+			--cov-config=.coveragerc \
 			--cov-report=term-missing \
 			--cov-report=html:$(SHARED_COVERAGE_DIR)/unit-html; \
 	fi
