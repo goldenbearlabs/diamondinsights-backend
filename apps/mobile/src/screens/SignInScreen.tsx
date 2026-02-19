@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 
 import { auth } from "../lib/firebase";
 import { ensureBackendUser } from "../lib/userSync";
+import { toReadableAuthError } from "../lib/authErrors";
 import { theme } from "../theme/colors";
 
 export default function SignInScreen() {
@@ -29,8 +30,8 @@ export default function SignInScreen() {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
         await ensureBackendUser(cred.user);
       router.replace("/(app)");
-    } catch (e: any) {
-      setError(e?.message ?? "Sign in failed");
+    } catch (e: unknown) {
+      setError(toReadableAuthError(e, "Sign in failed"));
     } finally {
       setLoading(false);
     }

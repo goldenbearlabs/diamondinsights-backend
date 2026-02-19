@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   DeviceEventEmitter,
   Image,
   Modal,
@@ -14,17 +15,26 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { sendPasswordResetEmail } from "firebase/auth";
+import { sendPasswordResetEmail, signOut } from "firebase/auth";
 
-import { ApiError, apiGetAuth, apiPostAuth, apiPutAuth } from "../../src/lib/api";
+import {
+  ApiError,
+  apiDeleteAuth,
+  apiGetAuth,
+  apiPostAuth,
+  apiPutAuth,
+  getMyEntitlements,
+} from "../../src/lib/api";
+import type { EntitlementsMeResponse } from "../../src/lib/api";
+import { toReadableAuthError } from "../../src/lib/authErrors";
 import { auth } from "../../src/lib/firebase";
 import { invalidateAvatarCache } from "../../src/lib/profileImage";
 import { uploadProfileImage } from "../../src/lib/storage";
 import { Avatar } from "../../src/components/Avatar";
 import { theme } from "../../src/theme/colors";
-import { useRouter } from "expo-router";
+import { presentProPaywall } from "../../src/lib/revenuecat";
 
 const STUB_ICON = require("../../assets/images/stub.png");
 
@@ -34,6 +44,7 @@ type UserProfile = {
   email?: string | null;
   display_name: string;
   profile_img_path: string;
+  latest_points_total?: number | null;
   is_me: boolean;
 };
 
@@ -43,8 +54,8 @@ type ShowProfile = {
   games_played?: number | null;
   linked_at: string;
   last_refreshed_at: string;
-  online_stats: Array<{
-    year: string;
+  online_stats: {
+    year: number;
     wins?: number | null;
     losses?: number | null;
     hr?: number | null;
@@ -54,7 +65,7 @@ type ShowProfile = {
     era?: number | null;
     k_per_9?: number | null;
     whip?: number | null;
-  }>;
+  }[];
 };
 
 type PortfolioHolding = {
@@ -83,6 +94,11 @@ const formatPortfolioStubs = (n: number): string => {
   return n.toLocaleString();
 };
 
+const formatScore = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "-";
+  return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+};
+
 export default function AccountScreen() {
   const params = useLocalSearchParams<{ userId?: string | string[] }>();
   const userId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
@@ -98,9 +114,14 @@ export default function AccountScreen() {
   const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"Investing" | "Gameplay">("Gameplay");
+  const [entitlements, setEntitlements] = useState<EntitlementsMeResponse | null>(null);
+  const [entitlementsLoading, setEntitlementsLoading] = useState(false);
+  const [entitlementsError, setEntitlementsError] = useState<string | null>(null);
+  const [paywallLoading, setPaywallLoading] = useState(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -171,7 +192,7 @@ export default function AccountScreen() {
     return () => {
       active = false;
     };
-  }, [profile?.id, profile?.is_me]);
+  }, [profile, profile?.id, profile?.is_me]);
 
   useEffect(() => {
     let active = true;
@@ -210,7 +231,40 @@ export default function AccountScreen() {
     return () => {
       active = false;
     };
-  }, [profile?.id, profile?.is_me, activeTab]);
+  }, [profile, profile?.id, profile?.is_me, activeTab]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadEntitlements = async () => {
+      if (!profile?.is_me) {
+        setEntitlements(null);
+        setEntitlementsError(null);
+        setEntitlementsLoading(false);
+        return;
+      }
+
+      setEntitlementsLoading(true);
+      setEntitlementsError(null);
+      try {
+        const data = await getMyEntitlements();
+        if (!active) return;
+        setEntitlements(data);
+      } catch (err: any) {
+        if (!active) return;
+        setEntitlements(null);
+        setEntitlementsError(err?.message ?? "Failed to load entitlements");
+      } finally {
+        if (active) setEntitlementsLoading(false);
+      }
+    };
+
+    loadEntitlements();
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.id, profile?.is_me]);
 
   const openSettings = () => {
     if (!profile) return;
@@ -274,6 +328,23 @@ export default function AccountScreen() {
       }
     } finally {
       setLinking(false);
+    }
+  };
+
+  const openProPaywall = async () => {
+    setPaywallLoading(true);
+    setEntitlementsError(null);
+    try {
+      const paywall = await presentProPaywall();
+      if (paywall.purchasedOrRestored) {
+        setNotice("Purchase complete. Webhook sync may take a few seconds.");
+      }
+      const updated = await getMyEntitlements();
+      setEntitlements(updated);
+    } catch (err: any) {
+      setEntitlementsError(err?.message ?? "Failed to open paywall");
+    } finally {
+      setPaywallLoading(false);
     }
   };
 
@@ -342,9 +413,55 @@ export default function AccountScreen() {
     }
   };
 
-  const summaryStats =
-    showProfile?.online_stats?.find((row) => row.year === "Total") ??
-    showProfile?.online_stats?.[0];
+  const deleteAccount = async () => {
+    setDeletingAccount(true);
+    setNotice(null);
+    setModalError(null);
+    try {
+      await apiDeleteAuth<void>("/users/me");
+      await signOut(auth).catch(() => undefined);
+      setSettingsOpen(false);
+      router.replace("/(auth)/signin");
+    } catch (err: unknown) {
+      setModalError(toReadableAuthError(err, "Failed to delete account"));
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      "Delete account",
+      "This permanently deletes your account and data. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteAccount();
+          },
+        },
+      ],
+    );
+  };
+
+  const sortedOnlineStats = [...(showProfile?.online_stats ?? [])].sort((a, b) => a.year - b.year);
+  const summaryStats = sortedOnlineStats.length ? sortedOnlineStats[sortedOnlineStats.length - 1] : null;
+  const aggregateRecord = sortedOnlineStats.reduce(
+    (acc, row) => {
+      acc.wins += row.wins ?? 0;
+      acc.losses += row.losses ?? 0;
+      if (row.wins !== null && row.wins !== undefined) acc.hasWins = true;
+      if (row.losses !== null && row.losses !== undefined) acc.hasLosses = true;
+      return acc;
+    },
+    { wins: 0, losses: 0, hasWins: false, hasLosses: false },
+  );
+  const recordText =
+    aggregateRecord.hasWins || aggregateRecord.hasLosses
+      ? `${aggregateRecord.wins}-${aggregateRecord.losses}`
+      : "-";
   const formatStat = (value?: number | null) =>
     value === null || value === undefined ? "-" : String(value);
   const formatFloat = (value?: number | null, digits = 2) =>
@@ -383,20 +500,72 @@ export default function AccountScreen() {
                 <Text style={styles.nameLarge}>{profile.display_name}</Text>
                 <View style={styles.summaryRow}>
                   <View style={styles.summaryItem}>
-                    <Text style={[styles.summaryValue, styles.summaryValueAccent]}>100</Text>
-                    <Text style={styles.summaryLabel}>Rating</Text>
+                    <Text style={[styles.summaryValue, styles.summaryValueAccent]}>
+                      {formatScore(profile.latest_points_total)}
+                    </Text>
+                    <Text style={styles.summaryLabel}>Score</Text>
                   </View>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>
-                      {summaryStats
-                        ? `${formatStat(summaryStats.wins)}-${formatStat(summaryStats.losses)}`
-                        : "-"}
-                    </Text>
+                    <Text style={styles.summaryValue}>{recordText}</Text>
                     <Text style={styles.summaryLabel}>Record</Text>
                   </View>
                 </View>
               </View>
             </View>
+
+            {profile.is_me ? (
+              <View style={styles.proCard}>
+                <View style={styles.proHeader}>
+                  <Text style={styles.proTitle}>Diamond Pro</Text>
+                  <View
+                    style={[
+                      styles.proBadge,
+                      entitlements?.has_pro ? styles.proBadgeActive : styles.proBadgeInactive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.proBadgeText,
+                        entitlements?.has_pro ? styles.proBadgeTextActive : styles.proBadgeTextInactive,
+                      ]}
+                    >
+                      {entitlements?.has_pro ? "Active" : "Free"}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.proDescription}>
+                  {entitlements?.has_pro
+                    ? "Your Pro entitlement is active."
+                    : "Unlock Pro features with the RevenueCat paywall."}
+                </Text>
+                {entitlements?.pro_expires_at ? (
+                  <Text style={styles.proMeta}>
+                    Renews through {new Date(entitlements.pro_expires_at).toLocaleDateString()}
+                  </Text>
+                ) : null}
+                {entitlementsLoading ? (
+                  <View style={styles.loadingInline}>
+                    <ActivityIndicator color={theme.colors.text} />
+                  </View>
+                ) : null}
+                {entitlementsError ? <Text style={styles.errorText}>{entitlementsError}</Text> : null}
+
+                <TouchableOpacity
+                  style={[styles.proButton, paywallLoading && styles.proButtonDisabled]}
+                  disabled={paywallLoading}
+                  onPress={openProPaywall}
+                >
+                  <Text style={styles.proButtonText}>
+                    {paywallLoading
+                      ? "Opening..."
+                      : entitlements?.has_pro
+                        ? "Manage Subscription"
+                        : "Unlock Pro"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             <View style={styles.tabRow}>
               <TouchableOpacity
@@ -443,7 +612,7 @@ export default function AccountScreen() {
                   <View style={styles.portfolioPrivateContainer}>
                     <Ionicons name="lock-closed" size={24} color="rgba(255,255,255,0.2)" />
                     <Text style={styles.sectionText}>
-                      {profile?.display_name}'s portfolio is private
+                      {profile?.display_name} portfolio is private
                     </Text>
                   </View>
                 ) : portfolioError === "none" ? (
@@ -653,13 +822,23 @@ export default function AccountScreen() {
             {modalError ? <Text style={styles.errorText}>{modalError}</Text> : null}
 
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.resetButton} onPress={resetPassword} disabled={saving}>
+              <TouchableOpacity style={styles.resetButton} onPress={resetPassword} disabled={saving || deletingAccount}>
                 <Text style={styles.resetText}>Reset password</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={saving}>
+              <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={saving || deletingAccount}>
                 <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              style={[styles.deleteAccountButton, deletingAccount && styles.deleteAccountButtonDisabled]}
+              onPress={confirmDeleteAccount}
+              disabled={saving || deletingAccount}
+            >
+              <Text style={styles.deleteAccountText}>
+                {deletingAccount ? "Deleting account..." : "Delete account"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -791,6 +970,74 @@ const styles = StyleSheet.create({
   },
   summaryValueAccent: {
     color: "#fbbf24",
+  },
+  proCard: {
+    padding: theme.spacing.m,
+    borderRadius: 16,
+    backgroundColor: "rgba(251, 191, 36, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(251, 191, 36, 0.35)",
+    gap: 10,
+  },
+  proHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  proTitle: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  proBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  proBadgeActive: {
+    backgroundColor: "rgba(34,197,94,0.2)",
+    borderColor: "rgba(34,197,94,0.6)",
+  },
+  proBadgeInactive: {
+    backgroundColor: "rgba(148,163,184,0.16)",
+    borderColor: "rgba(148,163,184,0.45)",
+  },
+  proBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  proBadgeTextActive: {
+    color: "#22c55e",
+  },
+  proBadgeTextInactive: {
+    color: theme.colors.muted,
+  },
+  proDescription: {
+    color: theme.colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  proMeta: {
+    color: theme.colors.text,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  proButton: {
+    marginTop: 2,
+    borderRadius: 12,
+    paddingVertical: 11,
+    backgroundColor: "#fbbf24",
+    alignItems: "center",
+  },
+  proButtonDisabled: {
+    opacity: 0.75,
+  },
+  proButtonText: {
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: "800",
   },
   tabRow: {
     flexDirection: "row",
@@ -1018,6 +1265,22 @@ const styles = StyleSheet.create({
   },
   saveText: {
     color: "white",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  deleteAccountButton: {
+    borderRadius: 12,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.5)",
+    backgroundColor: "rgba(239,68,68,0.12)",
+    alignItems: "center",
+  },
+  deleteAccountButtonDisabled: {
+    opacity: 0.65,
+  },
+  deleteAccountText: {
+    color: "#f87171",
     fontSize: 13,
     fontWeight: "700",
   },

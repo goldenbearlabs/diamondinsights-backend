@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DI Web (Next.js)
 
-## Getting Started
+This app lives at `apps/web` and will be deployed to Vercel.
 
-First, run the development server:
+## Local development
+
+1. Use Node `20.11.1` (or any version `>=20.9.0`).
+2. If you use `nvm`, run `nvm use`.
+3. From repo root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run web:dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Build and lint
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+From repo root:
 
-## Learn More
+```bash
+npm run web:build
+npm run web:lint
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Vercel setup (monorepo)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+From repo root:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run vercel:link:web
+npm run vercel:pull:web
+```
 
-## Deploy on Vercel
+If Vercel asks for project settings, use:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Framework preset: `Next.js`
+- Root directory: `apps/web`
+- Build command: `npm run build`
+- Install command: `npm install`
+- Output directory: `.next` (default)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Deploy commands:
+
+```bash
+npm run vercel:deploy:web
+npm run vercel:deploy:web:prod
+```
+
+## Environment
+
+- `BACKEND_API_URL`: base URL for the FastAPI backend (used by admin API proxy routes).
+  - Local default is `http://localhost:8000`.
+
+## Notes
+
+- Keep the user-facing web app and `/admin` under this same Next.js project.
+- Route handlers can proxy admin actions to backend admin endpoints.

@@ -13,7 +13,8 @@ from typing import Optional, List, Dict, Any, Iterable
 
 import pandas as pd
 import pyarrow.parquet as pq
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
+from redis import Redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from shared.db.database import get_db
 from shared.db.models import Card, Pitch, ShowBallParks
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
 from src.api.routes.users import firebase_claims
+from src.core.cache import build_cache_key, get_cache_client, get_cached_json, set_cached_json
 
 from .common import (
     _to_int,
@@ -141,6 +143,24 @@ _your_ovr_cache_lock = threading.Lock()
 _your_ovr_cache: dict[str, tuple[float, ShowYourOvrWeightsOut]] = {}
 
 
+def _read_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        parsed = int(float(raw))
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+_SHOW_STATS_REDIS_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_REDIS_CACHE_TTL_SEC", 14400)
+_SHOW_STATS_CLIENT_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_CLIENT_CACHE_TTL_SEC", 3600)
+_SHOW_STATS_STORAGE_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_STORAGE_CACHE_TTL_SEC", 3600)
+_stats_storage_cache_lock = threading.Lock()
+_stats_facts_df_cache: dict[str, tuple[float, pd.DataFrame]] = {}
+
+
 @dataclass
 class _SkillContext:
     root_df: pd.DataFrame
@@ -150,6 +170,44 @@ class _SkillContext:
 
 def _normalize_username(value: str) -> str:
     return str(value or "").strip().lower()
+
+
+def _set_stats_http_cache_headers(response: Response, *, is_public: bool) -> None:
+    max_age = max(1, _SHOW_STATS_CLIENT_CACHE_TTL_SEC)
+    scope = "public" if is_public else "private"
+    response.headers["Cache-Control"] = f"{scope}, max-age={max_age}, stale-while-revalidate=60"
+    if not is_public:
+        response.headers["Vary"] = "Authorization, Cookie"
+
+
+def _cache_stats_response(
+    cache: Redis | None,
+    cache_key: str,
+    response: ShowAggregateStatsOut,
+) -> ShowAggregateStatsOut:
+    set_cached_json(
+        cache,
+        cache_key,
+        response.model_dump(mode="json"),
+        ttl_sec=max(1, _SHOW_STATS_REDIS_CACHE_TTL_SEC),
+    )
+    return response
+
+
+def _load_stats_facts_df_cached(username: str) -> pd.DataFrame:
+    now = time.monotonic()
+    uname = _normalize_username(username)
+    with _stats_storage_cache_lock:
+        cached = _stats_facts_df_cache.get(uname)
+        if cached and cached[0] > now:
+            return cached[1].copy(deep=False)
+        if cached and cached[0] <= now:
+            _stats_facts_df_cache.pop(uname, None)
+
+    loaded = _load_facts_df_for_username(username)
+    with _stats_storage_cache_lock:
+        _stats_facts_df_cache[uname] = (time.monotonic() + max(1, _SHOW_STATS_STORAGE_CACHE_TTL_SEC), loaded)
+    return loaded.copy(deep=False)
 
 
 def _facts_cache_key(username: str, columns: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
@@ -3394,18 +3452,36 @@ def get_show_skills(
 
 @router.get("/stats", response_model=ShowAggregateStatsOut)
 def get_show_stats(
+    response: Response,
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims),
     view: Optional[str] = Query(default=None, max_length=8),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowAggregateStatsOut:
+    _set_stats_http_cache_headers(response, is_public=False)
     user = _get_authed_user(db, claims)
 
     sp = _get_profile_for_user(db, user.id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
-    df = _load_facts_df_for_username(sp.username)
-    return _compute_aggregate_stats(df, sp.username, view=view)
+    view_norm = (view or "").strip().lower()
+    cache_key = build_cache_key(
+        "show",
+        "stats",
+        "me",
+        "v1",
+        _normalize_username(sp.username),
+        view_norm,
+        str((claims or {}).get("uid") or ""),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowAggregateStatsOut.model_validate(cached)
+
+    df = _load_stats_facts_df_cached(sp.username)
+    computed = _compute_aggregate_stats(df, sp.username, view=view)
+    return _cache_stats_response(cache, cache_key, computed)
 
 
 @router.get("/your-ovr", response_model=ShowYourOvrWeightsOut)
@@ -3635,14 +3711,32 @@ def get_show_skills_by_username(
 @public_router.get("/show/{username}/stats", response_model=ShowAggregateStatsOut)
 def get_show_stats_by_username(
     username: str,
+    response: Response,
     db: Session = Depends(get_db),
     view: Optional[str] = Query(default=None, max_length=8),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowAggregateStatsOut:
+    _set_stats_http_cache_headers(response, is_public=True)
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
-    return _compute_aggregate_stats(df, sp.username, view=view)
+
+    view_norm = (view or "").strip().lower()
+    cache_key = build_cache_key(
+        "show",
+        "stats",
+        "username",
+        "v1",
+        _normalize_username(sp.username),
+        view_norm,
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowAggregateStatsOut.model_validate(cached)
+
+    df = _load_stats_facts_df_cached(sp.username)
+    computed = _compute_aggregate_stats(df, sp.username, view=view)
+    return _cache_stats_response(cache, cache_key, computed)
 
 
 @public_router.get("/show/{username}/archetype/batting", response_model=BattingArchetypeOut)
@@ -3804,14 +3898,33 @@ def get_show_skills_for_user(
 @public_router.get("/{user_id}/show/stats", response_model=ShowAggregateStatsOut)
 def get_show_stats_for_user(
     user_id: int,
+    response: Response,
     db: Session = Depends(get_db),
     view: Optional[str] = Query(default=None, max_length=8),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowAggregateStatsOut:
+    _set_stats_http_cache_headers(response, is_public=True)
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
-    df = _load_facts_df_for_username(sp.username)
-    return _compute_aggregate_stats(df, sp.username, view=view)
+
+    view_norm = (view or "").strip().lower()
+    cache_key = build_cache_key(
+        "show",
+        "stats",
+        "user-id",
+        "v1",
+        user_id,
+        _normalize_username(sp.username),
+        view_norm,
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowAggregateStatsOut.model_validate(cached)
+
+    df = _load_stats_facts_df_cached(sp.username)
+    computed = _compute_aggregate_stats(df, sp.username, view=view)
+    return _cache_stats_response(cache, cache_key, computed)
 
 
 @public_router.get("/{user_id}/show/archetype/batting", response_model=BattingArchetypeOut)

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import Literal, Optional
+from typing import Literal, Optional, TypeVar
 
 import pandas as pd
 import pyarrow.parquet as pq
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
+from redis import Redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +19,7 @@ from shared.db.database import get_db
 from shared.db.models import Player, ShowBallParks, ShowGameSummary, ShowProfile, Users
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
 from src.api.routes.users import firebase_claims_optional
+from src.core.cache import build_cache_key, get_cache_client, get_cached_json, set_cached_json
 from src.schemas.records import (
     HardHitRecordResponse,
     HardHitRecordsResponse,
@@ -24,14 +30,35 @@ from src.schemas.records import (
 
 router = APIRouter(prefix="/records", tags=["records"])
 
+
+def _read_positive_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
 HOME_RUNS_RECORDS_KEY = "records/home_runs.parquet"
 HARDEST_HITS_RECORDS_KEY = "records/hardest_hits.parquet"
 DIFFICULTY_ORDER = ["goat", "legend", "hall of fame", "all star", "veteran", "rookie"]
 TimeRange = Literal["24h", "1w", "1m", "all"]
+RECORDS_LEADERBOARD_CACHE_TTL_SEC = int(_read_positive_float_env("RECORDS_LEADERBOARD_CACHE_TTL_SEC", 14400))
+RECORDS_SPACES_CLIENT_TTL_SEC = _read_positive_float_env("RECORDS_SPACES_CLIENT_TTL_SEC", 1800)
+RECORDS_CLIENT_HTTP_CACHE_TTL_SEC = int(_read_positive_float_env("RECORDS_CLIENT_HTTP_CACHE_TTL_SEC", 1800))
+_SPACES_CACHE_LOCK = threading.Lock()
+_spaces_connector_cache: tuple[float, SpacesConnector] | None = None
+_SPACES_NETWORK_CACHE_LOCK = threading.Lock()
+_spaces_bytes_cache: dict[str, tuple[float, bytes]] = {}
+ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 
 
 @router.get("/home-runs", response_model=HomeRunRecordsResponse)
 def get_home_run_records(
+    response: Response,
     mode: RecordMode = Query(
         default="normal",
         description="Sort mode: normal uses distance_ft, plus uses distance_plus_ft.",
@@ -68,19 +95,39 @@ def get_home_run_records(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims_optional),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> HomeRunRecordsResponse:
-    try:
-        spaces = SpacesConnector(SpacesConfig.from_env())
-    except KeyError as exc:
-        raise HTTPException(status_code=503, detail=f"Spaces configuration missing: {exc}") from exc
+    _set_client_cache_headers(response)
+
+    cache_key = build_cache_key(
+        "records",
+        "home-runs",
+        "v1",
+        mode,
+        _normalize_cache_text(difficulty),
+        _normalize_cache_text(hitter_username),
+        _normalize_cache_text(pitcher_username),
+        _normalize_cache_text(profile_username),
+        hitter_mlb_id if hitter_mlb_id is not None else "",
+        pitcher_mlb_id if pitcher_mlb_id is not None else "",
+        time_range,
+        limit,
+        offset,
+        _claims_uid(claims) or "anon",
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return HomeRunRecordsResponse.model_validate(cached)
 
     try:
-        raw = spaces.get_bytes(HOME_RUNS_RECORDS_KEY)
+        raw = _get_spaces_bytes_cached(HOME_RUNS_RECORDS_KEY)
+    except KeyError as exc:
+        raise HTTPException(status_code=503, detail=f"Spaces configuration missing: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Unable to load home run records from storage") from exc
 
     if not raw:
-        return HomeRunRecordsResponse(
+        return _cache_records_response(cache, cache_key, HomeRunRecordsResponse(
             items=[],
             available_difficulties=[],
             my_top_hr_ovr_rank=None,
@@ -88,7 +135,7 @@ def get_home_run_records(
             limit=limit,
             offset=offset,
             mode=mode,
-        )
+        ))
 
     try:
         table = pq.read_table(BytesIO(raw))
@@ -97,7 +144,7 @@ def get_home_run_records(
 
     df = table.to_pandas()
     if df.empty:
-        return HomeRunRecordsResponse(
+        return _cache_records_response(cache, cache_key, HomeRunRecordsResponse(
             items=[],
             available_difficulties=[],
             my_top_hr_ovr_rank=None,
@@ -105,7 +152,7 @@ def get_home_run_records(
             limit=limit,
             offset=offset,
             mode=mode,
-        )
+        ))
 
     for col in ("distance_ft", "distance_plus_ft", "elevation"):
         if col not in df.columns:
@@ -151,7 +198,7 @@ def get_home_run_records(
 
     base_df = df[df[distance_col].notna()].copy()
     if base_df.empty:
-        return HomeRunRecordsResponse(
+        return _cache_records_response(cache, cache_key, HomeRunRecordsResponse(
             items=[],
             available_difficulties=available_difficulties,
             my_top_hr_ovr_rank=None,
@@ -159,7 +206,7 @@ def get_home_run_records(
             limit=limit,
             offset=offset,
             mode=mode,
-        )
+        ))
 
     overall_rank_lookup = _competition_rank_lookup(df=base_df, value_col=distance_col)
 
@@ -210,7 +257,7 @@ def get_home_run_records(
 
     filtered_df = filtered_df.copy()
     if filtered_df.empty:
-        return HomeRunRecordsResponse(
+        return _cache_records_response(cache, cache_key, HomeRunRecordsResponse(
             items=[],
             available_difficulties=available_difficulties,
             my_top_hr_ovr_rank=None,
@@ -218,7 +265,7 @@ def get_home_run_records(
             limit=limit,
             offset=offset,
             mode=mode,
-        )
+        ))
 
     filtered_rank_lookup = _competition_rank_lookup(df=filtered_df, value_col=distance_col)
 
@@ -300,7 +347,7 @@ def get_home_run_records(
             )
         )
 
-    return HomeRunRecordsResponse(
+    return _cache_records_response(cache, cache_key, HomeRunRecordsResponse(
         items=items,
         available_difficulties=available_difficulties,
         my_top_hr_ovr_rank=my_top_hr_ovr_rank,
@@ -308,11 +355,12 @@ def get_home_run_records(
         limit=limit,
         offset=offset,
         mode=mode,
-    )
+    ))
 
 
 @router.get("/hardest-hits", response_model=HardHitRecordsResponse)
 def get_hardest_hit_records(
+    response: Response,
     difficulty: Optional[str] = Query(
         default=None,
         description="Exact difficulty filter (case-insensitive).",
@@ -345,26 +393,45 @@ def get_hardest_hit_records(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims_optional),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> HardHitRecordsResponse:
-    try:
-        spaces = SpacesConnector(SpacesConfig.from_env())
-    except KeyError as exc:
-        raise HTTPException(status_code=503, detail=f"Spaces configuration missing: {exc}") from exc
+    _set_client_cache_headers(response)
+
+    cache_key = build_cache_key(
+        "records",
+        "hardest-hits",
+        "v1",
+        _normalize_cache_text(difficulty),
+        _normalize_cache_text(hitter_username),
+        _normalize_cache_text(pitcher_username),
+        _normalize_cache_text(profile_username),
+        hitter_mlb_id if hitter_mlb_id is not None else "",
+        pitcher_mlb_id if pitcher_mlb_id is not None else "",
+        time_range,
+        limit,
+        offset,
+        _claims_uid(claims) or "anon",
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return HardHitRecordsResponse.model_validate(cached)
 
     try:
-        raw = spaces.get_bytes(HARDEST_HITS_RECORDS_KEY)
+        raw = _get_spaces_bytes_cached(HARDEST_HITS_RECORDS_KEY)
+    except KeyError as exc:
+        raise HTTPException(status_code=503, detail=f"Spaces configuration missing: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Unable to load hard hit records from storage") from exc
 
     if not raw:
-        return HardHitRecordsResponse(
+        return _cache_records_response(cache, cache_key, HardHitRecordsResponse(
             items=[],
             available_difficulties=[],
             my_top_hit_ovr_rank=None,
             total=0,
             limit=limit,
             offset=offset,
-        )
+        ))
 
     try:
         table = pq.read_table(BytesIO(raw))
@@ -373,14 +440,14 @@ def get_hardest_hit_records(
 
     df = table.to_pandas()
     if df.empty:
-        return HardHitRecordsResponse(
+        return _cache_records_response(cache, cache_key, HardHitRecordsResponse(
             items=[],
             available_difficulties=[],
             my_top_hit_ovr_rank=None,
             total=0,
             limit=limit,
             offset=offset,
-        )
+        ))
 
     for col in ("exit_vel_mph",):
         if col not in df.columns:
@@ -424,14 +491,14 @@ def get_hardest_hit_records(
 
     base_df = df[df[value_col].notna()].copy()
     if base_df.empty:
-        return HardHitRecordsResponse(
+        return _cache_records_response(cache, cache_key, HardHitRecordsResponse(
             items=[],
             available_difficulties=available_difficulties,
             my_top_hit_ovr_rank=None,
             total=0,
             limit=limit,
             offset=offset,
-        )
+        ))
 
     overall_rank_lookup = _competition_rank_lookup(df=base_df, value_col=value_col)
 
@@ -482,14 +549,14 @@ def get_hardest_hit_records(
 
     filtered_df = filtered_df.copy()
     if filtered_df.empty:
-        return HardHitRecordsResponse(
+        return _cache_records_response(cache, cache_key, HardHitRecordsResponse(
             items=[],
             available_difficulties=available_difficulties,
             my_top_hit_ovr_rank=None,
             total=0,
             limit=limit,
             offset=offset,
-        )
+        ))
 
     filtered_rank_lookup = _competition_rank_lookup(df=filtered_df, value_col=value_col)
 
@@ -566,14 +633,71 @@ def get_hardest_hit_records(
             )
         )
 
-    return HardHitRecordsResponse(
+    return _cache_records_response(cache, cache_key, HardHitRecordsResponse(
         items=items,
         available_difficulties=available_difficulties,
         my_top_hit_ovr_rank=my_top_hit_ovr_rank,
         total=total,
         limit=limit,
         offset=offset,
+    ))
+
+
+def _get_cached_spaces_connector() -> SpacesConnector:
+    global _spaces_connector_cache
+
+    now = time.monotonic()
+    with _SPACES_CACHE_LOCK:
+        cached = _spaces_connector_cache
+        if cached and cached[0] > now:
+            return cached[1]
+
+        connector = SpacesConnector(SpacesConfig.from_env())
+        _spaces_connector_cache = (now + RECORDS_SPACES_CLIENT_TTL_SEC, connector)
+        return connector
+
+
+def _get_spaces_bytes_cached(key: str) -> bytes:
+    now = time.monotonic()
+    with _SPACES_NETWORK_CACHE_LOCK:
+        cached = _spaces_bytes_cache.get(key)
+        if cached and cached[0] > now:
+            return cached[1]
+        if cached and cached[0] <= now:
+            _spaces_bytes_cache.pop(key, None)
+
+    payload = _get_cached_spaces_connector().get_bytes(key)
+    with _SPACES_NETWORK_CACHE_LOCK:
+        _spaces_bytes_cache[key] = (time.monotonic() + RECORDS_SPACES_CLIENT_TTL_SEC, payload)
+    return payload
+
+
+def _cache_records_response(
+    cache: Redis | None,
+    key: str,
+    response: ResponseModelT,
+) -> ResponseModelT:
+    set_cached_json(
+        cache,
+        key,
+        response.model_dump(mode="json"),
+        ttl_sec=RECORDS_LEADERBOARD_CACHE_TTL_SEC,
     )
+    return response
+
+
+def _normalize_cache_text(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
+def _set_client_cache_headers(response: Response) -> None:
+    max_age = max(1, RECORDS_CLIENT_HTTP_CACHE_TTL_SEC)
+    response.headers["Cache-Control"] = f"private, max-age={max_age}, stale-while-revalidate=60"
+    response.headers["Vary"] = "Authorization, Cookie"
+
+
+def _claims_uid(claims: dict) -> str:
+    return str((claims or {}).get("uid") or "").strip()
 
 
 def _to_int(v: object) -> Optional[int]:
@@ -704,4 +828,3 @@ def _competition_rank_lookup(
         (str(game_id), int(event_id)): int(rank)
         for game_id, event_id, rank in tmp[["game_id", "event_id", "_rank"]].itertuples(index=False, name=None)
     }
-

@@ -713,6 +713,9 @@ class Users(Base):
     messages: Mapped[List["Message"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     comments: Mapped[List["Comment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     comment_likes: Mapped[List["CommentLike"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    entitlements: Mapped[List["UserEntitlement"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"USERS (id={self.id}, firebase_id={self.firebase_id}, email={self.email})"
@@ -720,6 +723,77 @@ class Users(Base):
 
 def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
+
+
+class AdminRosterConfig(Base):
+    __tablename__ = "admin_roster_config"
+
+    singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)
+    next_roster_update_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("singleton_id = 1", name="ck_admin_roster_config_singleton"),
+    )
+
+    def __repr__(self) -> str:
+        return f"ADMIN_ROSTER_CONFIG(singleton_id={self.singleton_id}, next_roster_update_at={self.next_roster_update_at})"
+
+
+class UserEntitlement(Base):
+    __tablename__ = "user_entitlements"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    entitlement_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    product_identifier: Mapped[Optional[str]] = mapped_column(String(255))
+    store: Mapped[Optional[str]] = mapped_column(String(64))
+    ownership_type: Mapped[Optional[str]] = mapped_column(String(64))
+    environment: Mapped[Optional[str]] = mapped_column(String(32))
+    purchased_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True))
+    latest_event_type: Mapped[Optional[str]] = mapped_column(String(64))
+    latest_event_id: Mapped[Optional[str]] = mapped_column(String(128))
+    latest_event_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    user: Mapped["Users"] = relationship(back_populates="entitlements")
+
+    __table_args__ = (
+        Index("ix_user_entitlements_user_active", "user_id", "is_active"),
+        Index("ix_user_entitlements_expires_at", "expires_at"),
+    )
+
+
+class RevenueCatWebhookEvent(Base):
+    __tablename__ = "revenuecat_webhook_events"
+
+    external_event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    app_user_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    original_app_user_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    api_version: Mapped[Optional[str]] = mapped_column(String(32))
+    product_id: Mapped[Optional[str]] = mapped_column(String(255))
+    store: Mapped[Optional[str]] = mapped_column(String(64))
+    environment: Mapped[Optional[str]] = mapped_column(String(32))
+    event_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    processing_error: Mapped[Optional[str]] = mapped_column(Text)
+    raw_payload: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    received_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    processed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True))
 
 class PredictionRun(Base):
     __tablename__ = "prediction_runs"
@@ -956,7 +1030,7 @@ class UserUpdateScore(Base):
 
     votes_count: Mapped[int] = mapped_column(Integer, default=0)
     correct_count: Mapped[int] = mapped_column(Integer, default=0)
-    points_total: Mapped[int] = mapped_column(Integer, default=0)
+    points_total: Mapped[float] = mapped_column(Float, default=0.0)
     computed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     user: Mapped["Users"] = relationship(back_populates="update_scores")
