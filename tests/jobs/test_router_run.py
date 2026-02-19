@@ -131,6 +131,7 @@ def test_run_idle_sets_status_to_idle(monkeypatch):
         ("player_sync", {"reload_all_players": "yes"}, "apps.jobs.player_sync", "PlayerSync", {"reload_all_players": True}),
         ("player_sync", {}, "apps.jobs.player_sync", "PlayerSync", {"reload_all_players": False}),
         ("prediction_sync", {}, "apps.jobs.prediction_sync", "PredictionSync", {}),
+        ("roster-update-aggregator", {}, "apps.jobs.roster_update_aggregator", "RosterUpdateAggregator", {}),
         ("your_ovr_sync", {}, "apps.jobs.your_ovr_sync", "YourOvrSync", {}),
         (
             "card_position_overall_sync",

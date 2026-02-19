@@ -163,6 +163,10 @@ class Router:
                             case "your_ovr_sync":
                                 from apps.jobs.your_ovr_sync import YourOvrSync
                                 YourOvrSync().run(session)
+
+                            case "roster-update-aggregator":
+                                from apps.jobs.roster_update_aggregator import RosterUpdateAggregator
+                                RosterUpdateAggregator().run(session)
                             
                             case _:
                                 raise ValueError(f"Unknown job type: {payload.job_type}")

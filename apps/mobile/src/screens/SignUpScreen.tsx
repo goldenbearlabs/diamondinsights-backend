@@ -10,9 +10,11 @@ import {
   ScrollView,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { createUserWithEmailAndPassword, deleteUser, updateProfile, type User } from "firebase/auth";
 import { useRouter } from "expo-router";
 
+import { ApiError, getDisplayNameAvailability } from "../lib/api";
+import { toReadableAuthError } from "../lib/authErrors";
 import { auth } from "../lib/firebase";
 import { uploadProfileImage } from "../lib/storage";
 import { ensureBackendUser } from "../lib/userSync";
@@ -44,43 +46,50 @@ export default function SignUpScreen() {
   };
 
   const onSignUp = async () => {
-  setError(null);
-  setLoading(true);
-
-  try {
-    console.warn("[signup] start");
-
-    console.warn("[signup] createUserWithEmailAndPassword");
-    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-    const user = cred.user;
-    console.warn("[signup] firebase user created", user.uid, user.email);
-
-    console.warn("[signup] updateProfile");
-    await updateProfile(user, { displayName });
-    console.warn("[signup] updateProfile done");
-
-    let profileImgPath: string | undefined;
-
-    if (photoUri) {
-      console.warn("[signup] uploadProfileImage start", photoUri);
-      profileImgPath = await uploadProfileImage(photoUri, user.uid);
-      console.warn("[signup] uploadProfileImage done", profileImgPath);
-    } else {
-      console.warn("[signup] no photo picked, skipping upload");
+    const normalizedDisplayName = displayName.trim();
+    if (!normalizedDisplayName) {
+      setError("Username is required.");
+      return;
     }
 
-    console.warn("[signup] ensureBackendUser start");
-    await ensureBackendUser(user, { displayName, profileImgPath });
-    console.warn("[signup] ensureBackendUser done");
+    setError(null);
+    setLoading(true);
 
-    router.replace("/(app)");
-  } catch (e: any) {
-    console.warn("[signup] ERROR", e?.message ?? String(e));
-    setError(e?.message ?? "Signup failed");
-  } finally {
-    setLoading(false);
-  }
-};
+    let createdUser: User | null = null;
+
+    try {
+      const availability = await getDisplayNameAvailability(normalizedDisplayName);
+      if (!availability.available) {
+        setError("That username is already taken. Try another one.");
+        return;
+      }
+
+      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const user = cred.user;
+      createdUser = user;
+
+      await updateProfile(user, { displayName: normalizedDisplayName });
+
+      let profileImgPath: string | undefined;
+      if (photoUri) {
+        profileImgPath = await uploadProfileImage(photoUri, user.uid);
+      }
+
+      await ensureBackendUser(user, { displayName: normalizedDisplayName, profileImgPath });
+      router.replace("/(app)");
+    } catch (e: unknown) {
+      if (createdUser && e instanceof ApiError && e.status === 409) {
+        try {
+          await deleteUser(createdUser);
+        } catch {
+          // Best effort rollback if backend rejected account creation.
+        }
+      }
+      setError(toReadableAuthError(e, "Signup failed"));
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   return (

@@ -79,6 +79,36 @@ export async function apiDeleteAuth<T>(path: string): Promise<T> {
   return apiRequest<T>("DELETE", path, undefined, { auth: true });
 }
 
+export interface DisplayNameAvailability {
+  available: boolean;
+}
+
+export function getDisplayNameAvailability(displayName: string) {
+  const query = encodeURIComponent(displayName.trim());
+  return apiGet<DisplayNameAvailability>(`/users/display-name-available?display_name=${query}`);
+}
+
+export interface EntitlementRecord {
+  entitlement_id: string;
+  is_active: boolean;
+  product_identifier: string | null;
+  store: string | null;
+  environment: string | null;
+  expires_at: string | null;
+  updated_at: string;
+}
+
+export interface EntitlementsMeResponse {
+  has_pro: boolean;
+  pro_entitlement_id: string;
+  pro_expires_at: string | null;
+  entitlements: EntitlementRecord[];
+}
+
+export function getMyEntitlements() {
+  return apiRequest<EntitlementsMeResponse>("GET", "/entitlements/me", undefined, { auth: true });
+}
+
 
 
 export interface UserPredictionCreate {

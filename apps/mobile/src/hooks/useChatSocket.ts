@@ -35,6 +35,8 @@ export const useChatSocket = () => {
       ws.current = socket;
 
       socket.onopen = () => {
+        // Reset local cache so server history becomes the source of truth.
+        setMessages([]);
         setIsConnected(true);
         console.log("Chat Connected");
       };
@@ -76,7 +78,11 @@ export const useChatSocket = () => {
             );
           }
           else if (data.type === "delete_message"){
-            setMessages((prev) => prev.filter((msg) => msg.id !== data.payload.id));
+            const rawId = data.payload?.id;
+            const messageId = typeof rawId === "number" ? rawId : Number(rawId);
+            if (Number.isFinite(messageId)) {
+              setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+            }
           }
         } catch (err) {
           console.error("Chat Parse Error:", err);
@@ -117,6 +123,7 @@ export const useChatSocket = () => {
         nextAppState === "active"
       ) {
         console.log("App has come to the foreground! Reconnecting chat...");
+        disconnect();
         connect();
       }
 

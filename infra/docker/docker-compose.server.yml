@@ -41,6 +41,8 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CACHE_DEFAULT_TTL_SEC: ${CACHE_DEFAULT_TTL_SEC:-60}
       PYTHONPATH: /app/src:/app/shared
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
