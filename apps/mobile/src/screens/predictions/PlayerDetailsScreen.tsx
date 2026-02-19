@@ -52,11 +52,12 @@ export default function PlayerDetailsScreen() {
   const BATTING_COLOR = '#3b82f6';
   const PITCHING_COLOR = '#fbbf24';
   const FIELDING_COLOR = '#22c55e';
+  const RUNNING_COLOR = '#A78BFA';
  
   const [userPrediction, setUserPrediction] = useState<string>('');
   const [loadingPred, setLoadingPred] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [activeTab, setActiveTab] = useState<'attributes' | 'market'>('attributes');
+  const [activeTab, setActiveTab] = useState<'attributes' | 'market' | 'stats' | 'pro'>('attributes');
   
   const [buyPrice, setBuyPrice] = useState<number | null>(null);
   const [sellPrice, setSellPrice] = useState<number | null>(null);
@@ -65,6 +66,21 @@ export default function PlayerDetailsScreen() {
   // 2. New State for Candles
   const [marketCandles, setMarketCandles] = useState<any[]>([]);
   const [loadingMarket, setLoadingMarket] = useState(false);
+
+  type CardQuirk = { card_id: string; name: string; description: string; img: string };
+  const [quirks, setQuirks] = useState<CardQuirk[]>([]);
+  const [loadingQuirks, setLoadingQuirks] = useState(false);
+
+  type SplitStats = { split: string; [key: string]: any };
+  type SeasonStats = {
+    is_hitter: boolean;
+    season: number;
+    batting?: { overall: SplitStats; splits: SplitStats[] } | null;
+    pitching?: { overall: SplitStats; splits: SplitStats[] } | null;
+  };
+  const [seasonStats, setSeasonStats] = useState<SeasonStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [activeWindow, setActiveWindow] = useState<'season' | '7d' | '14d' | 'last_update'>('season');
 
   useEffect(() => {
     if (card?.id) {
@@ -128,6 +144,35 @@ export default function PlayerDetailsScreen() {
 
     fetchMarket();
   }, [card?.id]);
+
+  useEffect(() => {
+    if (!card?.id) return;
+    setLoadingQuirks(true);
+    apiGet<{ card_id: string; name: string; description: string; img: string }[]>(`/quirks/${card.id}`)
+      .then(res => setQuirks(res))
+      .catch(() => setQuirks([]))
+      .finally(() => setLoadingQuirks(false));
+  }, [card?.id]);
+
+  useEffect(() => {
+    if (!card?.id) return;
+    setLoadingStats(true);
+    const windowParam = activeWindow !== 'season' ? `&window=${activeWindow}` : '';
+    apiGet<SeasonStats>(`/mlb_stats/season/${card.id}?season=2025${windowParam}`)
+      .then(res => setSeasonStats(res))
+      .catch(() => setSeasonStats(null))
+      .finally(() => setLoadingStats(false));
+  }, [card?.id, activeWindow]);
+
+  const SPLIT_LABELS: Record<string, string> = {
+    vslhp: 'vs LHP', vsrhp: 'vs RHP', vslhb: 'vs LHB', vsrhb: 'vs RHB', risp: 'RISP', overall: 'Overall',
+  };
+
+  const formatStat = (val: number | undefined, decimals: number = 3): string => {
+    if (val == null) return '-';
+    if (decimals === 3) return val.toFixed(3).replace(/^0/, '');
+    return val.toFixed(decimals);
+  };
 
   const handleInfoPress = () => {
     Alert.alert(
@@ -307,7 +352,7 @@ export default function PlayerDetailsScreen() {
             )}
           </View>
 
-          {/* attribute / market tabs */}
+          {/* attribute / market / stats / pro tabs */}
           <View style={styles.tabsContainer}>
             <TouchableOpacity
               onPress={() => setActiveTab('attributes')}
@@ -321,9 +366,24 @@ export default function PlayerDetailsScreen() {
             >
               <Text style={[styles.tabText, activeTab === 'market' && styles.tabTextActive]}>Market</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveTab('stats')}
+              style={[styles.tabButton, activeTab === 'stats' && styles.tabButtonActive]}
+            >
+              <Text style={[styles.tabText, activeTab === 'stats' && styles.tabTextActive]}>MLB Stats</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveTab('pro')}
+              style={[styles.tabButton, activeTab === 'pro' && styles.tabButtonActivePro]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <FontAwesome5 name="crown" size={9} color={activeTab === 'pro' ? '#fbbf24' : theme.colors.muted} />
+                <Text style={[styles.tabText, activeTab === 'pro' && { color: '#fbbf24', fontWeight: '700' }]}>PRO</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
-          {activeTab === 'attributes' ? (
+          {activeTab === 'attributes' && (
             <>
               <Text style={styles.sectionTitle}>Attributes</Text>
               <View style={styles.glassCard}>
@@ -365,75 +425,53 @@ export default function PlayerDetailsScreen() {
                  <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
                  <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} />
                  <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} />
-                 <AttributeBar label="Reaction" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
+                 <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} />
+
+                {/* Running (hitters only) */}
+                {card.is_hitter && (
+                  <>
+                    <View style={{ height: 16 }} />
+                    <Text style={[styles.subHeader, { color: RUNNING_COLOR }]}>Running</Text>
+                    <View style={[styles.subHeaderDivider, { backgroundColor: RUNNING_COLOR }]} />
+                    <AttributeBar label="Speed" value={card.speed || 0} barColor={RUNNING_COLOR} />
+                    <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} />
+                    <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} />
+                  </>
+                )}
 
               </View>
 
-              {/* Predicted Attributes */}
-              {card.predicted_attributes && (
-                <>
-                  <View style={styles.predictionHeader}>
-                    <View style={styles.proBadge}>
-                      <FontAwesome5 name="crown" size={10} color="#fbbf24" style={styles.proIcon} />
-                      <Text style={styles.proText}>PRO</Text>
+              {/* Quirks */}
+              <Text style={styles.sectionTitle}>Quirks</Text>
+              <View style={styles.glassCard}>
+                {loadingQuirks ? (
+                  <ActivityIndicator color="white" />
+                ) : quirks.length === 0 ? (
+                  <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 8 }}>No quirks</Text>
+                ) : (
+                  quirks.map((quirk, index) => (
+                    <View
+                      key={quirk.name}
+                      style={[
+                        styles.quirkRow,
+                        index < quirks.length - 1 && styles.quirkRowBorder,
+                      ]}
+                    >
+                      <Image source={{ uri: quirk.img }} style={styles.quirkImg} />
+                      <View style={styles.quirkText}>
+                        <Text style={styles.quirkName}>{quirk.name}</Text>
+                        <Text style={styles.quirkDescription}>{quirk.description}</Text>
+                      </View>
                     </View>
-                    <Text style={[styles.sectionTitle, { color: '#fbbf24', marginBottom: 0 }]}>Predicted Attributes</Text>
-                  </View>
-                  <View style={styles.glassCard}>
-                    
-                    {/* Pitching Predictions */}
-                    {PITCHING_PREDICTION_KEYS.some(({ key }) => 
-                      card.predicted_attributes?.[`pit_pred_${key}_new`] != null
-                    ) && (
-                      <>
-                        <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
-                        <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
-                        {PITCHING_PREDICTION_KEYS.map(({ key, label }) => {
-                          const newVal = card.predicted_attributes?.[`pit_pred_${key}_new`];
-                          const delta = card.predicted_attributes?.[`pit_pred_${key}_delta`];
-                          if (newVal == null || delta == null) return null;
-                          return (
-                            <PredictionAttributeBar
-                              key={key}
-                              label={label}
-                              predictedValue={Math.round(newVal)}
-                              delta={delta}
-                            />
-                          );
-                        })}
-                        {showBatting && <View style={{ height: 24 }} />}
-                      </>
-                    )}
+                  ))
+                )}
+              </View>
 
-                    {/* Batting Predictions */}
-                    {BATTING_PREDICTION_KEYS.some(({ key }) => 
-                      card.predicted_attributes?.[`hit_pred_${key}_new`] != null
-                    ) && (
-                      <>
-                        <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
-                        <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
-                        {BATTING_PREDICTION_KEYS.map(({ key, label }) => {
-                          const newVal = card.predicted_attributes?.[`hit_pred_${key}_new`];
-                          const delta = card.predicted_attributes?.[`hit_pred_${key}_delta`];
-                          if (newVal == null || delta == null) return null;
-                          return (
-                            <PredictionAttributeBar
-                              key={key}
-                              label={label}
-                              predictedValue={Math.round(newVal)}
-                              delta={delta}
-                            />
-                          );
-                        })}
-                      </>
-                    )}
-
-                  </View>
-                </>
-              )}
             </>
-          ) : (
-            // 5. Updated Market Tab (Kept your exact layout + Added Chart)
+          )}
+          {activeTab === 'market' && (
             <>
               <Text style={styles.sectionTitle}>Market</Text>
               <View style={styles.glassCard}>
@@ -481,6 +519,245 @@ export default function PlayerDetailsScreen() {
               <MarketVolumeChart buyVolume={buyVolume} sellVolume={sellVolume} loading={loadingMarket} />
             </>
           )}
+          {activeTab === 'stats' && (
+            <>
+              <Text style={styles.sectionTitle}>MLB Stats</Text>
+              {/* Window filter pills */}
+              <View style={styles.windowFilterGrid}>
+                <View style={styles.windowFilterRow}>
+                  {([
+                    { key: 'season', label: 'Season' },
+                    { key: '7d',     label: 'Last 7 Days' },
+                    { key: '14d',    label: 'Last 14 Days' },
+                  ] as { key: 'season' | '7d' | '14d' | 'last_update'; label: string }[]).map(({ key: w, label }) => (
+                    <TouchableOpacity
+                      key={w}
+                      style={[styles.windowPill, activeWindow === w && styles.windowPillActive]}
+                      onPress={() => setActiveWindow(w)}
+                    >
+                      <Text style={[styles.windowPillText, activeWindow === w && styles.windowPillTextActive]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={[styles.windowPillFull, activeWindow === 'last_update' && styles.windowPillActive]}
+                  onPress={() => setActiveWindow('last_update')}
+                >
+                  <Text style={[styles.windowPillText, activeWindow === 'last_update' && styles.windowPillTextActive]}>
+                    Since Last Roster Update
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {(() => {
+                const windowLabel =
+                  activeWindow === '7d' ? 'Last 7 Days' :
+                  activeWindow === '14d' ? 'Last 14 Days' :
+                  activeWindow === 'last_update' ? 'Since Last Roster Update' :
+                  'Season Totals';
+                return (
+              <>{loadingStats ? (
+                <View style={styles.glassCard}>
+                  <ActivityIndicator color="white" />
+                </View>
+              ) : !seasonStats || (!seasonStats.batting && !seasonStats.pitching) ? (
+                <View style={styles.glassCard}>
+                  <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 24 }}>N/A</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Batting Stats */}
+                  {seasonStats.batting && (
+                    <>
+                      {isTwoWay && <Text style={[styles.subHeader, { color: BATTING_COLOR, marginBottom: 8 }]}>Batting</Text>}
+                      {/* Batting Overall Badges */}
+                      <View style={styles.statsBadgeRow}>
+                        {(['avg', 'obp', 'slg', 'ops'] as const).map(key => (
+                          <View key={key} style={styles.statsBadge}>
+                            <Text style={styles.statsBadgeLabel}>{key.toUpperCase()}</Text>
+                            <Text style={styles.statsBadgeValue}>{formatStat(seasonStats.batting!.overall[key])}</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      {/* Batting Overall Counting Stats */}
+                      <View style={styles.glassCard}>
+                        <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>{windowLabel}</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                        <View style={styles.statsGrid}>
+                          {(['pa', 'ab', 'h', 'hr', 'rbi', 'r', 'bb', 'so', 'doubles', 'triples', 'hbp', 'tb'] as const).map(key => (
+                            <View key={key} style={styles.statsGridItem}>
+                              <Text style={styles.statsGridLabel}>{key === 'doubles' ? '2B' : key === 'triples' ? '3B' : key.toUpperCase()}</Text>
+                              <Text style={styles.statsGridValue}>{seasonStats.batting!.overall[key] ?? 0}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+
+                      {/* Batting Splits */}
+                      <View style={styles.glassCard}>
+                        <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Splits</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                        <View style={styles.splitTableRow}>
+                          <Text style={[styles.splitTableCell, styles.splitTableHeader, { flex: 1.2 }]}></Text>
+                          {['AVG', 'OBP', 'SLG', 'AB', 'H', 'HR', 'BB', 'K'].map(h => (
+                            <Text key={h} style={[styles.splitTableCell, styles.splitTableHeader]}>{h}</Text>
+                          ))}
+                        </View>
+                        {seasonStats.batting!.splits.map(split => (
+                          <View key={split.split} style={styles.splitTableRow}>
+                            <Text style={[styles.splitTableCell, { flex: 1.2, color: 'white', fontWeight: '600' }]}>{SPLIT_LABELS[split.split] || split.split}</Text>
+                            <Text style={styles.splitTableCell}>{formatStat(split.avg)}</Text>
+                            <Text style={styles.splitTableCell}>{formatStat(split.obp)}</Text>
+                            <Text style={styles.splitTableCell}>{formatStat(split.slg)}</Text>
+                            <Text style={styles.splitTableCell}>{split.ab}</Text>
+                            <Text style={styles.splitTableCell}>{split.h}</Text>
+                            <Text style={styles.splitTableCell}>{split.hr}</Text>
+                            <Text style={styles.splitTableCell}>{split.bb}</Text>
+                            <Text style={styles.splitTableCell}>{split.so}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  )}
+
+                  {/* Spacer between batting and pitching for two-way players */}
+                  {isTwoWay && seasonStats.batting && seasonStats.pitching && (
+                    <View style={{ height: 8 }} />
+                  )}
+
+                  {/* Pitching Stats */}
+                  {seasonStats.pitching && (
+                    <>
+                      {isTwoWay && <Text style={[styles.subHeader, { color: PITCHING_COLOR, marginBottom: 8 }]}>Pitching</Text>}
+                      {/* Pitching Overall Badges */}
+                      <View style={styles.statsBadgeRow}>
+                        {(['era', 'whip', 'k9', 'ip'] as const).map(key => (
+                          <View key={key} style={styles.statsBadge}>
+                            <Text style={styles.statsBadgeLabel}>{key === 'k9' ? 'K/9' : key.toUpperCase()}</Text>
+                            <Text style={styles.statsBadgeValue}>
+                              {key === 'era' || key === 'whip' ? formatStat(seasonStats.pitching!.overall[key], 2)
+                                : key === 'k9' ? formatStat(seasonStats.pitching!.overall[key], 2)
+                                : seasonStats.pitching!.overall[key]}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      {/* Pitching Overall Counting Stats */}
+                      <View style={styles.glassCard}>
+                        <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>{windowLabel}</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                        <View style={styles.statsGrid}>
+                          {(['ip', 'h', 'er', 'hr', 'bb', 'k', 'batters_faced', 'strike_pct'] as const).map(key => (
+                            <View key={key} style={styles.statsGridItem}>
+                              <Text style={styles.statsGridLabel}>
+                                {key === 'batters_faced' ? 'BF' : key === 'strike_pct' ? 'STR%' : key.toUpperCase()}
+                              </Text>
+                              <Text style={styles.statsGridValue}>
+                                {key === 'strike_pct'
+                                  ? `${(((seasonStats.pitching!.overall[key] as number) ?? 0) * 100).toFixed(1)}%`
+                                  : seasonStats.pitching!.overall[key] ?? 0}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+
+                      {/* Pitching Splits */}
+                      <View style={styles.glassCard}>
+                        <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Splits</Text>
+                        <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                        <View style={styles.splitTableRow}>
+                          <Text style={[styles.splitTableCell, styles.splitTableHeader, { flex: 1.2 }]}></Text>
+                          {['ERA', 'WHIP', 'IP', 'H', 'ER', 'K', 'BB', 'HR'].map(h => (
+                            <Text key={h} style={[styles.splitTableCell, styles.splitTableHeader]}>{h}</Text>
+                          ))}
+                        </View>
+                        {seasonStats.pitching!.splits.map(split => (
+                          <View key={split.split} style={styles.splitTableRow}>
+                            <Text style={[styles.splitTableCell, { flex: 1.2, color: 'white', fontWeight: '600' }]}>{SPLIT_LABELS[split.split] || split.split}</Text>
+                            <Text style={styles.splitTableCell}>{formatStat(split.era, 2)}</Text>
+                            <Text style={styles.splitTableCell}>{formatStat(split.whip, 2)}</Text>
+                            <Text style={styles.splitTableCell}>{split.ip}</Text>
+                            <Text style={styles.splitTableCell}>{split.h}</Text>
+                            <Text style={styles.splitTableCell}>{split.er}</Text>
+                            <Text style={styles.splitTableCell}>{split.k}</Text>
+                            <Text style={styles.splitTableCell}>{split.bb}</Text>
+                            <Text style={styles.splitTableCell}>{split.hr}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                </>
+              )}</>
+                );
+              })()}
+            </>
+          )}
+          {activeTab === 'pro' && (
+            <>
+              <View style={styles.predictionHeader}>
+                <View style={styles.proBadge}>
+                  <FontAwesome5 name="crown" size={10} color="#fbbf24" style={styles.proIcon} />
+                  <Text style={styles.proText}>PRO</Text>
+                </View>
+                <Text style={[styles.sectionTitle, { color: '#fbbf24', marginBottom: 0 }]}>Predicted Attributes</Text>
+              </View>
+              <View style={styles.glassCard}>
+
+                {/* Pitching Predictions */}
+                {PITCHING_PREDICTION_KEYS.some(({ key }) =>
+                  card.predicted_attributes?.[`pit_pred_${key}_new`] != null
+                ) && (
+                  <>
+                    <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                    <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                    {PITCHING_PREDICTION_KEYS.map(({ key, label }) => {
+                      const newVal = card.predicted_attributes?.[`pit_pred_${key}_new`];
+                      const delta = card.predicted_attributes?.[`pit_pred_${key}_delta`];
+                      if (newVal == null || delta == null) return null;
+                      return (
+                        <PredictionAttributeBar
+                          key={key}
+                          label={label}
+                          predictedValue={Math.round(newVal)}
+                          delta={delta}
+                        />
+                      );
+                    })}
+                    {showBatting && <View style={{ height: 24 }} />}
+                  </>
+                )}
+
+                {/* Batting Predictions */}
+                {BATTING_PREDICTION_KEYS.some(({ key }) =>
+                  card.predicted_attributes?.[`hit_pred_${key}_new`] != null
+                ) && (
+                  <>
+                    <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                    <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                    {BATTING_PREDICTION_KEYS.map(({ key, label }) => {
+                      const newVal = card.predicted_attributes?.[`hit_pred_${key}_new`];
+                      const delta = card.predicted_attributes?.[`hit_pred_${key}_delta`];
+                      if (newVal == null || delta == null) return null;
+                      return (
+                        <PredictionAttributeBar
+                          key={key}
+                          label={label}
+                          predictedValue={Math.round(newVal)}
+                          delta={delta}
+                        />
+                      );
+                    })}
+                  </>
+                )}
+
+              </View>
+            </>
+          )}
 
         </ScrollView>
         </KeyboardAvoidingView>
@@ -520,10 +797,10 @@ const styles = StyleSheet.create({
   },
   statLabel: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
   statValue: { color: '#3b82f6', fontSize: 24, fontWeight: '900' },
-  tabsContainer: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  tabsContainer: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   tabButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -534,8 +811,51 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59, 130, 246, 0.2)',
     borderColor: 'rgba(59, 130, 246, 0.6)',
   },
-  tabText: { color: theme.colors.muted, fontSize: 14, fontWeight: '600' },
+  tabText: { color: theme.colors.muted, fontSize: 12, fontWeight: '600' },
   tabTextActive: { color: theme.colors.text, fontWeight: '700' },
+  tabButtonActivePro: {
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    borderColor: 'rgba(251, 191, 36, 0.6)',
+  },
+  windowFilterGrid: {
+    flexDirection: 'column',
+    gap: 8,
+    marginBottom: 14,
+  },
+  windowFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  windowPill: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    alignItems: 'center',
+  },
+  windowPillFull: {
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    alignItems: 'center',
+  },
+  windowPillActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(59, 130, 246, 0.6)',
+  },
+  windowPillText: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  windowPillTextActive: {
+    color: 'white',
+    fontWeight: '700',
+  },
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
   subHeader: { color: '#3b82f6', fontSize: 15, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase' },
   subHeaderDivider: { height: 1, opacity: 0.45, marginBottom: 10 },
@@ -547,6 +867,103 @@ const styles = StyleSheet.create({
   marketIcon: { width: 16, height: 16, resizeMode: 'contain' },
   marketValue: { color: 'white', fontSize: 16, fontWeight: '700' },
   marketValueText: { marginTop: 6 },
+  quirkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  quirkRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  quirkImg: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  quirkText: {
+    flex: 1,
+  },
+  quirkName: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  quirkDescription: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: '400',
+    lineHeight: 16,
+  },
+  statsBadgeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  statsBadge: {
+    flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.7)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  statsBadgeLabel: {
+    color: theme.colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  statsBadgeValue: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  statsGridItem: {
+    width: '25%',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  statsGridLabel: {
+    color: theme.colors.muted,
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  statsGridValue: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  splitTableRow: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  splitTableCell: {
+    flex: 1,
+    color: theme.colors.muted,
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  splitTableHeader: {
+    color: theme.colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
   predictionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
