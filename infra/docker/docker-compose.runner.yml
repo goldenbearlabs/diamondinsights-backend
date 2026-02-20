@@ -1,17 +1,25 @@
 services:
-  jobs:
+  runner:
     build:
       context: ../..
       dockerfile: apps/jobs/Dockerfile
     working_dir: /app
     restart: unless-stopped
+    command: python -m apps.jobs.main
     environment:
       TZ: America/Vancouver
       REDIS_URL: ${REDIS_URL}
       PYTHONPATH: /app/shared:/app/apps/jobs
       RUNNER_NAME: ${RUNNER_NAME:-jobs-runner-1}
+      RUNNER_HEARTBEAT_INTERVAL_SECONDS: ${RUNNER_HEARTBEAT_INTERVAL_SECONDS:-15}
+      RUNNER_HEARTBEAT_TTL_SECONDS: ${RUNNER_HEARTBEAT_TTL_SECONDS:-60}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      DO_SPACES_BUCKET: ${DO_SPACES_BUCKET}
+      DO_SPACES_REGION: ${DO_SPACES_REGION}
+      DO_SPACES_ENDPOINT: ${DO_SPACES_ENDPOINT}
+      DO_SPACES_KEY: ${DO_SPACES_KEY}
+      DO_SPACES_SECRET: ${DO_SPACES_SECRET}

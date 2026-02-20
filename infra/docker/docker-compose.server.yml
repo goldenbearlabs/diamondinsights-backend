@@ -80,35 +80,6 @@ services:
     networks:
       - app_network
 
-  jobs:
-    build:
-      context: ../..
-      dockerfile: apps/jobs/Dockerfile
-    working_dir: /app
-    restart: unless-stopped
-    environment:
-      TZ: America/Vancouver
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      PYTHONPATH: /app/shared:/app/apps/jobs
-      RUNNER_NAME: ${RUNNER_NAME:-jobs-runner-server}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: 5432
-      DO_SPACES_BUCKET: ${DO_SPACES_BUCKET}
-      DO_SPACES_REGION: ${DO_SPACES_REGION}
-      DO_SPACES_ENDPOINT: ${DO_SPACES_ENDPOINT}
-      DO_SPACES_KEY: ${DO_SPACES_KEY}
-      DO_SPACES_SECRET: ${DO_SPACES_SECRET}
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    networks:
-      - app_network
-
   redis:
     image: redis:7-alpine
     command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
