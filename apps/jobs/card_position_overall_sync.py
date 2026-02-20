@@ -143,15 +143,11 @@ class CardPositionOverallSync(Job):
             for pos in playable_positions:
                 eval_secondary = [p for p in source_playable_positions if p != pos]
                 if is_hitter:
-                    if pos == primary:
-                        position_penalty_pct = 0.0
-                        position_penalty_tier = "primary"
-                    elif pos in secondary_set:
-                        position_penalty_pct = 0.05
-                        position_penalty_tier = "secondary"
-                    else:
-                        position_penalty_pct = 0.10
-                        position_penalty_tier = "out_of_position"
+                    position_penalty_pct, position_penalty_tier = overall._hitter_position_penalty(
+                        primary_position=primary,
+                        evaluated_position=pos,
+                        secondary_positions=list(secondary_set),
+                    )
                 else:
                     position_penalty_pct = 0.0
                     position_penalty_tier = "none"

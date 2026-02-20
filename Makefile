@@ -1,4 +1,4 @@
-.PHONY: help up down ps logs logs-backend build test \
+.PHONY: help up down ps logs logs-backend build test backend-test backend-test-unit backend-test-integration backend-test-api shared-test-unit \
 	migrate revision run-job training-data \
 	runner-up runner-down runner-ps runner-logs runner-restart runner-build runner-pull runner-update runner-install \
 	server-up server-down server-ps server-logs \
@@ -12,6 +12,27 @@ RUNNER_ENV ?= .env
 SERVER_ENV ?= .env
 MONITORING_ENV ?= .env
 JOB_ARGS ?=
+UV ?= uv
+UV_BACKEND ?= $(UV) run --project apps/backend
+BACKEND_PYTEST_CONFIG ?= apps/backend/pytest.ini
+BACKEND_TEST_BASE ?= apps/backend/tests
+BACKEND_UNIT_TEST_PATH ?= $(BACKEND_TEST_BASE)/unit
+BACKEND_INTEGRATION_TEST_PATH ?= $(BACKEND_TEST_BASE)/integration
+BACKEND_API_TEST_PATH ?= $(BACKEND_TEST_BASE)/api
+BACKEND_COVERAGE_DIR ?= $(BACKEND_TEST_BASE)/coverage
+SHARED_PYTEST_CONFIG ?= shared/pytest.ini
+SHARED_UNIT_TEST_PATH ?= shared/tests/unit
+SHARED_COVERAGE_DIR ?= shared/tests/coverage
+BACKEND_API_APP_COV = \
+	--cov=apps/backend/src/api \
+	--cov=apps/backend/src/core \
+	--cov=apps/backend/src/main.py
+BACKEND_API_SHARED_COV = \
+	--cov=shared.db.database \
+	--cov=shared.db.models \
+	--cov=shared.queue.queue \
+	--cov=shared.queue.redis_connector \
+	--cov=shared.storage.spaces_connector
 
 COMPOSE_BASE = docker compose -f infra/docker/docker-compose.yml --env-file $(ENV_FILE)
 COMPOSE_RUNNER = docker compose -f infra/docker/docker-compose.runner.yml --env-file $(RUNNER_ENV)
@@ -23,6 +44,8 @@ help:
 	@printf "  make up|down|ps|logs|logs-backend|build\n"
 	@printf "  make migrate | revision REV_MSG='desc'\n"
 	@printf "  make run-job JOB_MODULE=apps.jobs.card_sync JOB_CLASS=CardSync [JOB_ARGS='reload_all_years=True']\n"
+	@printf "  make backend-test|backend-test-unit|backend-test-integration|backend-test-api\n"
+	@printf "  make shared-test-unit\n"
 	@printf "  make card_sync|card_sync_above|card_sync_below|game_boxscore_sync|market_candle_sync|market_price_sync|market_sync|player_sync|roster_update_sync|prediction_sync|card_position_overall_sync|show_profile_stats_updater|show_game_refresh|show_game_agg|your_ovr_sync\n"
 	@printf "  make runner-up|runner-down|runner-ps|runner-logs\n"
 	@printf "  make server-up|server-down|server-ps|server-logs\n"
@@ -49,8 +72,56 @@ logs-backend:
 	$(COMPOSE_BASE) logs -f backend
 
 test:
-	python3 -m pytest
-	python3 scripts/update_test_coverage.py
+	$(UV_BACKEND) pytest
+	$(UV_BACKEND) python scripts/update_test_coverage.py
+
+backend-test: backend-test-unit backend-test-integration backend-test-api
+
+backend-test-unit:
+	@mkdir -p $(BACKEND_COVERAGE_DIR)
+	@if [ -z "$$(find $(BACKEND_UNIT_TEST_PATH) -type f -name 'test_*.py' -print -quit 2>/dev/null)" ]; then \
+		echo "No backend unit tests found at $(BACKEND_UNIT_TEST_PATH)"; \
+	else \
+		$(UV_BACKEND) pytest -c $(BACKEND_PYTEST_CONFIG) -q $(BACKEND_UNIT_TEST_PATH) \
+			--cov=apps/backend/src \
+			--cov-report=term-missing \
+			--cov-report=html:$(BACKEND_COVERAGE_DIR)/unit-html; \
+	fi
+
+backend-test-integration:
+	@mkdir -p $(BACKEND_COVERAGE_DIR)
+	@if [ -z "$$(find $(BACKEND_INTEGRATION_TEST_PATH) -type f -name 'test_*.py' -print -quit 2>/dev/null)" ]; then \
+		echo "No backend integration tests found at $(BACKEND_INTEGRATION_TEST_PATH)"; \
+	else \
+		$(UV_BACKEND) pytest -c $(BACKEND_PYTEST_CONFIG) -q $(BACKEND_INTEGRATION_TEST_PATH) \
+			--cov=apps/backend/src \
+			--cov-report=term-missing \
+			--cov-report=html:$(BACKEND_COVERAGE_DIR)/integration-html; \
+	fi
+
+backend-test-api:
+	@mkdir -p $(BACKEND_COVERAGE_DIR)
+	@if [ -z "$$(find $(BACKEND_API_TEST_PATH) -type f -name 'test_*.py' -print -quit 2>/dev/null)" ]; then \
+		echo "No backend api tests found at $(BACKEND_API_TEST_PATH)"; \
+	else \
+		$(UV_BACKEND) pytest -c $(BACKEND_PYTEST_CONFIG) -q $(BACKEND_API_TEST_PATH) \
+			$(BACKEND_API_APP_COV) \
+			$(BACKEND_API_SHARED_COV) \
+			--cov-report=term-missing \
+			--cov-report=html:$(BACKEND_COVERAGE_DIR)/api-html; \
+	fi
+
+shared-test-unit:
+	@mkdir -p $(SHARED_COVERAGE_DIR)
+	@if [ -z "$$(find $(SHARED_UNIT_TEST_PATH) -type f -name 'test_*.py' -print -quit 2>/dev/null)" ]; then \
+		echo "No shared unit tests found at $(SHARED_UNIT_TEST_PATH)"; \
+	else \
+		$(UV_BACKEND) pytest -c $(SHARED_PYTEST_CONFIG) -q $(SHARED_UNIT_TEST_PATH) \
+			--cov=shared \
+			--cov-config=.coveragerc \
+			--cov-report=term-missing \
+			--cov-report=html:$(SHARED_COVERAGE_DIR)/unit-html; \
+	fi
 
 build:
 	$(COMPOSE_BASE) build

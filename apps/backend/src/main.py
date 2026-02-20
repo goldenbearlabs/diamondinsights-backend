@@ -1,4 +1,3 @@
-
 import time
 from contextlib import asynccontextmanager
 import logging
@@ -15,15 +14,24 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Performs startup and cleanup operations for the FastAPI app instance
+    Operations before the yield are run before the app starts.
+    Operations after the yield are run after the app shuts down.
+    Exceptions not handled inside the context will re-raise at the yield
+
+    Args:
+        app: FastAPI instance this context serves
+    """
     init_firebase_admin()
     app.state.cache = init_cache_client()
-    yield
-    close_cache_client(app.state.cache)
+    try:
+        yield
+    finally:
+        close_cache_client(app.state.cache)
 
 app = FastAPI(title="DiamondInsights API", 
               version="1.0.0",
-              description="",
-              openapi_url="/openapi.json",
+              summary="API serves the web & mobile for Diamond Insights and lives on a Digital Ocean server.",
               lifespan=lifespan)
 
 @app.middleware("http")

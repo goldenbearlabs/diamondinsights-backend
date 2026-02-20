@@ -9,12 +9,17 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.goldenbearlabs.diamondinsights",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/icon_up_diamond.png"
+        "foregroundImage": "./assets/images/icon_up_diamond.png",
+        "package": "com.goldenbearlabs.diamondinsights"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
@@ -41,6 +46,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2d18af5e-e5af-49bf-82c8-f4dab89e1855"
+      }
+    },
+    "owner": "diamondinsights"
   }
 }

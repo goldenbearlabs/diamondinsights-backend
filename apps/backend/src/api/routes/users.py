@@ -4,14 +4,14 @@ import unicodedata
 from typing import Optional
 
 from firebase_admin import auth as fb_auth
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shared.db.database import get_db
-from shared.db.models import Users
+from shared.db.models import UserUpdateScore, Users
 
 
 def _normalize_search(s: str) -> str:
@@ -59,7 +59,7 @@ def _ensure_display_name_unique(db: Session, display_name: str, current_user_id:
         existing = db.scalar(select(Users).where(func.lower(Users.display_name) == func.lower(display_name)))
 
     if existing and (current_user_id is None or existing.id != current_user_id):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Display name already in use")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already in use")
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -76,18 +76,41 @@ class UserProfileOut(BaseModel):
     email: Optional[str] = None
     display_name: str
     profile_img_path: str
+    latest_points_total: Optional[float] = None
     is_me: bool
 
     @staticmethod
-    def from_orm_user(u: Users, *, is_me: bool) -> "UserProfileOut":
+    def from_orm_user(u: Users, *, is_me: bool, latest_points_total: Optional[float] = None) -> "UserProfileOut":
         return UserProfileOut(
             id=u.id,
             firebase_id=u.firebase_id if is_me else None,
             email=u.email if is_me else None,
             display_name=u.display_name,
             profile_img_path=u.profile_img_url,
+            latest_points_total=latest_points_total,
             is_me=is_me,
         )
+
+
+def _get_latest_points_total(db: Session, user_id: int) -> Optional[float]:
+    return db.scalar(
+        select(UserUpdateScore.points_total)
+        .where(UserUpdateScore.user_id == user_id)
+        .order_by(
+            UserUpdateScore.computed_at.desc(),
+            UserUpdateScore.update_date.desc(),
+            UserUpdateScore.update_id.desc(),
+        )
+        .limit(1)
+    )
+
+
+def _user_profile_out(db: Session, user: Users, *, is_me: bool) -> UserProfileOut:
+    return UserProfileOut.from_orm_user(
+        user,
+        is_me=is_me,
+        latest_points_total=_get_latest_points_total(db, user.id),
+    )
 
 
 class UpdateUserBody(BaseModel):
@@ -127,7 +150,7 @@ def signup(
         if changed:
             db.commit()
             db.refresh(user)
-        return UserProfileOut.from_orm_user(user, is_me=True)
+        return _user_profile_out(db, user, is_me=True)
 
     _ensure_display_name_unique(db, body.display_name)
 
@@ -150,7 +173,21 @@ def signup(
     else:
         db.refresh(user)
 
-    return UserProfileOut.from_orm_user(user, is_me=True)
+    return _user_profile_out(db, user, is_me=True)
+
+
+class DisplayNameAvailabilityOut(BaseModel):
+    available: bool
+
+
+@router.get("/display-name-available", response_model=DisplayNameAvailabilityOut)
+def is_display_name_available(
+    display_name: str = Query(min_length=1, max_length=80),
+    db: Session = Depends(get_db),
+) -> DisplayNameAvailabilityOut:
+    normalized = _normalize_search(display_name)
+    existing = db.scalar(select(Users.id).where(Users.search_display_name == normalized))
+    return DisplayNameAvailabilityOut(available=existing is None)
 
 
 @router.get("/me", response_model=UserProfileOut)
@@ -166,7 +203,39 @@ def me(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    return UserProfileOut.from_orm_user(user, is_me=True)
+    return _user_profile_out(db, user, is_me=True)
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(
+    db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims),
+) -> Response:
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    user = db.scalar(select(Users).where(Users.firebase_id == uid))
+    if user:
+        db.delete(user)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete user",
+            )
+
+    try:
+        fb_auth.delete_user(uid)
+    except fb_auth.UserNotFoundError:
+        pass
+    except Exception:
+        # Account data is already removed from our DB; ignore Firebase delete failures.
+        pass
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{user_id}", response_model=UserProfileOut)
@@ -180,7 +249,7 @@ def get_user_profile(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     is_me = claims.get("uid") == user.firebase_id
-    return UserProfileOut.from_orm_user(user, is_me=is_me)
+    return _user_profile_out(db, user, is_me=is_me)
 
 
 @router.put("/me", response_model=UserProfileOut)
@@ -252,4 +321,4 @@ def update_me(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update user")
 
     db.refresh(user)
-    return UserProfileOut.from_orm_user(user, is_me=True)
+    return _user_profile_out(db, user, is_me=True)

@@ -4,6 +4,7 @@ import { View, ActivityIndicator } from "react-native";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "../src/lib/firebase";
 import { theme } from "../src/theme/colors"; // Optional: for background color
+import { syncRevenueCatUser } from "../src/lib/revenuecat";
 
 export default function RootLayout() {
   const router = useRouter();
@@ -28,7 +29,27 @@ export default function RootLayout() {
 
     if (!user && !inAuth) router.replace("/(auth)/signin");
     if (user && inAuth) router.replace("/(app)");
-  }, [ready, user, segments]);
+  }, [ready, user, segments, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncRevenueCat = async () => {
+      try {
+        await syncRevenueCatUser(user?.uid ?? null);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("[revenuecat] failed to sync user", err);
+        }
+      }
+    };
+
+    syncRevenueCat();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
   if (!ready) {
     return (

@@ -8,11 +8,12 @@ import {
   StyleSheet,
   ScrollView,
 } from "react-native";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "expo-router";
 
 import { auth } from "../lib/firebase";
 import { ensureBackendUser } from "../lib/userSync";
+import { toReadableAuthError } from "../lib/authErrors";
 import { theme } from "../theme/colors";
 
 export default function SignInScreen() {
@@ -20,19 +21,43 @@ export default function SignInScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const onSignIn = async () => {
     setError(null);
+    setNotice(null);
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-        await ensureBackendUser(cred.user);
+      await ensureBackendUser(cred.user);
       router.replace("/(app)");
-    } catch (e: any) {
-      setError(e?.message ?? "Sign in failed");
+    } catch (e: unknown) {
+      setError(toReadableAuthError(e, "Sign in failed"));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onForgotPassword = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      setNotice(null);
+      setError("Enter your email address to reset your password.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setResettingPassword(true);
+    try {
+      await sendPasswordResetEmail(auth, normalizedEmail);
+      setNotice("Password reset email sent.");
+    } catch (e: unknown) {
+      setError(toReadableAuthError(e, "Failed to send reset email"));
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -70,11 +95,23 @@ export default function SignInScreen() {
           />
         </View>
 
+        <View style={styles.forgotRow}>
+          <Pressable
+            onPress={onForgotPassword}
+            disabled={loading || resettingPassword}
+          >
+            <Text style={styles.forgotLink}>
+              {resettingPassword ? "Sending reset..." : "Forgot password?"}
+            </Text>
+          </Pressable>
+        </View>
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
 
         <Pressable
           onPress={onSignIn}
-          disabled={loading}
+          disabled={loading || resettingPassword}
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
         >
           {loading ? (
@@ -143,6 +180,19 @@ const styles = StyleSheet.create({
   errorText: {
     color: theme.colors.error,
     fontSize: 13,
+  },
+  noticeText: {
+    color: theme.colors.primary,
+    fontSize: 13,
+  },
+  forgotRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  forgotLink: {
+    color: "#fbbf24",
+    fontSize: 13,
+    fontWeight: "700",
   },
   primaryButton: {
     marginTop: 4,
