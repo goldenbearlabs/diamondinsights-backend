@@ -468,7 +468,7 @@ export default function AccountScreen() {
     value === null || value === undefined ? "-" : value.toFixed(digits);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["left", "right", "bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>Account</Text>
@@ -891,7 +891,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: theme.spacing.l,
     paddingTop: theme.spacing.l,
-    paddingBottom: theme.spacing.xl,
+    paddingBottom: theme.spacing.l,
     gap: theme.spacing.l,
   },
   headerRow: {
@@ -1171,15 +1171,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#020617",
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(2, 6, 23, 0.75)",
+    backgroundColor: "#020617",
   },
   modalCard: {
     width: "88%",
     borderRadius: 20,
-    backgroundColor: theme.colors.card,
+    backgroundColor: "#0f172a",
     padding: theme.spacing.l,
     gap: theme.spacing.m,
     borderWidth: 1,
@@ -1204,7 +1205,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    backgroundColor: "#111827",
   },
   photoButtonText: {
     color: theme.colors.text,
@@ -1230,7 +1231,7 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.12)",
-    backgroundColor: "rgba(15, 23, 42, 0.6)",
+    backgroundColor: "#111827",
     color: theme.colors.text,
     paddingVertical: 10,
     paddingHorizontal: 12,
