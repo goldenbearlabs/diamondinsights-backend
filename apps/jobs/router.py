@@ -117,7 +117,7 @@ class Router:
                                 from apps.jobs.game_boxscore_sync import GameBoxscoreSync
                                 reload_all = int(payload.args.get("reload_all_games", False))
                                 season = int(payload.args.get("season", 2025))
-                                GameBoxscoreSync(season_year=season,reload_all_games=reload_all).run(session)
+                                GameBoxscoreSync(season_year=season,rerun_all_boxscores=reload_all).run(session)
 
                             case "market_sync":
                                 from apps.jobs.market_sync import MarketSync
@@ -141,8 +141,8 @@ class Router:
 
                             case "player_sync":
                                 from apps.jobs.player_sync import PlayerSync
-                                reload_all = bool(payload.args.get("reload_all_players", False))
-                                PlayerSync(reload_all_players=reload_all).run(session)
+                                reload_all = bool(payload.args.get("rerun_all_cards", False))
+                                PlayerSync(rerun_all_cards=reload_all).run(session)
 
                             case "prediction_sync":
                                 from apps.jobs.prediction_sync import PredictionSync

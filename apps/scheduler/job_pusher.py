@@ -31,7 +31,7 @@ class JobPusher:
         return self.push("market_price_sync")
     
     def player_sync(self, reload_all_players: bool = False) -> Payload:
-        return self.push("player_sync", {"reload_all_players": reload_all_players})
+        return self.push("player_sync", {"rerun_all_cards": reload_all_players})
     
     def game_boxscore_sync(self, reload_all_games: bool = False, season = 2025) -> Payload:
         return self.push("game_boxscore_sync", {"reload_all_games": reload_all_games, "season": season})
