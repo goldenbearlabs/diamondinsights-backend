@@ -1,0 +1,80 @@
+{
+  "attr": "K/9",
+  "saved_utc": "2026-02-16T22:10:37.550253Z",
+  "seed": 42,
+  "best_fold": 2,
+  "best_fold_metrics": {
+    "fold": 2,
+    "rmse": 2.2024831954246897,
+    "mae": 1.5214352991179925,
+    "r2": 0.7178218038911811,
+    "n_val": 2014
+  },
+  "all_fold_metrics": [
+    {
+      "fold": 0,
+      "rmse": 2.260249597640007,
+      "mae": 1.4882383823432794,
+      "r2": 0.6643059057608602,
+      "n_val": 2021
+    },
+    {
+      "fold": 1,
+      "rmse": 2.4885957145738806,
+      "mae": 1.69355603708799,
+      "r2": 0.5293048755664693,
+      "n_val": 2034
+    },
+    {
+      "fold": 2,
+      "rmse": 2.2024831954246897,
+      "mae": 1.5214352991179925,
+      "r2": 0.7178218038911811,
+      "n_val": 2014
+    },
+    {
+      "fold": 3,
+      "rmse": 2.442225731742673,
+      "mae": 1.576601324540048,
+      "r2": 0.6846952423307111,
+      "n_val": 2029
+    },
+    {
+      "fold": 4,
+      "rmse": 2.207982353434963,
+      "mae": 1.4970975056624298,
+      "r2": 0.7163558708196178,
+      "n_val": 2034
+    }
+  ],
+  "oof_metrics": {
+    "rmse": 2.3237163441420483,
+    "mae": 1.5555284106381284,
+    "r2": 0.6695945685967353
+  },
+  "params": {
+    "n_estimators": 3000,
+    "learning_rate": 0.03,
+    "num_leaves": 63,
+    "min_child_samples": 50,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "reg_alpha": 0.0,
+    "max_depth": -1,
+    "verbosity": -1,
+    "force_col_wise": true
+  },
+  "old_col": "K/9_old",
+  "new_col": "K/9_new",
+  "delta_col": "K/9_delta",
+  "group_col": "update_date",
+  "preprocess": {
+    "to_numeric": true,
+    "fillna": 0.0,
+    "dtype": "float32",
+    "align_with": "features.json",
+    "missing_fill": 0.0,
+    "drop_extra": true
+  }
+}

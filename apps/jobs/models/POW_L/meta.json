@@ -1,0 +1,80 @@
+{
+  "attr": "POW L",
+  "saved_utc": "2026-02-16T21:55:49.362305Z",
+  "seed": 42,
+  "best_fold": 4,
+  "best_fold_metrics": {
+    "fold": 4,
+    "rmse": 2.75491474197415,
+    "mae": 1.9717087806181937,
+    "r2": 0.7186080943793021,
+    "n_val": 1999
+  },
+  "all_fold_metrics": [
+    {
+      "fold": 0,
+      "rmse": 3.477125302688943,
+      "mae": 2.365237640604934,
+      "r2": 0.6599860158428937,
+      "n_val": 2001
+    },
+    {
+      "fold": 1,
+      "rmse": 2.830388606047479,
+      "mae": 2.033368638600977,
+      "r2": 0.7356828055268541,
+      "n_val": 2144
+    },
+    {
+      "fold": 2,
+      "rmse": 3.015810620434923,
+      "mae": 1.9694597975618806,
+      "r2": 0.6873512136191942,
+      "n_val": 2140
+    },
+    {
+      "fold": 3,
+      "rmse": 3.2400673134159024,
+      "mae": 2.3261374466623628,
+      "r2": 0.7004853998638643,
+      "n_val": 2128
+    },
+    {
+      "fold": 4,
+      "rmse": 2.75491474197415,
+      "mae": 1.9717087806181937,
+      "r2": 0.7186080943793021,
+      "n_val": 1999
+    }
+  ],
+  "oof_metrics": {
+    "rmse": 3.0733067804562926,
+    "mae": 2.1320104865296456,
+    "r2": 0.6994143480113748
+  },
+  "params": {
+    "n_estimators": 3000,
+    "learning_rate": 0.03,
+    "num_leaves": 63,
+    "min_child_samples": 50,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "reg_alpha": 0.0,
+    "max_depth": -1,
+    "verbosity": -1,
+    "force_col_wise": true
+  },
+  "old_col": "POW L_old",
+  "new_col": "POW L_new",
+  "delta_col": "POW L_delta",
+  "group_col": "update_date",
+  "preprocess": {
+    "to_numeric": true,
+    "fillna": 0.0,
+    "dtype": "float32",
+    "align_with": "features.json",
+    "missing_fill": 0.0,
+    "drop_extra": true
+  }
+}

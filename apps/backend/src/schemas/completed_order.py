@@ -15,3 +15,13 @@ class CompletedOrderResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CompletedOrderRow(BaseModel):
+    card_id: str
+    date: datetime
+    price: int
+    is_buy: Optional[bool] = None
+
+    class Config:
+        from_attributes = True

@@ -2,26 +2,37 @@ name: CI (Tests)
 
 on:
   push:
-    branches: [ main, dev, 'feature/**' ]
+    branches: [main, dev, 'feature/**']
   pull_request:
-    branches: [ main ]
+    branches: [main, dev]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          pip install -r apps/backend/requirements.txt
-          pip install pytest
+          python -m pip install --upgrade pip
+          pip install -r requirements/backend.txt
+          pip install -r requirements/jobs.txt
+          pip install -r requirements/scheduler.txt
+          pip install -r requirements/test.txt
 
-      - name: Run Tests
+      - name: Compile Python modules
         run: |
-          python -m compileall apps/backend/src
+          python -m compileall shared apps/backend/src apps/jobs apps/scheduler
+
+      - name: Run shared unit tests
+        run: |
+          python -m pytest -c shared/pytest.ini -q shared/tests/unit

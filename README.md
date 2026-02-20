@@ -83,3 +83,7 @@ Steps to add new machine as a runner
 
 ## Get new set of training data
 `make up` then `make training-data`
+
+## Design Dependencies
+
+** We rely on the firebase_service_key.json file being located in a secrets folder at runtime to init our firebase instance **

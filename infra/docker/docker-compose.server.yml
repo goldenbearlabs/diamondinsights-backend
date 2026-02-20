@@ -11,26 +11,115 @@ services:
     networks:
       - app_network
     ports:
-      - "${TS_IP}:5432:5432"
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
 
   backend:
     build:
-      context: ../../apps/backend
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/backend/Dockerfile
+    working_dir: /app
     image: mlb_backend_image
     restart: unless-stopped
+    volumes:
+      - ../../apps/backend/src:/app/src
+      - ../../apps/backend/alembic:/app/alembic
+      - ../../apps/backend/alembic.ini:/app/alembic.ini
+      - ../../shared:/app/shared
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      FIREBASE_SERVICE_ACCOUNT_PATH: /run/secrets/firebase_service_key.json
       TZ: America/Vancouver
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CACHE_DEFAULT_TTL_SEC: ${CACHE_DEFAULT_TTL_SEC:-60}
+      PYTHONPATH: /app/src:/app/shared
+      DO_SPACES_BUCKET: ${DO_SPACES_BUCKET}
+      DO_SPACES_REGION: ${DO_SPACES_REGION}
+      DO_SPACES_ENDPOINT: ${DO_SPACES_ENDPOINT}
+      DO_SPACES_KEY: ${DO_SPACES_KEY}
+      DO_SPACES_SECRET: ${DO_SPACES_SECRET}
+      REVENUECAT_WEBHOOK_AUTH: ${REVENUECAT_WEBHOOK_AUTH}
+      REVENUECAT_PRO_ENTITLEMENT_ID: ${REVENUECAT_PRO_ENTITLEMENT_ID:-pro}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - app_network
-    command: bash -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    command: bash -c "until alembic upgrade head; do echo 'Postgres not ready, retrying Alembic in 2s...'; sleep 2; done; uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    secrets:
+      - source: firebase_service_key
+        target: firebase_service_key.json
+
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: apps/scheduler/Dockerfile
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      TZ: America/Vancouver
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PYTHONPATH: /app/shared:/app/apps/scheduler
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - app_network
+
+  jobs:
+    build:
+      context: ../..
+      dockerfile: apps/jobs/Dockerfile
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      TZ: America/Vancouver
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      PYTHONPATH: /app/shared:/app/apps/jobs
+      RUNNER_NAME: ${RUNNER_NAME:-jobs-runner-server}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DO_SPACES_BUCKET: ${DO_SPACES_BUCKET}
+      DO_SPACES_REGION: ${DO_SPACES_REGION}
+      DO_SPACES_ENDPOINT: ${DO_SPACES_ENDPOINT}
+      DO_SPACES_KEY: ${DO_SPACES_KEY}
+      DO_SPACES_SECRET: ${DO_SPACES_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - app_network
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+      - ../../apps/backend/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    restart: unless-stopped
+    networks:
+      - app_network
 
   caddy:
     image: caddy:2-alpine
@@ -47,7 +136,6 @@ services:
     networks:
       - app_network
 
-
   portainer:
     image: portainer/portainer-ce:latest
     restart: always
@@ -63,10 +151,16 @@ services:
 
 networks:
   app_network:
+    name: app_network
     driver: bridge
 
 volumes:
   postgres_data:
   portainer_data:
+  redis_data:
   caddy_data:
   caddy_config:
+
+secrets:
+  firebase_service_key:
+    file: ../../secrets/firebase_service_key.json

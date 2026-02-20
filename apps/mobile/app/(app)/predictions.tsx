@@ -1,0 +1,1 @@
+export { default } from '../../src/screens/predictions/PredictionsScreen';

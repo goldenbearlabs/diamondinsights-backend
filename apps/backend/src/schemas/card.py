@@ -1,7 +1,7 @@
 from pydantic import BaseModel
-from typing import Optional
+from src.schemas.quirk import QuirkResponse
+from typing import Any, Dict, Optional
 
-# This class defines the JSON structure that gets returned
 class CardResponse(BaseModel):
     id: str
     name: str
@@ -9,7 +9,18 @@ class CardResponse(BaseModel):
     ovr: int
     rarity: str
     display_position: str
+    display_primary_position: Optional[str] = None
+    display_secondary_positions: Optional[str] = None
     display_seconday_position: Optional[str] = None
+    true_overall: Optional[float] = None
+    true_overall_rounded: Optional[int] = None
+    meta_overall: Optional[float] = None
+    meta_overall_rounded: Optional[int] = None
+    your_overall: Optional[float] = None
+    your_overall_rounded: Optional[int] = None
+    true_overall_by_position: Optional[Dict[str, int]] = None
+    meta_overall_by_position: Optional[Dict[str, int]] = None
+    your_overall_by_position: Optional[Dict[str, float]] = None
     jersey_number: int
     age: int
     bat_hand: str
@@ -19,6 +30,7 @@ class CardResponse(BaseModel):
     born: str
     is_hitter: bool
     series_name: str
+    baked_img: str
     img: str
     hit_rank_image: Optional[str] = None
     fielding_rank_image: Optional[str] = None
@@ -30,7 +42,6 @@ class CardResponse(BaseModel):
     mlb_id: Optional[int] = None
     year: int
 
-    # pitching attributes
     stamina: int
     pitching_clutch: int
     hits_per_bf: int
@@ -41,7 +52,6 @@ class CardResponse(BaseModel):
     pitch_control: int
     pitch_movement: int
 
-    #hitting attributes
     contact_left: int
     contact_right: int
     power_left:int
@@ -53,7 +63,6 @@ class CardResponse(BaseModel):
     drag_bunting_ability: int
     hitting_durability: int
 
-    #fielding
     fielding_durability: int
     fielding_ability: int
     arm_strength: int
@@ -63,8 +72,12 @@ class CardResponse(BaseModel):
     speed: int
     baserunning_ability: int
     baserunning_aggression: int
+    quirks: Optional[list[QuirkResponse]] = None
 
-    
+    comment_count: Optional[int] = 0
+    user_prediction_count: Optional[int] = 0
+    predicted_ovr: Optional[int] = None
+    predicted_attributes: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

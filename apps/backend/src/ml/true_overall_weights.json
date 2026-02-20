@@ -1,0 +1,137 @@
+{
+  "generated_at_utc": "2026-02-10T17:52:47.839621+00:00",
+  "roles": {
+    "hitter": {
+      "display_position_coefficients": {
+        "1B": 0.4728228121525345,
+        "2B": -0.8841835043175329,
+        "3B": -0.893644129005098,
+        "C": 0.38804940967869483,
+        "CF": -0.30981630649513414,
+        "DH": 3.442801528465473,
+        "LF": -0.8199485678882393,
+        "RF": -0.8070616723984959,
+        "SS": -0.5890195701922091
+      },
+      "intercept": 20.690337434164576,
+      "numeric_coefficients": {
+        "arm_accuracy": 0.0481602131229951,
+        "arm_strength": 0.04517167522013837,
+        "baserunning_ability": 0.022037812485555693,
+        "baserunning_aggression": 0.0075775176025782084,
+        "batting_clutch": 0.04108256803617105,
+        "blocking": 0.021007952184260825,
+        "bunting_ability": 0.013586989669966973,
+        "contact_left": 0.04819509124722324,
+        "contact_right": 0.07903733343702518,
+        "drag_bunting_ability": -0.003155796797957331,
+        "fielding_ability": 0.06682039664212837,
+        "fielding_durability": 8.326672684688674e-17,
+        "hitting_durability": 0.02025538946630264,
+        "plate_discipline": 0.021155678557784156,
+        "plate_vision": 0.12772791768553632,
+        "power_left": 0.08818730085861574,
+        "power_right": 0.15018493325410995,
+        "reaction_time": 0.0654825755035374,
+        "speed": 0.04643507802319548
+      },
+      "numeric_features": [
+        "contact_left",
+        "contact_right",
+        "power_left",
+        "power_right",
+        "plate_vision",
+        "plate_discipline",
+        "batting_clutch",
+        "bunting_ability",
+        "drag_bunting_ability",
+        "hitting_durability",
+        "fielding_durability",
+        "fielding_ability",
+        "arm_strength",
+        "arm_accuracy",
+        "reaction_time",
+        "blocking",
+        "speed",
+        "baserunning_ability",
+        "baserunning_aggression"
+      ],
+      "secondary_position_coefficients": {
+        "1B": -0.014342240914363114,
+        "2B": -0.07976999694554278,
+        "3B": -0.23784257812020698,
+        "C": -1.966692646579401,
+        "CF": 0.06074222201764202,
+        "LF": -0.08521554159892927,
+        "P": 1.1892899164871493,
+        "RF": -0.18720898709953063,
+        "SS": 0.018857378978928724
+      },
+      "secondary_positions": [
+        "1B",
+        "2B",
+        "3B",
+        "C",
+        "CF",
+        "LF",
+        "P",
+        "RF",
+        "SS"
+      ]
+    },
+    "pitcher": {
+      "display_position_coefficients": {
+        "CP": -1.8624886403298755,
+        "RP": -1.7356606612776122,
+        "SP": 3.5981493016075
+      },
+      "intercept": 16.091277426243416,
+      "numeric_coefficients": {
+        "bb_per_bf": 0.20752364007126212,
+        "hits_per_bf": 0.2214064173534499,
+        "hr_per_bf": 0.001221504029726303,
+        "k_per_bf": 0.20535560727621469,
+        "pitch_control": -0.0056377212316851,
+        "pitch_movement": 0.019089196899144664,
+        "pitch_velocity": 0.08390472674580748,
+        "pitching_clutch": 0.0552147117777253,
+        "stamina": 0.03456655180218952
+      },
+      "numeric_features": [
+        "stamina",
+        "pitching_clutch",
+        "hits_per_bf",
+        "k_per_bf",
+        "bb_per_bf",
+        "hr_per_bf",
+        "pitch_velocity",
+        "pitch_control",
+        "pitch_movement"
+      ],
+      "secondary_position_coefficients": {
+        "1B": 2.066403702804289,
+        "2B": 1.934544112653592,
+        "3B": -3.928651494235994,
+        "C": 0.11124212224678,
+        "CF": 2.1991510791198774,
+        "LF": -1.4360321537185823,
+        "P": 2.081140809137272,
+        "RF": 2.7072793179386365,
+        "SS": 1.6203343279472722
+      },
+      "secondary_positions": [
+        "1B",
+        "2B",
+        "3B",
+        "C",
+        "CF",
+        "LF",
+        "P",
+        "RF",
+        "SS"
+      ]
+    }
+  },
+  "target": "ovr",
+  "version": 2
+}

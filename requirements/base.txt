@@ -1,0 +1,10 @@
+redis==7.1.0
+requests==2.32.5
+python-dotenv==1.2.1
+SQLAlchemy==2.0.44
+psycopg2-binary==2.9.11
+firebase-admin==7.1.0
+numpy==2.4.0
+pandas==2.3.3
+boto3==1.42.41
+pyarrow==23.0.0

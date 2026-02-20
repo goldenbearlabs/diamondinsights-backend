@@ -1,22 +1,38 @@
-
 import time
+from contextlib import asynccontextmanager
+import logging
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
-from src.api.routes import (
-    cards,
-    completed_orders,
-    listings,
-    market_candles,
-    mlb_game_batting_stats,
-    players,
-    quirks,
-)
+from shared.core.firebase_admin import init_firebase_admin
+from src.api.main import api_router
+from src.core.cache import close_cache_client, init_cache_client
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
-app = FastAPI(title="DiamondInsights API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Performs startup and cleanup operations for the FastAPI app instance
+    Operations before the yield are run before the app starts.
+    Operations after the yield are run after the app shuts down.
+    Exceptions not handled inside the context will re-raise at the yield
+
+    Args:
+        app: FastAPI instance this context serves
+    """
+    init_firebase_admin()
+    app.state.cache = init_cache_client()
+    try:
+        yield
+    finally:
+        close_cache_client(app.state.cache)
+
+app = FastAPI(title="DiamondInsights API", 
+              version="1.0.0",
+              summary="API serves the web & mobile for Diamond Insights and lives on a Digital Ocean server.",
+              lifespan=lifespan)
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
@@ -32,13 +48,7 @@ async def add_process_time_header(request: Request, call_next):
 
     return response
 
-app.include_router(cards.router)
-app.include_router(listings.router)
-app.include_router(completed_orders.router)
-app.include_router(quirks.router)
-app.include_router(market_candles.router)
-app.include_router(mlb_game_batting_stats.router)
-app.include_router(players.router)
+app.include_router(api_router)
 
 @app.get("/")
 def health_check():

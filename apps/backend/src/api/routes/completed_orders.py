@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from src.database.database import get_db
-from src.database.models import Card, CompletedOrder
-from src.schemas.completed_order import CompletedOrderResponse
-from datetime import datetime
+from shared.db.database import get_db
+from shared.db.models import Card, CompletedOrder
+from src.schemas.completed_order import CompletedOrderResponse, CompletedOrderRow
 
 
 router = APIRouter(prefix="/completed_orders", tags=["completed_orders"])
@@ -57,4 +57,76 @@ def get_completed_orders(
 
     return completed_orders
 
+
+@router.get("/latest", response_model=List[CompletedOrderRow])
+def get_latest_completed_orders(
+    card_id: Optional[str] = Query(None),
+    series: Optional[str] = Query(None),
+    name: Optional[str] = Query(None),
+    is_buy: Optional[bool] = Query(None),
+    limit: int = Query(50, le=100),
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    gets latest completed order per card (optionally filtered by series or name)
+    """
+
+    latest_subq = (
+        db.query(
+            CompletedOrder.card_id,
+            func.max(CompletedOrder.date).label("max_date")
+        )
+        .group_by(CompletedOrder.card_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(CompletedOrder)
+        .join(
+            latest_subq,
+            (CompletedOrder.card_id == latest_subq.c.card_id)
+            & (CompletedOrder.date == latest_subq.c.max_date)
+        )
+        .join(Card, CompletedOrder.card_id == Card.id)
+    )
+
+    if card_id is not None:
+        query = query.filter(CompletedOrder.card_id == card_id)
+
+    if series is not None:
+        query = query.filter(Card.series_name.ilike(series))
+
+    if name is not None:
+        query = query.filter(Card.name.ilike(f"%{name}%"))
+
+    if is_buy is not None:
+        query = query.filter(CompletedOrder.is_buy == is_buy)
+
+    query = query.order_by(CompletedOrder.date.desc())
+
+    return query.limit(limit).offset(offset).all()
+
     
+@router.get("/{card_id}/history", response_model=List[CompletedOrderRow])
+def get_card_order_history(
+    card_id: str,
+    limit: int = Query(500, le=1000), 
+    db: Session = Depends(get_db)
+):
+    """
+    Gets raw transaction history for a specific card.
+    Ordered by Oldest -> Newest for graphing.
+    """
+    orders = (
+        db.query(CompletedOrder)
+        .filter(CompletedOrder.card_id == card_id)
+        .order_by(CompletedOrder.date.asc()) # Critical for graphs
+        .limit(limit)
+        .all()
+    )
+    
+    if not orders:
+        return []
+
+    return orders

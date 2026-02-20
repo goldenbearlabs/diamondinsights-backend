@@ -1,10 +1,24 @@
 {
   "name": "di-monorepo",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "web": "npm --workspace apps/web run dev",
-    "mobile": "npm --workspace apps/mobile start",
-    "mobile:tunnel": "npm --workspace apps/mobile start -- --tunnel"
+    "web:dev": "npm --workspace apps/web run dev",
+    "web:build": "npm --workspace apps/web run build",
+    "web:lint": "npm --workspace apps/web run lint",
+    "vercel:link:web": "npx vercel link --cwd apps/web",
+    "vercel:pull:web": "npx vercel pull --cwd apps/web",
+    "vercel:deploy:web": "npx vercel deploy --cwd apps/web",
+    "vercel:deploy:web:prod": "npx vercel deploy --prod --cwd apps/web",
+    "mobile": "npm --workspace apps/mobile start -- --go",
+    "mobile:tunnel": "npm --workspace apps/mobile start -- --go --tunnel"
+  },
+  "dependencies": {
+    "react-native-gifted-charts": "^1.4.73",
+    "react-native-linear-gradient": "^2.8.3"
   }
 }

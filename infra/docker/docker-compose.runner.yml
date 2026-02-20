@@ -1,17 +1,17 @@
 services:
-  runner:
+  jobs:
     build:
-      context: ../../apps/backend
-      dockerfile: Dockerfile
-    image: mlb_backend_image
+      context: ../..
+      dockerfile: apps/jobs/Dockerfile
+    working_dir: /app
     restart: unless-stopped
     environment:
+      TZ: America/Vancouver
+      REDIS_URL: ${REDIS_URL}
+      PYTHONPATH: /app/shared:/app/apps/jobs
+      RUNNER_NAME: ${RUNNER_NAME:-jobs-runner-1}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_HOST: ${POSTGRES_HOST}
-      POSTGRES_PORT: 5432
-      TZ: America/Vancouver
-    volumes:
-      - ../../apps/backend/cron/crontab:/app/crontab:ro
-    command: ["/usr/local/bin/supercronic", "/app/crontab"]
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
