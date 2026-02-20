@@ -41,7 +41,7 @@ def test_initializes_when_missing(monkeypatch):
     monkeypatch.setattr(firebase_admin_module.firebase_admin, "initialize_app", lambda cred: new_app)
 
     assert firebase_admin_module.init_firebase_admin() is new_app
-    assert seen["path"] == "/run/secrets/firebase_service_account.json"
+    assert seen["path"] == "/run/secrets/firebase_service_key.json"
 
 
 def test_logs_and_raises_if_certificate_ioerror(monkeypatch, caplog):
