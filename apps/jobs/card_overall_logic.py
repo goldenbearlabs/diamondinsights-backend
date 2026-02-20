@@ -50,6 +50,12 @@ DISPLAY_POSITION_COL = "display_position"
 DEFAULT_TRUE_OVERALL_WEIGHTS_PATH = PROJECT_ROOT / "apps/backend/src/ml/true_overall_weights.json"
 HITTER_EVALUATED_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
 HITTER_POSITION_PENALTY_ATTRS = ("fielding_ability", "arm_accuracy", "reaction_time")
+HITTER_SECONDARY_POSITION_PENALTY_PCT = 0.05
+HITTER_OUT_OF_POSITION_BASE_PENALTY_PCT = 0.12
+HITTER_OUTFIELD_INFIELD_CROSS_PENALTY_PCT = 0.16
+HITTER_OUTFIELDER_TO_CATCHER_PENALTY_PCT = 0.30
+OUTFIELD_POSITIONS = {"LF", "CF", "RF"}
+INFIELD_POSITIONS = {"C", "1B", "2B", "3B", "SS"}
 
 
 def _resolve_weights_path(path: Path) -> Path:
@@ -273,10 +279,10 @@ HITTER_OVERALL_WEIGHTS: Dict[str, float] = {
     "power_right": 2,
     "plate_vision": 1.10,
     "batting_clutch": 1.50,
-    "fielding_ability": 1.15,
+    "fielding_ability": 1.50,
     "arm_strength": 1.10,
     "arm_accuracy": 0.75,
-    "reaction_time": 1.15,
+    "reaction_time": 1.50,
     "speed": 1.25,
     "baserunning_ability": 0.95,
     # Low-value hitter traits.
@@ -375,6 +381,34 @@ def _split_secondary_positions(v: object) -> List[str]:
         return []
     parts = [p.strip() for p in cleaned.split(",") if p.strip()]
     return list(dict.fromkeys(parts))
+
+
+def _hitter_position_penalty(
+    primary_position: object,
+    evaluated_position: object,
+    secondary_positions: List[str] | None = None,
+) -> Tuple[float, str]:
+    primary = _clean_main_position(primary_position)
+    evaluated = _clean_main_position(evaluated_position)
+    secondary_set = {_clean_main_position(p) for p in (secondary_positions or [])}
+    secondary_set.discard("")
+
+    if not evaluated:
+        return 0.0, "none"
+    if evaluated == primary:
+        return 0.0, "primary"
+    if evaluated in secondary_set:
+        return HITTER_SECONDARY_POSITION_PENALTY_PCT, "secondary"
+
+    if primary in OUTFIELD_POSITIONS and evaluated == "C":
+        return HITTER_OUTFIELDER_TO_CATCHER_PENALTY_PCT, "out_of_position_outfielder_to_catcher"
+
+    outfield_to_infield = primary in OUTFIELD_POSITIONS and evaluated in INFIELD_POSITIONS
+    infield_to_outfield = primary in INFIELD_POSITIONS and evaluated in OUTFIELD_POSITIONS
+    if outfield_to_infield or infield_to_outfield:
+        return HITTER_OUTFIELD_INFIELD_CROSS_PENALTY_PCT, "out_of_position_outfield_infield"
+
+    return HITTER_OUT_OF_POSITION_BASE_PENALTY_PCT, "out_of_position"
 
 
 def _normalize_common_features(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
