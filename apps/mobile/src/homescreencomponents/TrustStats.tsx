@@ -12,7 +12,7 @@ const StatItem = ({ value, label }: { value: string, label: string }) => (
 export const TrustStats = () => {
   return (
     <View style={styles.container}>
-      <StatItem value="96%" label="Model Accuracy" />
+      <StatItem value="~90%" label="Model Accuracy" />
       
       <StatItem value="17k+" label="Players Analyzed" />
       
