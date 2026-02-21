@@ -20,7 +20,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
-import { apiGet, apiPostAuth, apiDeleteAuth, apiGetAuth, apiPatchAuth, updatePortfolioHolding } from '../../lib/api';
+import { apiGet, apiPostAuth, apiDeleteAuth, apiGetAuth, apiPatchAuth, updatePortfolioHolding, getUserPrediction, saveUserPrediction } from '../../lib/api';
 
 const STUB_ICON = require('../../../assets/images/stub.png');
 
@@ -162,6 +162,20 @@ export default function PortfolioScreen() {
     return () => clearTimeout(timer);
   }, [searchText, selectedCard]);
 
+  useEffect(() => {
+    if (selectedCard) {
+      getUserPrediction(selectedCard.id)
+        .then(res => {
+          if (res && res.predicted_ovr != null) {
+            setProjectedOvr(res.predicted_ovr.toString());
+          }
+        })
+        .catch(() => {
+          // Silently ignore if no prediction exists
+        });
+    }
+  }, [selectedCard]);
+
   // ── Derived totals ─────────────────────────────────────────────────────────
 
   const holdings = portfolio?.holdings ?? [];
@@ -196,13 +210,17 @@ export default function PortfolioScreen() {
 
     setAdding(true);
     try {
-      await apiPostAuth('/portfolios/me/holdings', {
-        card_id: selectedCard.id,
-        quantity: qty,
-        avg_price: price,
-        user_predicted_ovr: ovr,
-        notes: notes.trim() || null,
-      });
+      await Promise.all([
+        apiPostAuth('/portfolios/me/holdings', {
+          card_id: selectedCard.id,
+          quantity: qty,
+          avg_price: price,
+          user_predicted_ovr: ovr,
+          notes: notes.trim() || null,
+        }),
+        saveUserPrediction({ card_id: selectedCard.id, predicted_ovr: ovr }).catch(e => console.error('Prediction sync failed', e))
+      ]);
+      
       // Reset form
       setSelectedCard(null);
       setSearchText('');
@@ -322,7 +340,19 @@ export default function PortfolioScreen() {
         notes: editNotes.trim() || null,
       };
 
-      await updatePortfolioHolding(editingHolding.card_id, payload);
+      const promises: Promise<any>[] = [updatePortfolioHolding(editingHolding.card_id, payload)];
+      
+      if (editProjectedOvr.trim()) {
+        promises.push(
+          saveUserPrediction({ 
+            card_id: editingHolding.card_id, 
+            predicted_ovr: parseInt(editProjectedOvr, 10) 
+          }).catch(e => console.error('Prediction sync failed', e))
+        );
+      }
+
+      await Promise.all(promises);
+      
       handleCancelEdit();
       setSuccessMessage('Investment updated successfully');
       await fetchPortfolio();
@@ -453,7 +483,7 @@ export default function PortfolioScreen() {
 
         <View style={styles.investmentPLRow}>
           <View style={styles.plBlock}>
-            <Text style={styles.plBlockLabel}>Your Projection - ({yourOvr} OVR)</Text>
+            <Text style={styles.plBlockLabel}>Your Prediction - ({yourOvr} OVR)</Text>
             <View style={styles.plValueRow}>
               <Image source={STUB_ICON} style={styles.stubIconSmall} />
               <Text style={[styles.plBlockValue, { color: plColor(yourPL) }]}>
@@ -585,6 +615,7 @@ export default function PortfolioScreen() {
                           setSelectedCard(null);
                           setSearchText('');
                           setNotes('');
+                          setProjectedOvr('');
                         }}
                       >
                         <Ionicons
@@ -695,7 +726,12 @@ export default function PortfolioScreen() {
                     />
                   </View>
                   <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Projected OVR</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 4 }}>
+                      <Text style={[styles.inputLabel, { marginBottom: 0 }]}>Predicted OVR</Text>
+                      <TouchableOpacity onPress={() => Alert.alert('Predicted OVR', 'This value is synced with your Leaderboard predictions. Any value you enter here will become your official prediction for this card.')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Ionicons name="information-circle-outline" size={14} color={theme.colors.muted} />
+                      </TouchableOpacity>
+                    </View>
                     <TextInput
                       style={styles.numberInput}
                       placeholder="0"
@@ -862,7 +898,12 @@ export default function PortfolioScreen() {
                   </View>
 
                   <View style={{ marginTop: 12 }}>
-                    <Text style={styles.inputLabel}>Projected OVR</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 4 }}>
+                      <Text style={[styles.inputLabel, { marginBottom: 0 }]}>Predicted OVR</Text>
+                      <TouchableOpacity onPress={() => Alert.alert('Predicted OVR', 'This value is synced with your Leaderboard predictions. Any value you enter here will become your official prediction for this card.')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Ionicons name="information-circle-outline" size={14} color={theme.colors.muted} />
+                      </TouchableOpacity>
+                    </View>
                     <TextInput
                       style={styles.numberInput}
                       placeholder="0"

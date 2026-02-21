@@ -141,6 +141,24 @@ export default function CardScreen() {
                       <Text style={styles.statLabel}>OVERALL</Text>
                       <Text style={styles.statValue}>{card.ovr}</Text>
                     </View>
+
+                    {card.true_overall != null && (
+                    <View style={[styles.statBadge, styles.trueBadge]}>
+                      <Text style={[styles.statLabel, styles.trueText]}>TRUE</Text>
+                      <Text style={[styles.statValue, styles.trueText]}>
+                        {Math.round(Number(card.true_overall))}
+                      </Text>
+                    </View>
+                  )}
+
+                    {card.meta_overall != null && (
+                    <View style={[styles.statBadge, styles.metaBadge]}>
+                      <Text style={[styles.statLabel, styles.metaText]}>META</Text>
+                      <Text style={[styles.statValue, styles.metaText]}>
+                        {Math.round(Number(card.meta_overall))}
+                      </Text>
+                    </View>
+                  )}
                   </View>
                 </View>
               </View>
@@ -290,14 +308,28 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginVertical: 12 },
   statBadge: { 
     backgroundColor: 'rgba(59, 130, 246, 0.15)',
-    padding: 10, borderRadius: 8, alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#3b82f6'
+    padding: 8, borderRadius: 8, alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#3b82f6'
   },
   overallRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
-  statLabel: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold' },
-  statValue: { color: '#3b82f6', fontSize: 24, fontWeight: '900' },
+  statLabel: { color: '#3b82f6', fontSize: 9, fontWeight: 'bold' },
+  statValue: { color: '#3b82f6', fontSize: 18, fontWeight: '900' },
+  trueBadge: {
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    borderColor: '#a855f7',
+  },
+  trueText: {
+    color: '#a855f7',
+  },
+  metaBadge: {
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    borderColor: '#fbbf24',
+  },
+  metaText: {
+    color: '#fbbf24',
+  },
   sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
   windowFilterRow: {
     flexDirection: 'row',

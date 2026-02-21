@@ -35,6 +35,9 @@ type CardResult = {
   year: number;
   ovr: number;
   img: string;
+  baked_img?: string; // Added baked_img
+  series_name: string; // Added series_name
+  is_live_set: boolean;
 };
 
 type SearchResponse = {
@@ -96,7 +99,8 @@ export const SearchResultsPanel = ({
       setError(null);
 
       try {
-        const params = new URLSearchParams({ q: trimmed, limit: "12" });
+        // Enforce the Year 25 search here
+        const params = new URLSearchParams({ q: trimmed, limit: "12", year: "25" });
         if (mode === "users") params.set("users_only", "true");
         if (mode === "cards") params.set("cards_only", "true");
         const data = await apiGet<SearchResponse>(`/search?${params.toString()}`);
@@ -161,18 +165,30 @@ export const SearchResultsPanel = ({
     router.push({ pathname: "/(app)/account", params: { userId: String(userId) } });
   };
 
-  const handleCardPress = (card: CardResult) => {
-    onClose();
-    router.push({
-      pathname: "/(app)/card",
-      params: {
-        cardId: card.id,
-        cardName: card.name,
-        cardYear: String(card.year),
-        cardOvr: String(card.ovr),
-        cardImg: card.img,
-      },
-    });
+  const handleCardPress = async (card: CardResult) => {
+    try {
+      const fullCardData = await apiGet(`/cards/${card.id}`);
+      
+      onClose();
+
+      const targetPath = card.is_live_set ? `/predictions/${card.id}` : "/(app)/card";
+
+      router.push({
+        pathname: targetPath as any, 
+        params: {
+          cardData: JSON.stringify(fullCardData),
+        },
+      });
+    } catch (err) {
+      console.error("Failed to fetch full card details", err);
+      // Fallback in case of error
+      onClose();
+      const fallbackPath = card.is_live_set ? `/predictions/${card.id}` : "/(app)/card";
+      router.push({ 
+        pathname: fallbackPath as any, 
+        params: { cardData: JSON.stringify(card) } 
+      });
+    }
   };
 
   if (!visible) return null;
@@ -260,11 +276,15 @@ export const SearchResultsPanel = ({
                           style={styles.resultRow}
                           onPress={() => handleCardPress(card)}
                         >
-                          <Image source={{ uri: card.img }} style={styles.cardImage} />
+                          <Image 
+                            source={{ uri: card.baked_img || card.img }} 
+                            style={styles.cardImage} 
+                            resizeMode="contain"
+                          />
                           <View style={styles.resultText}>
                             <Text style={styles.resultTitle}>{card.name}</Text>
                             <Text style={styles.resultMeta}>
-                              {card.year} · OVR {card.ovr}
+                              {card.series_name} · OVR {card.ovr}
                             </Text>
                           </View>
                           <FontAwesome5 name="chevron-right" size={12} color={theme.colors.muted} />
@@ -350,7 +370,7 @@ const styles = StyleSheet.create({
   resultRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 14,
     backgroundColor: "rgba(15, 23, 42, 0.85)",
@@ -361,10 +381,10 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   cardImage: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    marginRight: 12,
+    width: 50,    // Increased width
+    height: 70,   // Increased height drastically
+    borderRadius: 4, 
+    marginRight: 14,
   },
   resultText: {
     flex: 1,

@@ -4,9 +4,36 @@ import { FontAwesome5 } from '@expo/vector-icons';
 import { theme } from '../theme/colors';
 
 const STEPS = [
-  { icon: 'database', title: 'Data Collection', desc: 'We aggregate real-time player stats and historic trends.', color: '#3b82f6' },
-  { icon: 'brain', title: 'AI Analysis', desc: 'Our model identifies patterns and predicts rating upgrades.', color: '#a855f7' },
-  { icon: 'chart-line', title: 'Profit', desc: 'Get actionable insights before the market catches up.', color: '#22c55e' },
+  { 
+    icon: 'satellite-dish', 
+    title: 'Data Collection', 
+    desc: 'We aggregate real-time player stats and historic trends.', 
+    color: '#3b82f6' // Blue
+  },
+  { 
+    icon: 'microchip', 
+    title: 'AI Analysis', 
+    desc: 'Our model identifies patterns and predicts rating upgrades.', 
+    color: '#a855f7' // Purple
+  },
+  { 
+    icon: 'gem', 
+    title: 'Profit', 
+    desc: 'Get actionable insights before the market catches up.', 
+    color: '#22c55e' // Green
+  },
+  { 
+    icon: 'gamepad', 
+    title: 'Analyze Your Gameplay', 
+    desc: 'View advanced stats and deep analytics from your actual MLB The Show games.', 
+    color: '#ef4444' // Red
+  },
+  { 
+    icon: 'trophy', 
+    title: 'Leaderboard', 
+    desc: 'Make your own roster predictions and compete against the community for the top spot.', 
+    color: '#fbbf24' // Gold/Yellow
+  },
 ];
 
 export const HowItWorks = () => {

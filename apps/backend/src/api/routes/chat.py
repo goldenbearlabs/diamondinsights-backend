@@ -4,6 +4,7 @@ from firebase_admin import auth
 from datetime import datetime
 import json
 import logging
+import re
 
 from shared.db.database import get_db 
 from shared.db.models import Message, Users
@@ -12,6 +13,33 @@ from src.chat_websockets import manager
 router = APIRouter()
 logger = logging.getLogger("uvicorn")
 
+BLOCKED_WORDS = [
+    "nigger",
+    "nigga",
+    "niggers",
+    "niggas",
+    "nigg",
+    "faggot",
+    "faggots",
+    "fag",
+    "retard",
+    "retards",
+    ]
+def censor_text(text: str) -> str:
+    if not text:
+        return text
+    
+    censored = text
+    for word in BLOCKED_WORDS:
+        
+        pattern_str = r'+'.join(re.escape(char) for char in word) + r'+'
+        
+        
+        pattern = re.compile(pattern_str, re.IGNORECASE)
+        
+        censored = pattern.sub("***", censored)
+    
+    return censored
 async def get_current_user_ws(token: str, db: Session):
     try:
         decoded_token = auth.verify_id_token(token)
@@ -85,7 +113,8 @@ async def websocket_endpoint(
             command = data.get("type")
             
             if command == "new_message":
-                content = data.get("text")
+                raw_content = data.get("text", "")
+                content = censor_text(raw_content)
                 parent_id = data.get("parentId") 
 
                 new_msg = Message(content=content, user_id=user.id, parent_id=parent_id)
@@ -106,7 +135,9 @@ async def websocket_endpoint(
 
             elif command == "edit_message":
                 msg_id = data.get("id")
-                new_text = data.get("text")
+
+                raw_new_text = data.get("text", "")
+                new_text = censor_text(raw_new_text)
                 msg = db.query(Message).filter(Message.id == msg_id).first()
                 
                 if msg and msg.user_id == user.id:

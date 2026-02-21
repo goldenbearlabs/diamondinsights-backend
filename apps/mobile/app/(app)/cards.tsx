@@ -499,12 +499,16 @@ export default function CardsRankingsScreen() {
                   </Text>
                 </View>
                 {rows.map((card, index) => (
-                  <View
+                  <Pressable
                     key={`pinned-${card.id}`}
                     style={[styles.pinnedImageCell, index % 2 === 0 ? styles.evenRow : styles.oddRow]}
+                    onPress={() => {
+                      router.push({ pathname: '/(app)/card', params: { cardData: JSON.stringify(card) } });
+
+                    }}
                   >
                     <CardImage uri={card.baked_img || card.img || null} />
-                  </View>
+                  </Pressable>
                 ))}
               </Animated.View>
             </View>

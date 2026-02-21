@@ -5,31 +5,21 @@ import { theme } from '../theme/colors';
 
 const { width } = Dimensions.get('window');
 
-
 const CARD_WIDTH = width * 0.45; 
 const SPACING = 10;
 const SNAP_INTERVAL = CARD_WIDTH + SPACING * 2;
 const SPACER_WIDTH = (width - SNAP_INTERVAL) / 2;
 
+// 1. Added predicted_ovr to the type
 type CardData = {
   id: string;
   name: string;
   img: string;
   ovr: number;
+  predicted_ovr: number | null; 
 };
 
-
-const getFakePrediction = (baseOvr: number, id: string) => {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  
-  
-  const randomBoost = 1 + (Math.abs(hash) % 300) / 100; 
-  
-  return (baseOvr + randomBoost - 1.0).toFixed(2); 
-};
+// Removed the getFakePrediction function here
 
 export const PredictionCarousel = () => {
   const [cards, setCards] = useState<CardData[]>([]);
@@ -46,7 +36,6 @@ export const PredictionCarousel = () => {
 
   return (
     <View style={styles.container}>
-      
       <Animated.FlatList
         data={cards}
         keyExtractor={(item) => item.id}
@@ -81,8 +70,8 @@ export const PredictionCarousel = () => {
             extrapolate: 'clamp',
           });
 
-          
-          const predictedOvr = getFakePrediction(item.ovr, item.id);
+          // 2. Use the real prediction from the database, fallback to '-' if null
+          const displayPrediction = item.predicted_ovr != null ? Math.round(item.predicted_ovr) : '-';
 
           return (
             <Animated.View style={[styles.cardWrapper, { transform: [{ scale }], opacity }]}>
@@ -92,9 +81,15 @@ export const PredictionCarousel = () => {
                 <View style={styles.scoreRow}>
                     <Text style={styles.currentScore}>{item.ovr}</Text>
                     <Text style={styles.arrow}>➔</Text>
-                    <Text style={styles.predictedScore}>{predictedOvr}</Text>
+                    <Text style={[
+                      styles.predictedScore, 
+                      // 3. Optional visual flair: change color to red if the prediction is a downgrade
+                      item.predicted_ovr != null && item.predicted_ovr < item.ovr && { color: '#f87171' }
+                    ]}>
+                      {displayPrediction}
+                    </Text>
                 </View>
-                <Text style={styles.fakeLabel}>AI PREDICTION EXAMPLE</Text>
+                <Text style={styles.fakeLabel}>PRO PREDICTION</Text>
               </View>
             </Animated.View>
           );

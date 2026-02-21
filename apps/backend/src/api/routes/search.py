@@ -51,7 +51,8 @@ class CardSearchOut(BaseModel):
     is_live_set: bool
     series_name: str
     rarity: str
-    img: str
+    img: str | None = None
+    baked_img: str | None = None
 
     @staticmethod
     def from_orm(c: Card) -> "CardSearchOut":
@@ -64,6 +65,7 @@ class CardSearchOut(BaseModel):
             series_name=c.series_name,
             rarity=c.rarity,
             img=c.img,
+            baked_img=c.baked_img,
         )
 
 
@@ -77,6 +79,7 @@ def search(
     q: str = Query(min_length=1, max_length=80),
     users_only: bool = Query(default=False),
     cards_only: bool = Query(default=False),
+    year: int | None = Query(default=25), # Added default year filter
     limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     cache: Redis | None = Depends(get_cache_client),
@@ -92,7 +95,7 @@ def search(
     elif cards_only and not users_only:
         search_users = False
 
-    cache_key = build_cache_key("search", q_norm, users_only, cards_only, limit)
+    cache_key = build_cache_key("search", q_norm, users_only, cards_only, year, limit)
     cached = get_cached_json(cache, cache_key)
     if cached is not None:
         return SearchResponse.model_validate(cached)
@@ -114,13 +117,17 @@ def search(
         cards_stmt = (
             select(Card)
             .where(Card.search_name.ilike(f"%{q_norm}%"))
-            .order_by(
-                desc(Card.year),
-                desc(Card.is_live_set),
-                desc(Card.ovr),
-            )
-            .limit(limit)
         )
+        
+        if year is not None:
+            cards_stmt = cards_stmt.where(Card.year == year)
+            
+        cards_stmt = cards_stmt.order_by(
+            desc(Card.year),
+            desc(Card.is_live_set),
+            desc(Card.ovr),
+        ).limit(limit)
+        
         cards = db.scalars(cards_stmt).all()
         cards_out = [CardSearchOut.from_orm(c) for c in cards]
 
