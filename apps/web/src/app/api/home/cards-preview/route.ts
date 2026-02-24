@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { backendApiUrl } from "@/lib/admin-api";
+import { backendApiUrl } from "@/lib/backend-api";
 
 type BackendCardPreview = {
   id?: string;
