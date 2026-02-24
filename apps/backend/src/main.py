@@ -1,9 +1,11 @@
 import time
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from shared.core.firebase_admin import init_firebase_admin
 from src.api.main import api_router
@@ -11,6 +13,22 @@ from src.core.cache import close_cache_client, init_cache_client
 
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+DEFAULT_CORS_ALLOW_ORIGINS = (
+    "https://diamondinsights.app",
+    "https://www.diamondinsights.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
+
+def get_cors_allow_origins() -> list[str]:
+    raw_origins = (os.getenv("CORS_ALLOW_ORIGINS") or "").strip()
+    if not raw_origins:
+        return list(DEFAULT_CORS_ALLOW_ORIGINS)
+
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return origins or list(DEFAULT_CORS_ALLOW_ORIGINS)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,6 +51,16 @@ app = FastAPI(title="DiamondInsights API",
               version="1.0.0",
               summary="API serves the web & mobile for Diamond Insights and lives on a Digital Ocean server.",
               lifespan=lifespan)
+
+cors_allow_origins = get_cors_allow_origins()
+logger.info("CORS enabled for origins: %s", cors_allow_origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):

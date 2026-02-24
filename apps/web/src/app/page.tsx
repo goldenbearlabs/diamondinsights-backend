@@ -57,6 +57,7 @@ const TRUST_STATS = [
   { value: "24/7", label: "Market Updates" },
 ] as const;
 const CAROUSEL_ROTATE_MS = 3200;
+const CURRENT_YEAR = new Date().getFullYear();
 
 function toCountdown(totalSeconds: number): Countdown {
   const d = Math.floor(totalSeconds / 86_400);
@@ -331,6 +332,17 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        <footer className={styles.footer}>
+          <p>&copy; {CURRENT_YEAR} Diamond Insights by Golden Bear Labs</p>
+          <div className={styles.footerLinks}>
+            <a href="#how-it-works">How It Works</a>
+            <a href="mailto:support@goldenbearlabs.com">Contact</a>
+            <a href="https://x.com/goldenbearlabs" target="_blank" rel="noreferrer">
+              X
+            </a>
+          </div>
+        </footer>
       </div>
     </main>
   );

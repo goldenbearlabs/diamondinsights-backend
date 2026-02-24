@@ -40,6 +40,7 @@ services:
       TZ: America/Vancouver
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CACHE_DEFAULT_TTL_SEC: ${CACHE_DEFAULT_TTL_SEC:-60}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-https://diamondinsights.app,https://www.diamondinsights.app,http://localhost:3000,http://127.0.0.1:3000}
       PYTHONPATH: /app/src:/app/shared
       DO_SPACES_BUCKET: ${DO_SPACES_BUCKET}
       DO_SPACES_REGION: ${DO_SPACES_REGION}

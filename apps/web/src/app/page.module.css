@@ -444,6 +444,30 @@
   font-weight: 700;
 }
 
+.footer {
+  padding: 2px 2px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--color-muted);
+  font-size: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.footerLinks {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.footerLinks a {
+  color: var(--color-gold);
+  font-weight: 700;
+}
+
 @media (max-width: 768px) {
   .mainCard,
   .contactCard {
@@ -463,5 +487,10 @@
   .secondaryButton {
     font-size: 16px;
     padding: 13px 12px;
+  }
+
+  .footer {
+    justify-content: center;
+    text-align: center;
   }
 }
