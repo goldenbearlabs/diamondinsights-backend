@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { backendApiUrl, backendUnavailableResponse } from "@/lib/backend-api";
 import {
   adminUnauthorizedResponse,
   authHeaderFromCookie,
-  backendApiUrl,
-  backendUnavailableResponse,
 } from "@/lib/admin-api";
 
 type RosterSettingsBody = {

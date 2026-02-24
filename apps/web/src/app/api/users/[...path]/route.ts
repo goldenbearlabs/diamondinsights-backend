@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { backendApiUrl, backendUnavailableResponse } from "@/lib/admin-api";
+import { backendApiUrl, backendUnavailableResponse } from "@/lib/backend-api";
 
 function buildBackendPath(pathSegments: string[], search: string): string {
   const joined = pathSegments.join("/");
