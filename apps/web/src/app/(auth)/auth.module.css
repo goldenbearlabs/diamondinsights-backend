@@ -1,0 +1,151 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 14px;
+  background:
+    radial-gradient(860px 540px at 0% 0%, var(--blob-left), transparent 72%),
+    radial-gradient(820px 500px at 100% 100%, var(--blob-right), transparent 68%),
+    var(--color-background);
+}
+
+.card {
+  width: min(460px, 100%);
+  border-radius: 20px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-card);
+  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.45);
+}
+
+.title {
+  color: var(--color-text);
+  font-size: 30px;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin-top: 6px;
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.form {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.label {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.input {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--color-text);
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+.input::placeholder {
+  color: var(--color-muted);
+}
+
+.forgotRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.forgotButton {
+  border: 0;
+  background: transparent;
+  color: var(--color-gold);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.forgotButton:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.messageError {
+  color: var(--color-error);
+  font-size: 13px;
+}
+
+.messageNotice {
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.primaryButton {
+  margin-top: 4px;
+  border: 0;
+  background: var(--color-primary);
+  color: #ffffff;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 23, 42, 0.4);
+  color: var(--color-text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.avatarPreview {
+  margin: 2px auto 0;
+  border-radius: 999px;
+  border: 2px solid var(--color-primary);
+}
+
+.switchRow {
+  margin-top: 12px;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.switchRow span {
+  color: var(--color-muted);
+}
+
+.switchRow a {
+  color: var(--color-gold);
+  font-weight: 700;
+}
+
+.homeLink {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--color-muted);
+  font-size: 12px;
+}

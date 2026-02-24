@@ -51,6 +51,14 @@ npm run vercel:deploy:web:prod
 
 - `BACKEND_API_URL`: base URL for the FastAPI backend (used by admin API proxy routes).
   - Local default is `http://localhost:8000`.
+- User-facing web auth calls are proxied through Next route handlers at `/api/users/*` (same-origin).
+- `BACKEND_API_URL` is used by these proxies to reach FastAPI.
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+- `NEXT_PUBLIC_FIREBASE_APP_ID`
 
 ## Notes
 
