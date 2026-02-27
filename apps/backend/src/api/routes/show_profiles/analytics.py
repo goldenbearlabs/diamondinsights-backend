@@ -154,8 +154,9 @@ def _read_positive_int_env(name: str, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-_SHOW_STATS_REDIS_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_REDIS_CACHE_TTL_SEC", 14400)
-_SHOW_STATS_CLIENT_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_CLIENT_CACHE_TTL_SEC", 3600)
+_SHOW_STATS_REDIS_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_REDIS_CACHE_TTL_SEC", 21600)
+_SHOW_STATS_CLIENT_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_CLIENT_CACHE_TTL_SEC", 21600)
+_SHOW_SKILLS_REDIS_CACHE_TTL_SEC = _read_positive_int_env("SHOW_SKILLS_REDIS_CACHE_TTL_SEC", 21600)
 _SHOW_STATS_STORAGE_CACHE_TTL_SEC = _read_positive_int_env("SHOW_STATS_STORAGE_CACHE_TTL_SEC", 3600)
 _stats_storage_cache_lock = threading.Lock()
 _stats_facts_df_cache: dict[str, tuple[float, pd.DataFrame]] = {}
@@ -170,6 +171,11 @@ class _SkillContext:
 
 def _normalize_username(value: str) -> str:
     return str(value or "").strip().lower()
+
+
+def _cache_optional_int(value: Optional[int]) -> str:
+    iv = _to_int(value)
+    return str(iv) if iv is not None else "-"
 
 
 def _set_stats_http_cache_headers(response: Response, *, is_public: bool) -> None:
@@ -190,6 +196,20 @@ def _cache_stats_response(
         cache_key,
         response.model_dump(mode="json"),
         ttl_sec=max(1, _SHOW_STATS_REDIS_CACHE_TTL_SEC),
+    )
+    return response
+
+
+def _cache_skills_response(
+    cache: Redis | None,
+    cache_key: str,
+    response: ShowSkillsOut,
+) -> ShowSkillsOut:
+    set_cached_json(
+        cache,
+        cache_key,
+        response.model_dump(mode="json"),
+        ttl_sec=max(1, _SHOW_SKILLS_REDIS_CACHE_TTL_SEC),
     )
     return response
 
@@ -3424,16 +3444,33 @@ def _get_combined_archetype_cached(
 
 @router.get("/skills", response_model=ShowSkillsOut)
 def get_show_skills(
+    response: Response,
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims),
     pitcher_mlb_id: Optional[int] = Query(default=None, ge=0),
     hitter_mlb_id: Optional[int] = Query(default=None, ge=0),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowSkillsOut:
+    _set_stats_http_cache_headers(response, is_public=False)
     user = _get_authed_user(db, claims)
 
     sp = _get_profile_for_user(db, user.id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+
+    cache_key = build_cache_key(
+        "show",
+        "skills",
+        "me",
+        "v1",
+        _normalize_username(sp.username),
+        str((claims or {}).get("uid") or ""),
+        _cache_optional_int(pitcher_mlb_id),
+        _cache_optional_int(hitter_mlb_id),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowSkillsOut.model_validate(cached)
 
     username = sp.username
     df = _load_skill_facts_df(username)
@@ -3447,7 +3484,7 @@ def get_show_skills(
         reference_pitching_df=ref_pitching_df,
     )
 
-    return ShowSkillsOut(hitting=hitting, pitching=pitching)
+    return _cache_skills_response(cache, cache_key, ShowSkillsOut(hitting=hitting, pitching=pitching))
 
 
 @router.get("/stats", response_model=ShowAggregateStatsOut)
@@ -3688,13 +3725,30 @@ def get_show_hit_map(
 @public_router.get("/show/{username}/skills", response_model=ShowSkillsOut)
 def get_show_skills_by_username(
     username: str,
+    response: Response,
     db: Session = Depends(get_db),
     pitcher_mlb_id: Optional[int] = Query(default=None, ge=0),
     hitter_mlb_id: Optional[int] = Query(default=None, ge=0),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowSkillsOut:
+    _set_stats_http_cache_headers(response, is_public=True)
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+
+    cache_key = build_cache_key(
+        "show",
+        "skills",
+        "username",
+        "v1",
+        _normalize_username(sp.username),
+        _cache_optional_int(pitcher_mlb_id),
+        _cache_optional_int(hitter_mlb_id),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowSkillsOut.model_validate(cached)
+
     df = _load_skill_facts_df(sp.username)
     df = _filter_df_by_pitcher(df, pitcher_mlb_id)
     df = _filter_df_by_hitter(df, hitter_mlb_id)
@@ -3705,7 +3759,7 @@ def get_show_skills_by_username(
         reference_hitting_df=ref_hitting_df,
         reference_pitching_df=ref_pitching_df,
     )
-    return ShowSkillsOut(hitting=hitting, pitching=pitching)
+    return _cache_skills_response(cache, cache_key, ShowSkillsOut(hitting=hitting, pitching=pitching))
 
 
 @public_router.get("/show/{username}/stats", response_model=ShowAggregateStatsOut)
@@ -3875,13 +3929,31 @@ def get_show_hit_map_by_username(
 @public_router.get("/{user_id}/show/skills", response_model=ShowSkillsOut)
 def get_show_skills_for_user(
     user_id: int,
+    response: Response,
     db: Session = Depends(get_db),
     pitcher_mlb_id: Optional[int] = Query(default=None, ge=0),
     hitter_mlb_id: Optional[int] = Query(default=None, ge=0),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowSkillsOut:
+    _set_stats_http_cache_headers(response, is_public=True)
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
+
+    cache_key = build_cache_key(
+        "show",
+        "skills",
+        "user-id",
+        "v1",
+        user_id,
+        _normalize_username(sp.username),
+        _cache_optional_int(pitcher_mlb_id),
+        _cache_optional_int(hitter_mlb_id),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowSkillsOut.model_validate(cached)
+
     df = _load_skill_facts_df(sp.username)
     df = _filter_df_by_pitcher(df, pitcher_mlb_id)
     df = _filter_df_by_hitter(df, hitter_mlb_id)
@@ -3892,7 +3964,7 @@ def get_show_skills_for_user(
         reference_hitting_df=ref_hitting_df,
         reference_pitching_df=ref_pitching_df,
     )
-    return ShowSkillsOut(hitting=hitting, pitching=pitching)
+    return _cache_skills_response(cache, cache_key, ShowSkillsOut(hitting=hitting, pitching=pitching))
 
 
 @public_router.get("/{user_id}/show/stats", response_model=ShowAggregateStatsOut)

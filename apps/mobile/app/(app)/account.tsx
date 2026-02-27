@@ -25,16 +25,13 @@ import {
   apiGetAuth,
   apiPostAuth,
   apiPutAuth,
-  getMyEntitlements,
 } from "../../src/lib/api";
-import type { EntitlementsMeResponse } from "../../src/lib/api";
 import { toReadableAuthError } from "../../src/lib/authErrors";
 import { auth } from "../../src/lib/firebase";
 import { invalidateAvatarCache } from "../../src/lib/profileImage";
 import { uploadProfileImage } from "../../src/lib/storage";
 import { Avatar } from "../../src/components/Avatar";
 import { theme } from "../../src/theme/colors";
-import { presentProPaywall } from "../../src/lib/revenuecat";
 
 const STUB_ICON = require("../../assets/images/stub.png");
 
@@ -114,10 +111,6 @@ export default function AccountScreen() {
   const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"Investing" | "Gameplay">("Gameplay");
-  const [entitlements, setEntitlements] = useState<EntitlementsMeResponse | null>(null);
-  const [entitlementsLoading, setEntitlementsLoading] = useState(false);
-  const [entitlementsError, setEntitlementsError] = useState<string | null>(null);
-  const [paywallLoading, setPaywallLoading] = useState(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -233,38 +226,6 @@ export default function AccountScreen() {
     };
   }, [profile, profile?.id, profile?.is_me, activeTab]);
 
-  useEffect(() => {
-    let active = true;
-
-    const loadEntitlements = async () => {
-      if (!profile?.is_me) {
-        setEntitlements(null);
-        setEntitlementsError(null);
-        setEntitlementsLoading(false);
-        return;
-      }
-
-      setEntitlementsLoading(true);
-      setEntitlementsError(null);
-      try {
-        const data = await getMyEntitlements();
-        if (!active) return;
-        setEntitlements(data);
-      } catch (err: any) {
-        if (!active) return;
-        setEntitlements(null);
-        setEntitlementsError(err?.message ?? "Failed to load entitlements");
-      } finally {
-        if (active) setEntitlementsLoading(false);
-      }
-    };
-
-    loadEntitlements();
-
-    return () => {
-      active = false;
-    };
-  }, [profile?.id, profile?.is_me]);
 
   const openSettings = () => {
     if (!profile) return;
@@ -331,22 +292,6 @@ export default function AccountScreen() {
     }
   };
 
-  const openProPaywall = async () => {
-    setPaywallLoading(true);
-    setEntitlementsError(null);
-    try {
-      const paywall = await presentProPaywall();
-      if (paywall.purchasedOrRestored) {
-        setNotice("Purchase complete. Webhook sync may take a few seconds.");
-      }
-      const updated = await getMyEntitlements();
-      setEntitlements(updated);
-    } catch (err: any) {
-      setEntitlementsError(err?.message ?? "Failed to open paywall");
-    } finally {
-      setPaywallLoading(false);
-    }
-  };
 
   const saveProfile = async () => {
     if (!profile) return;
@@ -514,55 +459,16 @@ export default function AccountScreen() {
             </View>
 
             {profile.is_me ? (
-              <View style={styles.proCard}>
-                <View style={styles.proHeader}>
-                  <Text style={styles.proTitle}>Diamond Pro</Text>
-                  <View
-                    style={[
-                      styles.proBadge,
-                      entitlements?.has_pro ? styles.proBadgeActive : styles.proBadgeInactive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.proBadgeText,
-                        entitlements?.has_pro ? styles.proBadgeTextActive : styles.proBadgeTextInactive,
-                      ]}
-                    >
-                      {entitlements?.has_pro ? "Active" : "Free"}
-                    </Text>
-                  </View>
-                </View>
-
-                <Text style={styles.proDescription}>
-                  {entitlements?.has_pro
-                    ? "Your Pro entitlement is active."
-                    : "Unlock Pro features with the RevenueCat paywall."}
+              <View style={styles.proCtaCard}>
+                <Text style={styles.proCtaTitle}>Become Pro Member</Text>
+                <Text style={styles.proCtaDescription}>
+                  Unlock premium Diamond Insights features with a Pro membership.
                 </Text>
-                {entitlements?.pro_expires_at ? (
-                  <Text style={styles.proMeta}>
-                    Renews through {new Date(entitlements.pro_expires_at).toLocaleDateString()}
-                  </Text>
-                ) : null}
-                {entitlementsLoading ? (
-                  <View style={styles.loadingInline}>
-                    <ActivityIndicator color={theme.colors.text} />
-                  </View>
-                ) : null}
-                {entitlementsError ? <Text style={styles.errorText}>{entitlementsError}</Text> : null}
-
                 <TouchableOpacity
-                  style={[styles.proButton, paywallLoading && styles.proButtonDisabled]}
-                  disabled={paywallLoading}
-                  onPress={openProPaywall}
+                  style={styles.proCtaButton}
+                  onPress={() => router.push("/paywall")}
                 >
-                  <Text style={styles.proButtonText}>
-                    {paywallLoading
-                      ? "Opening..."
-                      : entitlements?.has_pro
-                        ? "Manage Subscription"
-                        : "Unlock Pro"}
-                  </Text>
+                  <Text style={styles.proCtaButtonText}>Become Pro Member</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -971,7 +877,7 @@ const styles = StyleSheet.create({
   summaryValueAccent: {
     color: "#fbbf24",
   },
-  proCard: {
+  proCtaCard: {
     padding: theme.spacing.m,
     borderRadius: 16,
     backgroundColor: "rgba(251, 191, 36, 0.08)",
@@ -979,62 +885,24 @@ const styles = StyleSheet.create({
     borderColor: "rgba(251, 191, 36, 0.35)",
     gap: 10,
   },
-  proHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  proTitle: {
+  proCtaTitle: {
     color: theme.colors.text,
     fontSize: 18,
     fontWeight: "800",
   },
-  proBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  proBadgeActive: {
-    backgroundColor: "rgba(34,197,94,0.2)",
-    borderColor: "rgba(34,197,94,0.6)",
-  },
-  proBadgeInactive: {
-    backgroundColor: "rgba(148,163,184,0.16)",
-    borderColor: "rgba(148,163,184,0.45)",
-  },
-  proBadgeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-  },
-  proBadgeTextActive: {
-    color: "#22c55e",
-  },
-  proBadgeTextInactive: {
-    color: theme.colors.muted,
-  },
-  proDescription: {
+  proCtaDescription: {
     color: theme.colors.muted,
     fontSize: 13,
     lineHeight: 18,
   },
-  proMeta: {
-    color: theme.colors.text,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  proButton: {
+  proCtaButton: {
     marginTop: 2,
     borderRadius: 12,
     paddingVertical: 11,
     backgroundColor: "#fbbf24",
     alignItems: "center",
   },
-  proButtonDisabled: {
-    opacity: 0.75,
-  },
-  proButtonText: {
+  proCtaButtonText: {
     color: "#111827",
     fontSize: 14,
     fontWeight: "800",

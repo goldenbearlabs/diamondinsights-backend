@@ -106,7 +106,7 @@ export const AppHeader = () => {
                 <Ionicons name="mail-outline" size={20} color={theme.colors.muted} />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.proBadge} onPress={() => {}}>
+              <TouchableOpacity style={styles.proBadge} onPress={() => router.push("/paywall")}>
                 <FontAwesome5 name="crown" size={12} color={ACCENT} style={styles.proIcon} />
                 <Text style={styles.proText}>PRO</Text>
               </TouchableOpacity>

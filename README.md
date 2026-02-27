@@ -32,6 +32,23 @@ http://142.93.158.215:9000
 - `make ps` shows running containers
 - `make logs` tails local logs
 
+## RevenueCat Webhook
+
+Use this webhook URL in RevenueCat:
+
+- `POST /billing/revenuecat/webhook` (for example: `https://<your-api-domain>/billing/revenuecat/webhook`)
+
+Required env vars:
+
+- `REVENUECAT_WEBHOOK_AUTH`: shared secret expected in webhook `Authorization` header.
+- `REVENUECAT_PRO_ENTITLEMENT_ID`: entitlement id treated as Pro (default: `pro`).
+
+Behavior:
+
+- Webhook events are stored in `revenuecat_webhook_events`.
+- Entitlements are upserted into `user_entitlements` keyed by `(user_id, entitlement_id)`.
+- `/entitlements/me` returns `has_pro` and entitlement records for the authenticated user.
+
 ## Updating DB
 
 1) update models.py

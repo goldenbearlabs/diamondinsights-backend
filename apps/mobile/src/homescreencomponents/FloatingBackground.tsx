@@ -9,10 +9,7 @@ const ICON_SIZE = 35;
 const CELL_SIZE = 70; 
 
 const IMAGES = [
-  require('../../assets/images/shield-bronze.png'),
-  require('../../assets/images/shield-silver.png'),
-  require('../../assets/images/shield-gold.png'),
-  require('../../assets/images/shield-diamond.png'),
+  require('../../assets/images/logo.png'),
 ];
 
 const COLS = Math.floor(width / CELL_SIZE);
@@ -71,6 +68,7 @@ const DiamondParticle = ({
 
           setCurrentImg((prev: any) => {
             const opts = IMAGES.filter(i => i !== prev);
+            if (!opts.length) return prev;
             return opts[Math.floor(Math.random() * opts.length)];
           });
 
