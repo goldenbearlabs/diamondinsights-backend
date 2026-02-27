@@ -17,7 +17,7 @@ import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { SearchMode, SearchResultsPanel } from "./SearchOverlay";
 import { theme } from "../theme/colors";
 
-const LOGO_IMAGE = require("../../assets/images/placeholder.png");
+const LOGO_IMAGE = require("../../assets/images/logo.png");
 const ACCENT = "#fbbf24";
 const HEADER_HORIZONTAL_PADDING = 16;
 const SEARCH_MIN_WIDTH = 280;
@@ -106,7 +106,7 @@ export const AppHeader = () => {
                 <Ionicons name="mail-outline" size={20} color={theme.colors.muted} />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.proBadge} onPress={() => {}}>
+              <TouchableOpacity style={styles.proBadge} onPress={() => router.push("/paywall")}>
                 <FontAwesome5 name="crown" size={12} color={ACCENT} style={styles.proIcon} />
                 <Text style={styles.proText}>PRO</Text>
               </TouchableOpacity>
@@ -173,8 +173,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   logoButton: {
-    width: 40,
-    height: 40,
+    width: 48,
+    height: 48,
     borderRadius: 10,
     overflow: "hidden",
   },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Linking} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router"; // <-- 1. Added router import
 import { apiGet } from "../../lib/api";
 import { theme } from "../../theme/colors";
 import { FloatingBackground } from "../../homescreencomponents/FloatingBackground";
@@ -8,9 +9,6 @@ import { PredictionCarousel } from "../../homescreencomponents/PredictionCarouse
 import { TrustStats } from "../../homescreencomponents/TrustStats"; 
 import { HowItWorks } from "../../homescreencomponents/HowItWorks"; 
 import { ContactCard } from "../../homescreencomponents/ContactCard";
-
-
-
 
 const RosterCountdown = () => {
   const [timeLeft, setTimeLeft] = useState({ d: 4, h: 12, m: 30, s: 0 });
@@ -35,6 +33,8 @@ const RosterCountdown = () => {
 };
 
 export default function HomeScreen() {
+  const router = useRouter(); // <-- 2. Initialized router
+
   return (
     <View style={styles.container}>
       <View style={styles.backgroundLayer}>
@@ -63,12 +63,12 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.buttonGroup}>
-              <TouchableOpacity style={styles.btnPrimary} onPress={() => {}}>
-                <Text style={styles.btnTextWhite}>Sign in/Create Account</Text>
+              <TouchableOpacity style={styles.btnPrimary} onPress={() => router.push('/(app)/portfolio')}>
+                <Text style={styles.btnTextWhite}>Create Investment Portfolio</Text>
                 
               </TouchableOpacity>
-              <TouchableOpacity style={styles.btnSecondary} onPress={() => {}}>
-                <Text style={styles.btnTextSecondary}>View Our AI-Powered Predictions</Text>
+              <TouchableOpacity style={styles.btnSecondary} onPress={() => router.push('/(app)/predictions')}>
+                <Text style={styles.btnTextSecondary}>View Live Series Cards</Text>
               </TouchableOpacity>
             </View>
             <PredictionCarousel />
@@ -137,5 +137,4 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  
 });

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-
+import re
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from firebase_admin import auth as fb_auth
 from sqlalchemy import desc, select, exists
@@ -12,7 +12,33 @@ from src.api.routes.users import firebase_claims
 from src.schemas.card_comment import CommentCreate, CommentOut, CommentUpdate
 router = APIRouter(prefix="/comments", tags=["comments"])
 
-
+BLOCKED_WORDS = [
+    "nigger",
+    "nigga",
+    "niggers",
+    "niggas",
+    "nigg",
+    "faggot",
+    "faggots",
+    "fag",
+    "retard",
+    "retards",
+    ]
+def censor_text(text: str) -> str:
+    if not text:
+        return text
+    
+    censored = text
+    for word in BLOCKED_WORDS:
+        
+        pattern_str = r'+'.join(re.escape(char) for char in word) + r'+'
+        
+        
+        pattern = re.compile(pattern_str, re.IGNORECASE)
+        
+        censored = pattern.sub("***", censored)
+    
+    return censored
 
 
 def get_current_user(
@@ -113,7 +139,7 @@ def create_comment(
             raise HTTPException(status_code=400, detail="Parent comment belongs to a different card")
 
     new_comment = Comment(
-        content=body.content,
+        content=censor_text(body.content),
         user_id=user.id,
         card_id=card_id,
         parent_id=body.parent_id
@@ -163,7 +189,7 @@ def edit_comment(
     if comment.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to edit this comment")
 
-    comment.content = body.content
+    comment.content = censor_text(body.content)
     comment.edited_at = datetime.utcnow()
     db.commit()
 

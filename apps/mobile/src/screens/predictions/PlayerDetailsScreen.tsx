@@ -495,11 +495,11 @@ export default function PlayerDetailsScreen() {
                   {/* Fielding  */}
                   <Text style={[styles.subHeader, { color: FIELDING_COLOR }]}>Fielding</Text>
                   <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
-                  <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} />
-                  <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} />
-                  <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} />
-                  <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} />
-                  <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} />
+                  <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} maxValue={99} />
 
                   {/* Running (hitters only) */}
                   {card.is_hitter && (
@@ -507,9 +507,9 @@ export default function PlayerDetailsScreen() {
                       <View style={{ height: 16 }} />
                       <Text style={[styles.subHeader, { color: RUNNING_COLOR }]}>Running</Text>
                       <View style={[styles.subHeaderDivider, { backgroundColor: RUNNING_COLOR }]} />
-                      <AttributeBar label="Speed" value={card.speed || 0} barColor={RUNNING_COLOR} />
-                      <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} />
-                      <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} />
+                      <AttributeBar label="Speed" value={card.speed || 0} barColor={RUNNING_COLOR} maxValue={99} />
+                      <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} maxValue={99} />
+                      <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} maxValue={99} />
                     </>
                   )}
                 </View>

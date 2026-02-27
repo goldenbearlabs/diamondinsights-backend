@@ -9,6 +9,7 @@ export default function TabLayout() {
 
   return (
     <Tabs
+      backBehavior="history"
       tabBar={() => <BottomNav />}
       screenOptions={{
         tabBarStyle: {

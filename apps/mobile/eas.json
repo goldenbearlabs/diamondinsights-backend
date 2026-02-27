@@ -9,6 +9,7 @@
       "distribution": "internal"
     },
     "ios-simulator": {
+      "extends": "development",
       "developmentClient": true,
       "distribution": "internal",
       "ios": { "simulator": true }

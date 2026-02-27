@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  TouchableOpacity,
 } from "react-native";
 
 import { Avatar } from "../../components/Avatar";
@@ -29,6 +30,9 @@ function formatOrdinal(value: number): string {
   return `${value}th`;
 }
 
+// 1. Define the available Roster Updates
+const ROSTER_UPDATES = ["Roster Update 1"];
+
 export default function PredictionLeaderboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,6 +41,10 @@ export default function PredictionLeaderboardScreen() {
   const [totalParticipants, setTotalParticipants] = useState(0);
   const [myRank, setMyRank] = useState<number | null>(null);
   const [myPredictionCount, setMyPredictionCount] = useState<number | null>(null);
+
+  // 2. Add state for the dropdown
+  const [selectedUpdate, setSelectedUpdate] = useState(ROSTER_UPDATES[0]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const fetchLeaderboard = useCallback(async () => {
     try {
@@ -126,7 +134,7 @@ export default function PredictionLeaderboardScreen() {
         }
       >
         <Text style={styles.title}>Prediction Leaderboard</Text>
-        <Text style={styles.subtitle}>Top 50 Users</Text>
+        <Text style={styles.subtitle}>Top 50 Scores from the previous roster update</Text>
 
         {/* Roster update notice */}
         <View style={styles.noticeCard}>
@@ -134,6 +142,55 @@ export default function PredictionLeaderboardScreen() {
           <Text style={styles.noticeText}>
             Scores will be finalized after the next roster update
           </Text>
+        </View>
+
+        {/* 3. The Custom Dropdown UI */}
+        <View style={styles.dropdownContainer}>
+          <TouchableOpacity
+            style={styles.dropdownButton}
+            onPress={() => setDropdownOpen(!dropdownOpen)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.dropdownButtonText}>{selectedUpdate}</Text>
+            <Ionicons
+              name={dropdownOpen ? "chevron-up" : "chevron-down"}
+              size={18}
+              color={theme.colors.muted}
+            />
+          </TouchableOpacity>
+
+          {dropdownOpen && (
+            <View style={styles.dropdownMenu}>
+              {ROSTER_UPDATES.map((update, index) => {
+                const isActive = update === selectedUpdate;
+                return (
+                  <TouchableOpacity
+                    key={update}
+                    style={[
+                      styles.dropdownOption,
+                      index === ROSTER_UPDATES.length - 1 && styles.dropdownOptionLast,
+                      isActive && styles.dropdownOptionActive
+                    ]}
+                    onPress={() => {
+                      setSelectedUpdate(update);
+                      setDropdownOpen(false);
+                      // In the future, you can trigger a fetch here based on the selected update
+                    }}
+                  >
+                    <Text style={[
+                      styles.dropdownOptionText,
+                      isActive && styles.dropdownOptionTextActive
+                    ]}>
+                      {update}
+                    </Text>
+                    {isActive && (
+                      <Ionicons name="checkmark" size={16} color="#fbbf24" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         {/* Your rank indicator */}
@@ -205,6 +262,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: -4,
   },
+  
+  // -- Dropdown Styles Added Here --
+  dropdownContainer: {
+    zIndex: 10,
+    position: 'relative',
+    marginTop: 4,
+    marginBottom: 4,
+    alignSelf: 'flex-start',
+  },
+  dropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  dropdownButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    borderRadius: 10,
+    overflow: 'hidden',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  dropdownOptionLast: {
+    borderBottomWidth: 0,
+  },
+  dropdownOptionActive: {
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+  },
+  dropdownOptionText: {
+    color: theme.colors.muted,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  dropdownOptionTextActive: {
+    color: '#fbbf24',
+    fontWeight: '700',
+  },
+  // --------------------------------
+
   myRankCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -246,6 +372,7 @@ const styles = StyleSheet.create({
   },
   listWrap: {
     gap: 6,
+    zIndex: -1, // Ensures dropdown overlays above the list cleanly
   },
   headerRow: {
     flexDirection: "row",

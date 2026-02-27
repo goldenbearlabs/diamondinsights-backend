@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Animated,
@@ -154,6 +155,8 @@ export default function CardsRankingsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasNext, setHasNext] = useState(false);
+
+  const router = useRouter();
 
   const [selectedYears, setSelectedYears] = useState<number[]>([25]);
   const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
@@ -496,12 +499,16 @@ export default function CardsRankingsScreen() {
                   </Text>
                 </View>
                 {rows.map((card, index) => (
-                  <View
+                  <Pressable
                     key={`pinned-${card.id}`}
                     style={[styles.pinnedImageCell, index % 2 === 0 ? styles.evenRow : styles.oddRow]}
+                    onPress={() => {
+                      router.push({ pathname: '/(app)/card', params: { cardData: JSON.stringify(card) } });
+
+                    }}
                   >
                     <CardImage uri={card.baked_img || card.img || null} />
-                  </View>
+                  </Pressable>
                 ))}
               </Animated.View>
             </View>
@@ -637,9 +644,12 @@ export default function CardsRankingsScreen() {
                   const quirkText = quirks.length > 0 ? quirks.join(", ") : "None";
 
                   return (
-                      <View
+                      <Pressable
                         key={card.id}
                         style={[styles.row, index % 2 === 0 ? styles.evenRow : styles.oddRow]}
+                        onPress={() => {
+                          router.push({ pathname: '/(app)/card', params: { cardData: JSON.stringify(card) } });
+                        }}
                       >
                         <View
                           style={[
@@ -741,7 +751,7 @@ export default function CardsRankingsScreen() {
                         <OverflowSubline text={quirkText} />
                       </View>
                       <View style={styles.rowRightEdge} />
-                      </View>
+                      </Pressable>
                     );
                   })
                 )}
