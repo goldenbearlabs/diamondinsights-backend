@@ -84,11 +84,51 @@ def _extract_candidate_user_ids(event: dict) -> list[str]:
     return _normalize_user_ids(raw_ids)
 
 
+def _extract_target_user_ids(event: dict, event_type: str) -> list[str]:
+    candidate_user_ids = _extract_candidate_user_ids(event)
+    if event_type != "TRANSFER":
+        return candidate_user_ids
+
+    transferred_to = event.get("transferred_to")
+    transferred_to_ids = _normalize_user_ids(transferred_to if isinstance(transferred_to, list) else [])
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for uid in transferred_to_ids + candidate_user_ids:
+        if uid in seen:
+            continue
+        seen.add(uid)
+        ordered.append(uid)
+    return ordered
+
+
 def _extract_transferred_from_ids(event: dict) -> list[str]:
     transferred_from = event.get("transferred_from")
     if isinstance(transferred_from, list):
         return _normalize_user_ids(transferred_from)
     return []
+
+
+def _extract_entitlement_ids(event: dict) -> list[str]:
+    raw_values: list[Any] = []
+    ids = event.get("entitlement_ids")
+    if isinstance(ids, list):
+        raw_values.extend(ids)
+
+    # Older/newer payload variants may send a singular entitlement id.
+    raw_values.append(event.get("entitlement_id"))
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
 
 
 def _resolve_user_by_firebase_id(db: Session, firebase_id: str) -> Optional[Users]:
@@ -257,11 +297,7 @@ async def revenuecat_webhook(
     purchased_at = _event_datetime(event, ms_key="purchased_at_ms", iso_key="purchased_at")
     expires_at = _event_datetime(event, ms_key="expiration_at_ms", iso_key="expiration_at")
 
-    entitlement_ids = [
-        str(v).strip()
-        for v in (event.get("entitlement_ids") or [])
-        if isinstance(v, str) and str(v).strip()
-    ]
+    entitlement_ids = _extract_entitlement_ids(event)
     product_id = str(event.get("product_id") or "").strip() or None
     store = str(event.get("store") or "").strip() or None
     ownership_type = str(event.get("ownership_type") or "").strip() or None
@@ -292,7 +328,7 @@ async def revenuecat_webhook(
         return {"ok": True, "duplicate": True}
 
     target_user: Optional[Users] = None
-    for candidate_uid in _extract_candidate_user_ids(event):
+    for candidate_uid in _extract_target_user_ids(event, event_type):
         target_user = _resolve_user_by_firebase_id(db, candidate_uid)
         if target_user:
             break
@@ -354,4 +390,3 @@ async def revenuecat_webhook(
     webhook_event.processed_at = _utcnow()
     db.commit()
     return {"ok": True, "processed": True}
-

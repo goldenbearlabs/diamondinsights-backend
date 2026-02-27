@@ -82,7 +82,15 @@ type FieldRow = {
   label: string;
 };
 
+type ComparisonSortKey = "meta_overall" | "ovr" | "true_overall" | "your_overall";
+
 const MAX_CARDS = 5;
+const COMPARISON_SORT_OPTIONS: { key: ComparisonSortKey; label: string }[] = [
+  { key: "meta_overall", label: "Meta Overall" },
+  { key: "ovr", label: "OVR" },
+  { key: "true_overall", label: "True Overall" },
+  { key: "your_overall", label: "Your Overall" },
+];
 
 const FIELD_ROWS: FieldRow[] = [
   { key: "team_short_name", label: "Team" },
@@ -139,6 +147,7 @@ export default function CardComparisonScreen() {
   const [slots, setSlots] = useState<(CardModel | null)[]>([null, null]);
   const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const [searchSortKey, setSearchSortKey] = useState<ComparisonSortKey>("meta_overall");
   const [searchResults, setSearchResults] = useState<CardModel[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -207,8 +216,19 @@ export default function CardComparisonScreen() {
       if (selectedIds.has(card.id)) return false;
       if (currentSlotId && currentSlotId === card.id) return true;
       return true;
-    });
-  }, [searchResults, slots, activeSlotIndex]);
+    })
+      .sort((a, b) => {
+        const aPrimary = getSortMetric(a, searchSortKey);
+        const bPrimary = getSortMetric(b, searchSortKey);
+        if (aPrimary !== bPrimary) return bPrimary - aPrimary;
+
+        const aSecondary = getSortMetric(a, "ovr");
+        const bSecondary = getSortMetric(b, "ovr");
+        if (aSecondary !== bSecondary) return bSecondary - aSecondary;
+
+        return a.name.localeCompare(b.name);
+      });
+  }, [searchResults, slots, activeSlotIndex, searchSortKey]);
 
   const rowMaxValue = useMemo(() => {
     const out = new Map<string, number>();
@@ -394,6 +414,27 @@ export default function CardComparisonScreen() {
                 autoCorrect={false}
                 autoCapitalize="none"
               />
+              <View style={styles.sortOptionsWrap}>
+                <Text style={styles.sortOptionsLabel}>Sort results by</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.sortOptionsRow}>
+                    {COMPARISON_SORT_OPTIONS.map((option) => {
+                      const active = option.key === searchSortKey;
+                      return (
+                        <Pressable
+                          key={option.key}
+                          onPress={() => setSearchSortKey(option.key)}
+                          style={[styles.sortOptionChip, active && styles.sortOptionChipActive]}
+                        >
+                          <Text style={[styles.sortOptionText, active && styles.sortOptionTextActive]}>
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              </View>
             </View>
 
             {searchLoading ? (
@@ -461,6 +502,34 @@ function getYourOverallValue(card: CardModel): number | null {
   const raw = card.your_overall;
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
   return null;
+}
+
+function getSortMetric(card: CardModel, key: ComparisonSortKey): number {
+  if (key === "meta_overall") {
+    if (typeof card.meta_overall_rounded === "number" && Number.isFinite(card.meta_overall_rounded)) {
+      return card.meta_overall_rounded;
+    }
+    if (typeof card.meta_overall === "number" && Number.isFinite(card.meta_overall)) {
+      return card.meta_overall;
+    }
+    return card.ovr ?? 0;
+  }
+
+  if (key === "true_overall") {
+    if (typeof card.true_overall_rounded === "number" && Number.isFinite(card.true_overall_rounded)) {
+      return card.true_overall_rounded;
+    }
+    if (typeof card.true_overall === "number" && Number.isFinite(card.true_overall)) {
+      return card.true_overall;
+    }
+    return card.ovr ?? 0;
+  }
+
+  if (key === "your_overall") {
+    return getYourOverallValue(card) ?? card.ovr ?? 0;
+  }
+
+  return card.ovr ?? 0;
 }
 
 function getRowRawValue(card: CardModel, key: FieldKey): unknown {
@@ -831,6 +900,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(148, 163, 184, 0.16)",
+    gap: 8,
   },
   modalSearchInput: {
     borderWidth: 1,
@@ -842,6 +912,42 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  sortOptionsWrap: {
+    gap: 6,
+  },
+  sortOptionsLabel: {
+    color: "#94a3b8",
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  sortOptionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 8,
+  },
+  sortOptionChip: {
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.36)",
+    borderRadius: 999,
+    backgroundColor: "rgba(30, 41, 59, 0.72)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  sortOptionChipActive: {
+    borderColor: "rgba(251, 191, 36, 0.7)",
+    backgroundColor: "rgba(251, 191, 36, 0.18)",
+  },
+  sortOptionText: {
+    color: "#cbd5e1",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sortOptionTextActive: {
+    color: "#fde68a",
   },
   modalLoading: {
     paddingVertical: 10,

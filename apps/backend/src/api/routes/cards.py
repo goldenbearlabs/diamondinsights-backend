@@ -1,5 +1,8 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
+from pydantic import ValidationError
+from redis import Redis
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, selectinload
 from shared.db.database import get_db
@@ -8,8 +11,22 @@ from src.schemas.card import CardResponse
 from src.api.routes.users import firebase_claims_optional
 from src.api.routes.show_profiles.profile import _get_profile_for_user
 from src.api.routes.show_profiles.analytics import _load_your_ovr_weights_cached
+from src.core.cache import build_cache_key, get_cache_client, get_cached_json, set_cached_json
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+def _read_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(1, value)
+
+
+CARDS_RANKINGS_CACHE_TTL_SEC = _read_positive_int_env("CARDS_RANKINGS_CACHE_TTL_SEC", 3600)
 
 
 def _parse_csv_tokens(value: Optional[str], upper: bool = False) -> List[str]:
@@ -50,6 +67,16 @@ def _parse_years(year: Optional[int], years: Optional[str]) -> List[int]:
 
 def _normalize_position(value: Optional[str]) -> str:
     return (value or "").strip().upper()
+
+
+def _normalize_cache_text(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
+def _serialize_cache_list(values: List[object]) -> str:
+    if not values:
+        return "-"
+    return ",".join(str(value) for value in values)
 
 
 def _secondary_positions(card: Card) -> set[str]:
@@ -279,12 +306,66 @@ def get_cards(
     offset: int = 0,
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims_optional),
+    cache: Redis | None = Depends(get_cache_client),
 ):
     """
     gets multiple cards (with optional filters) |
     Response Time: ~150 - 240ms for first time loading |
     These queries don't join with any other tables.
     """
+
+    year_values = _parse_years(year, years)
+    position_values = _parse_csv_tokens(positions, upper=True)
+    if position is not None:
+        single_position = position.strip().upper()
+        if single_position:
+            position_values = [single_position] + [value for value in position_values if value != single_position]
+    bat_hand_values = _parse_csv_tokens(bat_hands, upper=True)
+    if bat_hand is not None:
+        single_bat = bat_hand.strip().upper()
+        if single_bat:
+            bat_hand_values = [single_bat] + [value for value in bat_hand_values if value != single_bat]
+    pitch_hand_values = _parse_csv_tokens(pitch_hands, upper=True)
+    chosen_throw_hand = throw_hand if throw_hand is not None else pitch_hand
+    if chosen_throw_hand is not None:
+        single_throw = chosen_throw_hand.strip().upper()
+        if single_throw:
+            pitch_hand_values = [single_throw] + [value for value in pitch_hand_values if value != single_throw]
+    selected_positions_for_metric: List[str] = position_values
+    normalized_sort_by = (sort_by or "ovr").strip().lower()
+    requested_sort_dir = (sort_dir or ("desc" if desc else "asc")).strip().lower()
+    normalized_sort_dir = "asc" if requested_sort_dir == "asc" else "desc"
+    reverse = normalized_sort_dir == "desc"
+    normalized_limit = max(0, limit)
+    normalized_offset = max(0, offset)
+    user_id_for_cache = str((claims or {}).get("uid") or "anon")
+    cache_key = build_cache_key(
+        "cards",
+        "rankings",
+        user_id_for_cache,
+        is_hitter if is_hitter is not None else "any",
+        _normalize_cache_text(team),
+        _normalize_cache_text(name),
+        _normalize_cache_text(series),
+        _serialize_cache_list(year_values),
+        _serialize_cache_list(position_values),
+        int(include_secondary),
+        _serialize_cache_list(bat_hand_values),
+        _serialize_cache_list(pitch_hand_values),
+        _normalize_cache_text(rarity),
+        normalized_sort_by,
+        normalized_sort_dir,
+        normalized_limit,
+        normalized_offset,
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        cards_payload = cached.get("cards")
+        if isinstance(cards_payload, list):
+            try:
+                return [CardResponse.model_validate(item) for item in cards_payload]
+            except (TypeError, ValueError, ValidationError):
+                pass
 
     comment_count_sub = (
         db.query(func.count(Comment.id))
@@ -336,18 +417,11 @@ def get_cards(
     if series is not None:
         query = query.filter(Card.series_name.ilike(series))
 
-    year_values = _parse_years(year, years)
     if year_values:
         if len(year_values) == 1:
             query = query.filter(Card.year == year_values[0])
         else:
             query = query.filter(Card.year.in_(year_values))
-
-    position_values = _parse_csv_tokens(positions, upper=True)
-    if position is not None:
-        single_position = position.strip().upper()
-        if single_position:
-            position_values = [single_position] + [value for value in position_values if value != single_position]
 
     if position_values:
         primary_match = func.upper(Card.display_position).in_(position_values)
@@ -371,23 +445,12 @@ def get_cards(
         else:
             query = query.filter(primary_match)
 
-    bat_hand_values = _parse_csv_tokens(bat_hands, upper=True)
-    if bat_hand is not None:
-        single_bat = bat_hand.strip().upper()
-        if single_bat:
-            bat_hand_values = [single_bat] + [value for value in bat_hand_values if value != single_bat]
     if bat_hand_values:
         if len(bat_hand_values) == 1:
             query = query.filter(func.upper(Card.bat_hand) == bat_hand_values[0])
         else:
             query = query.filter(func.upper(Card.bat_hand).in_(bat_hand_values))
 
-    pitch_hand_values = _parse_csv_tokens(pitch_hands, upper=True)
-    chosen_throw_hand = throw_hand if throw_hand is not None else pitch_hand
-    if chosen_throw_hand is not None:
-        single_throw = chosen_throw_hand.strip().upper()
-        if single_throw:
-            pitch_hand_values = [single_throw] + [value for value in pitch_hand_values if value != single_throw]
     if pitch_hand_values:
         if len(pitch_hand_values) == 1:
             query = query.filter(func.upper(Card.throw_hand) == pitch_hand_values[0])
@@ -414,11 +477,7 @@ def get_cards(
             unique_by_id[card.id] = card
     cards = list(unique_by_id.values())
 
-    selected_positions_for_metric: List[str] = position_values
     your_weight_map = _your_weight_map_for_claims(db, claims)
-    normalized_sort_by = (sort_by or "ovr").strip().lower()
-    normalized_sort_dir = (sort_dir or ("desc" if desc else "asc")).strip().lower()
-    reverse = normalized_sort_dir != "asc"
 
     def sort_key(card: Card):
         if normalized_sort_by == "name":
@@ -458,6 +517,13 @@ def get_cards(
     for card in cards:
         _attach_card_your_overall_fields(card, your_weight_map)
 
-    start = max(0, offset)
-    end = start + max(0, limit)
-    return cards[start:end]
+    start = normalized_offset
+    end = start + normalized_limit
+    response_cards = [CardResponse.model_validate(card) for card in cards[start:end]]
+    set_cached_json(
+        cache,
+        cache_key,
+        {"cards": [card.model_dump(mode="json") for card in response_cards]},
+        ttl_sec=CARDS_RANKINGS_CACHE_TTL_SEC,
+    )
+    return response_cards

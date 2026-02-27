@@ -4,7 +4,8 @@ import os
 from typing import Optional, Dict, Any, Tuple
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from redis import Redis
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from shared.db.database import get_db
 from shared.db.models import Users, ShowProfile, ShowProfileOnlineStats
 from src.api.routes.users import firebase_claims
+from src.core.cache import build_cache_key, get_cache_client, get_cached_json, set_cached_json
 
 from .common import _utcnow, _to_int, _to_float
 from .models import LinkShowBody, ShowProfileOut
@@ -21,6 +23,33 @@ router = APIRouter()
 public_router = APIRouter()
 
 SHOW_SEARCH_URL = os.getenv("SHOW_SEARCH_URL", "https://mlb25.theshow.com/apis/player_search.json")
+
+
+def _read_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC = _read_positive_int_env("SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC", 21600)
+_SHOW_PROFILE_PAGE_CLIENT_CACHE_TTL_SEC = _read_positive_int_env("SHOW_PROFILE_PAGE_CLIENT_CACHE_TTL_SEC", 21600)
+
+
+def _normalize_username(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _set_profile_http_cache_headers(response: Response, *, is_public: bool) -> None:
+    max_age = max(1, _SHOW_PROFILE_PAGE_CLIENT_CACHE_TTL_SEC)
+    scope = "public" if is_public else "private"
+    response.headers["Cache-Control"] = f"{scope}, max-age={max_age}, stale-while-revalidate=60"
+    if not is_public:
+        response.headers["Vary"] = "Authorization, Cookie"
 
 
 def _fetch_show_profile(username: str) -> Tuple[dict, dict]:
@@ -226,35 +255,102 @@ def refresh_show_profile(
 
 @router.get("", response_model=ShowProfileOut)
 def get_show_profile(
+    response: Response,
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowProfileOut:
+    _set_profile_http_cache_headers(response, is_public=False)
     user = _get_authed_user(db, claims)
 
     sp = _get_profile_for_user(db, user.id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
-    return ShowProfileOut.from_orm_profile(sp)
+    cache_key = build_cache_key(
+        "show",
+        "profile",
+        "me",
+        "v1",
+        _normalize_username(sp.username),
+        str((claims or {}).get("uid") or ""),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowProfileOut.model_validate(cached)
+
+    payload = ShowProfileOut.from_orm_profile(sp)
+    set_cached_json(
+        cache,
+        cache_key,
+        payload.model_dump(mode="json"),
+        ttl_sec=max(1, _SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC),
+    )
+    return payload
 
 
 @public_router.get("/show/{username}", response_model=ShowProfileOut)
 def get_show_profile_by_username(
     username: str,
+    response: Response,
     db: Session = Depends(get_db),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowProfileOut:
+    _set_profile_http_cache_headers(response, is_public=True)
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Username not found")
-    return ShowProfileOut.from_orm_profile(sp)
+
+    cache_key = build_cache_key(
+        "show",
+        "profile",
+        "username",
+        "v1",
+        _normalize_username(sp.username),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowProfileOut.model_validate(cached)
+
+    payload = ShowProfileOut.from_orm_profile(sp)
+    set_cached_json(
+        cache,
+        cache_key,
+        payload.model_dump(mode="json"),
+        ttl_sec=max(1, _SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC),
+    )
+    return payload
 
 
 @public_router.get("/{user_id}/show", response_model=ShowProfileOut)
 def get_show_profile_for_user(
     user_id: int,
+    response: Response,
     db: Session = Depends(get_db),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowProfileOut:
+    _set_profile_http_cache_headers(response, is_public=True)
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
-    return ShowProfileOut.from_orm_profile(sp)
+
+    cache_key = build_cache_key(
+        "show",
+        "profile",
+        "user-id",
+        "v1",
+        user_id,
+        _normalize_username(sp.username),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowProfileOut.model_validate(cached)
+
+    payload = ShowProfileOut.from_orm_profile(sp)
+    set_cached_json(
+        cache,
+        cache_key,
+        payload.model_dump(mode="json"),
+        ttl_sec=max(1, _SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC),
+    )
+    return payload

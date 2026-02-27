@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import ValidationError
+from redis import Redis
 from sqlalchemy import select, func, case, and_, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -11,6 +14,7 @@ from shared.db.database import get_db
 from shared.db.models import ShowGameSummary
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
 from src.api.routes.users import firebase_claims
+from src.core.cache import build_cache_key, get_cache_client, get_cached_json, set_cached_json
 
 from .models import (
     ShowGameSummaryOut,
@@ -23,6 +27,37 @@ from .profile import _get_authed_user, _get_profile_for_user, _get_profile_by_us
 
 router = APIRouter()
 public_router = APIRouter()
+
+
+def _read_positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(float(raw))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC = _read_positive_int_env("SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC", 21600)
+_SHOW_PROFILE_PAGE_CLIENT_CACHE_TTL_SEC = _read_positive_int_env("SHOW_PROFILE_PAGE_CLIENT_CACHE_TTL_SEC", 21600)
+
+
+def _normalize_username(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _set_profile_http_cache_headers(response: Response, *, is_public: bool) -> None:
+    max_age = max(1, _SHOW_PROFILE_PAGE_CLIENT_CACHE_TTL_SEC)
+    scope = "public" if is_public else "private"
+    response.headers["Cache-Control"] = f"{scope}, max-age={max_age}, stale-while-revalidate=60"
+    if not is_public:
+        response.headers["Vary"] = "Authorization, Cookie"
+
+
+def _cache_ttl_sec() -> int:
+    return max(1, _SHOW_PROFILE_PAGE_REDIS_CACHE_TTL_SEC)
 
 
 def _show_game_summary_for_username(db: Session, username: str) -> ShowGameSummaryOut:
@@ -168,31 +203,76 @@ def _load_game_events_from_spaces(game_id: str) -> List[dict]:
 
 @router.get("/summary", response_model=ShowGameSummaryOut)
 def get_show_game_summary(
+    response: Response,
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowGameSummaryOut:
+    _set_profile_http_cache_headers(response, is_public=False)
     user = _get_authed_user(db, claims)
 
     sp = _get_profile_for_user(db, user.id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
-    return _show_game_summary_for_username(db, sp.username)
+    cache_key = build_cache_key(
+        "show",
+        "summary",
+        "me",
+        "v1",
+        _normalize_username(sp.username),
+        str((claims or {}).get("uid") or ""),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowGameSummaryOut.model_validate(cached)
+
+    payload = _show_game_summary_for_username(db, sp.username)
+    set_cached_json(cache, cache_key, payload.model_dump(mode="json"), ttl_sec=_cache_ttl_sec())
+    return payload
 
 
 @router.get("/game-log", response_model=List[ShowGameLogItemOut])
 def get_show_game_log(
+    response: Response,
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims),
     limit: int = Query(default=200, ge=1, le=500),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> List[ShowGameLogItemOut]:
+    _set_profile_http_cache_headers(response, is_public=False)
     user = _get_authed_user(db, claims)
 
     sp = _get_profile_for_user(db, user.id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No linked username")
 
-    return _show_game_log_for_username(db, sp.username, limit)
+    cache_key = build_cache_key(
+        "show",
+        "game-log",
+        "me",
+        "v1",
+        _normalize_username(sp.username),
+        str((claims or {}).get("uid") or ""),
+        limit,
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        items = cached.get("items")
+        if isinstance(items, list):
+            try:
+                return [ShowGameLogItemOut.model_validate(item) for item in items]
+            except (TypeError, ValueError, ValidationError):
+                pass
+
+    payload = _show_game_log_for_username(db, sp.username, limit)
+    set_cached_json(
+        cache,
+        cache_key,
+        {"items": [item.model_dump(mode="json") for item in payload]},
+        ttl_sec=_cache_ttl_sec(),
+    )
+    return payload
 
 
 @router.get("/game-events/{game_id}", response_model=List[ShowGameEventOut])
@@ -236,24 +316,65 @@ def get_show_game_bundle(
 @public_router.get("/show/{username}/summary", response_model=ShowGameSummaryOut)
 def get_show_game_summary_by_username(
     username: str,
+    response: Response,
     db: Session = Depends(get_db),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowGameSummaryOut:
+    _set_profile_http_cache_headers(response, is_public=True)
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Username not found")
-    return _show_game_summary_for_username(db, sp.username)
+    cache_key = build_cache_key(
+        "show",
+        "summary",
+        "username",
+        "v1",
+        _normalize_username(sp.username),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowGameSummaryOut.model_validate(cached)
+    payload = _show_game_summary_for_username(db, sp.username)
+    set_cached_json(cache, cache_key, payload.model_dump(mode="json"), ttl_sec=_cache_ttl_sec())
+    return payload
 
 
 @public_router.get("/show/{username}/game-log", response_model=List[ShowGameLogItemOut])
 def get_show_game_log_by_username(
     username: str,
+    response: Response,
     db: Session = Depends(get_db),
     limit: int = Query(default=200, ge=1, le=500),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> List[ShowGameLogItemOut]:
+    _set_profile_http_cache_headers(response, is_public=True)
     sp = _get_profile_by_username(db, username)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Username not found")
-    return _show_game_log_for_username(db, sp.username, limit)
+    cache_key = build_cache_key(
+        "show",
+        "game-log",
+        "username",
+        "v1",
+        _normalize_username(sp.username),
+        limit,
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        items = cached.get("items")
+        if isinstance(items, list):
+            try:
+                return [ShowGameLogItemOut.model_validate(item) for item in items]
+            except (TypeError, ValueError, ValidationError):
+                pass
+    payload = _show_game_log_for_username(db, sp.username, limit)
+    set_cached_json(
+        cache,
+        cache_key,
+        {"items": [item.model_dump(mode="json") for item in payload]},
+        ttl_sec=_cache_ttl_sec(),
+    )
+    return payload
 
 
 @public_router.get("/show/{username}/game-events/{game_id}", response_model=List[ShowGameEventOut])
@@ -291,24 +412,67 @@ def get_show_game_bundle_by_username(
 @public_router.get("/{user_id}/show/summary", response_model=ShowGameSummaryOut)
 def get_show_game_summary_for_user(
     user_id: int,
+    response: Response,
     db: Session = Depends(get_db),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> ShowGameSummaryOut:
+    _set_profile_http_cache_headers(response, is_public=True)
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
-    return _show_game_summary_for_username(db, sp.username)
+    cache_key = build_cache_key(
+        "show",
+        "summary",
+        "user-id",
+        "v1",
+        user_id,
+        _normalize_username(sp.username),
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return ShowGameSummaryOut.model_validate(cached)
+    payload = _show_game_summary_for_username(db, sp.username)
+    set_cached_json(cache, cache_key, payload.model_dump(mode="json"), ttl_sec=_cache_ttl_sec())
+    return payload
 
 
 @public_router.get("/{user_id}/show/game-log", response_model=List[ShowGameLogItemOut])
 def get_show_game_log_for_user(
     user_id: int,
+    response: Response,
     db: Session = Depends(get_db),
     limit: int = Query(default=200, ge=1, le=500),
+    cache: Redis | None = Depends(get_cache_client),
 ) -> List[ShowGameLogItemOut]:
+    _set_profile_http_cache_headers(response, is_public=True)
     sp = _get_profile_for_user(db, user_id)
     if not sp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
-    return _show_game_log_for_username(db, sp.username, limit)
+    cache_key = build_cache_key(
+        "show",
+        "game-log",
+        "user-id",
+        "v1",
+        user_id,
+        _normalize_username(sp.username),
+        limit,
+    )
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        items = cached.get("items")
+        if isinstance(items, list):
+            try:
+                return [ShowGameLogItemOut.model_validate(item) for item in items]
+            except (TypeError, ValueError, ValidationError):
+                pass
+    payload = _show_game_log_for_username(db, sp.username, limit)
+    set_cached_json(
+        cache,
+        cache_key,
+        {"items": [item.model_dump(mode="json") for item in payload]},
+        ttl_sec=_cache_ttl_sec(),
+    )
+    return payload
 
 
 @public_router.get("/{user_id}/show/game-events/{game_id}", response_model=List[ShowGameEventOut])

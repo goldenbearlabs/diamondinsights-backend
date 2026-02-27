@@ -2224,6 +2224,10 @@ export default function GameplayStatsScreen() {
               {username}
             </Text>
           </View>
+          <View style={styles.profileAction}>
+            <Ionicons name="search" size={13} color="rgba(226, 232, 240, 0.85)" />
+            <Text style={styles.profileActionText}>Search</Text>
+          </View>
         </TouchableOpacity>
 
         <View style={styles.cardsRow}>
@@ -4816,7 +4820,8 @@ const styles = StyleSheet.create({
   profileImageWrap: {
   },
   profileText: {
-    maxWidth: 200,
+    flex: 1,
+    minWidth: 0,
   },
   profileLabel: {
     color: "rgba(226, 232, 240, 0.7)",
@@ -4830,6 +4835,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     marginTop: 2,
+  },
+  profileAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.35)",
+    backgroundColor: "rgba(30, 41, 59, 0.85)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  profileActionText: {
+    color: "rgba(226, 232, 240, 0.9)",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+    textTransform: "uppercase",
   },
   cardsRow: {
     flexDirection: "row",
