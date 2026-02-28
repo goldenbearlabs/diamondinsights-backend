@@ -85,6 +85,8 @@ type FieldRow = {
 type ComparisonSortKey = "meta_overall" | "ovr" | "true_overall" | "your_overall";
 
 const MAX_CARDS = 5;
+const MIN_SEARCH_LENGTH = 2;
+const SEARCH_RESULT_LIMIT = 30;
 const COMPARISON_SORT_OPTIONS: { key: ComparisonSortKey; label: string }[] = [
   { key: "meta_overall", label: "Meta Overall" },
   { key: "ovr", label: "OVR" },
@@ -161,22 +163,17 @@ export default function CardComparisonScreen() {
     }
 
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setSearchResults([]);
-      setSearchLoading(false);
-      setSearchError(null);
-      return;
-    }
-
     let cancelled = false;
     const timer = setTimeout(async () => {
       setSearchLoading(true);
       setSearchError(null);
       try {
         const params = new URLSearchParams();
-        params.set("name", trimmed);
         params.set("year", "25");
-        params.set("limit", "30");
+        params.set("limit", String(SEARCH_RESULT_LIMIT));
+        if (trimmed.length >= MIN_SEARCH_LENGTH) {
+          params.set("name", trimmed);
+        }
         const payload = await fetchComparisonCards(`/cards/?${params.toString()}`);
         if (!cancelled) {
           setSearchResults(normalizeCardResults(payload));
@@ -189,7 +186,7 @@ export default function CardComparisonScreen() {
       } finally {
         if (!cancelled) setSearchLoading(false);
       }
-    }, 220);
+    }, trimmed.length === 0 ? 0 : 220);
 
     return () => {
       cancelled = true;
@@ -472,7 +469,7 @@ export default function CardComparisonScreen() {
                 </Pressable>
               ))}
 
-              {query.trim().length >= 2 && !searchLoading && visibleResults.length === 0 ? (
+              {query.trim().length >= MIN_SEARCH_LENGTH && !searchLoading && visibleResults.length === 0 ? (
                 <Text style={styles.modalEmptyText}>No cards found.</Text>
               ) : null}
               {searchError ? <Text style={styles.modalErrorText}>{searchError}</Text> : null}

@@ -316,6 +316,7 @@ def get_cards(
     """
 
     year_values = _parse_years(year, years)
+    rarity_values = _parse_csv_tokens(rarity)
     position_values = _parse_csv_tokens(positions, upper=True)
     if position is not None:
         single_position = position.strip().upper()
@@ -342,7 +343,7 @@ def get_cards(
     user_id_for_cache = str((claims or {}).get("uid") or "anon")
     cache_key = build_cache_key(
         "cards",
-        "rankings",
+        "rankings_v2",
         user_id_for_cache,
         is_hitter if is_hitter is not None else "any",
         _normalize_cache_text(team),
@@ -489,8 +490,15 @@ def get_cards(
         else:
             query = query.filter(func.upper(Card.throw_hand).in_(pitch_hand_values))
 
-    if rarity is not None:
-        query = query.filter(Card.rarity.ilike(rarity))
+    if rarity_values:
+        if len(rarity_values) == 1:
+            single_rarity = rarity_values[0]
+            if "%" in single_rarity or "_" in single_rarity:
+                query = query.filter(Card.rarity.ilike(single_rarity))
+            else:
+                query = query.filter(func.lower(Card.rarity) == single_rarity.lower())
+        else:
+            query = query.filter(func.lower(Card.rarity).in_([value.lower() for value in rarity_values]))
 
     rows = query.all()
     cards: List[Card] = []

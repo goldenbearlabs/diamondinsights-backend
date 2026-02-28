@@ -24,6 +24,11 @@ import {
   restoreRevenueCatPurchases,
   syncRevenueCatUser,
 } from "../src/lib/revenuecat";
+import {
+  getMyEntitlements,
+  type EntitlementsMeResponse,
+} from "../src/lib/api";
+import { clearBackendProStatus, setBackendProStatus } from "../src/lib/proStatus";
 import { theme } from "../src/theme/colors";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
@@ -67,6 +72,19 @@ const formatPackageType = (packageType: string): string =>
     .replaceAll("_", " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
+const getErrorMessage = (err: unknown, fallback: string): string => {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err.trim()) return err.trim();
+  return fallback;
+};
+
+const formatDateTime = (raw: string | null | undefined): string | null => {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString();
+};
+
 const getRevenueCatPackageProduct = (
   revenueCatPackage: PurchasesPackage,
 ): PurchasesPackage["product"] | null => {
@@ -82,13 +100,16 @@ export default function PaywallScreen() {
 
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
   const [offering, setOffering] = useState<PurchasesOffering | null>(null);
+  const [backendEntitlements, setBackendEntitlements] = useState<EntitlementsMeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncingBackend, setSyncingBackend] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [managingSubscription, setManagingSubscription] = useState(false);
   const [purchaseLoadingId, setPurchaseLoadingId] = useState<string | null>(null);
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backendError, setBackendError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const availablePackages = useMemo(() => offering?.availablePackages ?? [], [offering]);
@@ -97,6 +118,14 @@ export default function PaywallScreen() {
     availablePackages[0] ??
     null;
   const proActive = hasRevenueCatProEntitlement(customerInfo);
+  const backendProActive = Boolean(backendEntitlements?.has_pro);
+  const backendProEntitlement = useMemo(
+    () =>
+      backendEntitlements?.entitlements.find(
+        (candidate) => candidate.entitlement_id === backendEntitlements.pro_entitlement_id,
+      ) ?? null,
+    [backendEntitlements],
+  );
 
   useEffect(() => {
     const packageStillExists = availablePackages.some(
@@ -114,10 +143,13 @@ export default function PaywallScreen() {
     }
 
     setError(null);
+    setBackendError(null);
     try {
       if (!isRevenueCatEnabled()) {
         setCustomerInfo(null);
         setOffering(null);
+        setBackendEntitlements(null);
+        clearBackendProStatus();
         setError(
           "RevenueCat is not configured. Add EXPO_PUBLIC_RC_TEST_API_KEY in apps/mobile/.env and run a native development build.",
         );
@@ -125,23 +157,72 @@ export default function PaywallScreen() {
       }
 
       await syncRevenueCatUser(auth.currentUser?.uid ?? null);
-      const [nextCustomerInfo, nextOffering] = await Promise.all([
+      const [nextCustomerInfoResult, nextOfferingResult, nextBackendEntitlementsResult] =
+        await Promise.allSettled([
         getRevenueCatCustomerInfo(),
         getRevenueCatCurrentOffering(),
-      ]);
+        getMyEntitlements(),
+        ]);
 
-      setCustomerInfo(nextCustomerInfo);
-      setOffering(nextOffering);
-
-      if (nextOffering?.availablePackages?.length) {
-        setSelectedPackageId((current) => current ?? nextOffering.availablePackages[0].identifier);
+      if (nextCustomerInfoResult.status === "rejected") {
+        throw nextCustomerInfoResult.reason;
       }
-    } catch (err: any) {
-      setError(err?.message ?? "Failed to load RevenueCat paywall data.");
+      if (nextOfferingResult.status === "rejected") {
+        throw nextOfferingResult.reason;
+      }
+
+      setCustomerInfo(nextCustomerInfoResult.value);
+      setOffering(nextOfferingResult.value);
+
+      if (nextBackendEntitlementsResult.status === "fulfilled") {
+        setBackendEntitlements(nextBackendEntitlementsResult.value);
+        setBackendProStatus(Boolean(nextBackendEntitlementsResult.value.has_pro));
+      } else {
+        setBackendEntitlements(null);
+        setBackendError(
+          getErrorMessage(
+            nextBackendEntitlementsResult.reason,
+            "Failed to load backend entitlement status.",
+          ),
+        );
+      }
+
+      if (nextOfferingResult.value?.availablePackages?.length) {
+        setSelectedPackageId((current) => current ?? nextOfferingResult.value.availablePackages[0].identifier);
+      }
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Failed to load RevenueCat paywall data.");
+      setError(message);
+      if (!message.toLowerCase().includes("revenuecat")) {
+        setBackendError(message);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
+  }, []);
+
+  const waitForBackendProSync = useCallback(async (timeoutMs = 30000, intervalMs = 2500): Promise<boolean> => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const nextBackendEntitlements = await getMyEntitlements();
+        setBackendEntitlements(nextBackendEntitlements);
+        setBackendProStatus(Boolean(nextBackendEntitlements.has_pro));
+        setBackendError(null);
+
+        if (nextBackendEntitlements.has_pro) {
+          return true;
+        }
+      } catch (err: unknown) {
+        setBackendError(getErrorMessage(err, "Failed to check backend entitlement status."));
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    return false;
   }, []);
 
   useEffect(() => {
@@ -157,7 +238,14 @@ export default function PaywallScreen() {
 
     try {
       await purchaseRevenueCatPackage(selectedPackage);
-      setNotice("Purchase complete.");
+      setNotice("Purchase complete. Confirming backend webhook...");
+      setSyncingBackend(true);
+      const synced = await waitForBackendProSync();
+      setNotice(
+        synced
+          ? "Purchase complete. Backend Pro entitlement is active."
+          : "Purchase completed, but backend Pro entitlement is still syncing.",
+      );
       await loadRevenueCat(false);
     } catch (err: any) {
       if (err?.userCancelled) {
@@ -166,6 +254,7 @@ export default function PaywallScreen() {
       }
       setError(err?.message ?? "Unable to complete purchase.");
     } finally {
+      setSyncingBackend(false);
       setPurchaseLoadingId(null);
     }
   };
@@ -176,11 +265,19 @@ export default function PaywallScreen() {
     setNotice(null);
     try {
       await restoreRevenueCatPurchases();
-      setNotice("Restore complete.");
+      setNotice("Restore complete. Confirming backend webhook...");
+      setSyncingBackend(true);
+      const synced = await waitForBackendProSync();
+      setNotice(
+        synced
+          ? "Restore complete. Backend Pro entitlement is active."
+          : "Restore completed, but backend Pro entitlement is still syncing.",
+      );
       await loadRevenueCat(false);
     } catch (err: any) {
       setError(err?.message ?? "Unable to restore purchases.");
     } finally {
+      setSyncingBackend(false);
       setRestoring(false);
     }
   };
@@ -224,6 +321,28 @@ export default function PaywallScreen() {
             <Text style={[styles.statusPillText, proActive && styles.statusPillTextActive]}>
               {proActive ? "Pro is Active" : "Pro is Not Active"}
             </Text>
+          </View>
+          <View style={styles.statusChecks}>
+            <Text style={styles.statusCheckText}>
+              RevenueCat entitlement: {proActive ? "active" : "inactive"}
+            </Text>
+            <Text style={styles.statusCheckText}>
+              Backend entitlement: {backendProActive ? "active" : "inactive"}
+            </Text>
+            {backendProEntitlement?.updated_at ? (
+              <Text style={styles.statusCheckTextMuted}>
+                Backend updated: {formatDateTime(backendProEntitlement.updated_at) ?? "unknown"}
+              </Text>
+            ) : null}
+            {syncingBackend ? (
+              <Text style={styles.statusCheckTextMuted}>Checking backend status...</Text>
+            ) : null}
+            {backendError ? <Text style={styles.backendErrorText}>{backendError}</Text> : null}
+            {proActive && !backendProActive ? (
+              <Text style={styles.backendWarningText}>
+                RevenueCat is active but backend is not. Check webhook URL/auth and app_user_id mapping.
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -428,6 +547,29 @@ const styles = StyleSheet.create({
   },
   statusPillTextActive: {
     color: "#86efac",
+  },
+  statusChecks: {
+    marginTop: 2,
+    gap: 2,
+  },
+  statusCheckText: {
+    color: theme.colors.text,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  statusCheckTextMuted: {
+    color: theme.colors.muted,
+    fontSize: 12,
+  },
+  backendWarningText: {
+    color: "#fbbf24",
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  backendErrorText: {
+    color: theme.colors.error,
+    fontSize: 12,
+    lineHeight: 16,
   },
   sectionCard: {
     borderRadius: 16,

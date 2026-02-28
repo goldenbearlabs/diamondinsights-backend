@@ -16,6 +16,7 @@ import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 
 import { SearchMode, SearchResultsPanel } from "./SearchOverlay";
 import { theme } from "../theme/colors";
+import { useBackendProStatus } from "../lib/proStatus";
 
 const LOGO_IMAGE = require("../../assets/images/logo.png");
 const ACCENT = "#fbbf24";
@@ -31,6 +32,7 @@ export const AppHeader = () => {
   const inputRef = useRef<TextInput>(null);
   const searchAnim = useRef(new Animated.Value(0)).current;
   const closingRef = useRef(false);
+  const { isPro, refresh: refreshProStatus } = useBackendProStatus();
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [renderSearch, setRenderSearch] = useState(false);
@@ -51,6 +53,10 @@ export const AppHeader = () => {
     if (!searchOpen) return;
     closeSearch();
   }, [pathname]);
+
+  useEffect(() => {
+    void refreshProStatus(true);
+  }, [pathname, refreshProStatus]);
 
   const runSearchAnim = (toValue: number, onDone?: () => void) => {
     searchAnim.stopAnimation();
@@ -106,10 +112,12 @@ export const AppHeader = () => {
                 <Ionicons name="mail-outline" size={20} color={theme.colors.muted} />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.proBadge} onPress={() => router.push("/paywall")}>
-                <FontAwesome5 name="crown" size={12} color={ACCENT} style={styles.proIcon} />
-                <Text style={styles.proText}>PRO</Text>
-              </TouchableOpacity>
+              {isPro === false ? (
+                <TouchableOpacity style={styles.proBadge} onPress={() => router.push("/paywall")}>
+                  <FontAwesome5 name="crown" size={12} color={ACCENT} style={styles.proIcon} />
+                  <Text style={styles.proText}>PRO</Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           ) : null}
 

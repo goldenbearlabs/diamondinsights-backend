@@ -4,7 +4,9 @@ from src.api.routes.entitlements import (
     _event_implies_active,
     _extract_entitlement_ids,
     _extract_target_user_ids,
+    _row_is_currently_active,
 )
+from shared.db.models import UserEntitlement
 
 
 def test_extract_target_user_ids_prefers_transferred_to_on_transfer() -> None:
@@ -48,3 +50,21 @@ def test_event_implies_active_expiration_and_past_expiry() -> None:
     assert _event_implies_active("EXPIRATION", None) is False
     assert _event_implies_active("RENEWAL", now - datetime.timedelta(seconds=1)) is False
     assert _event_implies_active("CANCELLATION", now + datetime.timedelta(days=1)) is True
+
+
+def test_row_is_currently_active_respects_is_active_and_expiry() -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    row = UserEntitlement(user_id=1, entitlement_id="pro")
+    row.is_active = True
+    row.expires_at = now + datetime.timedelta(minutes=10)
+    assert _row_is_currently_active(row, now) is True
+
+    row.expires_at = now - datetime.timedelta(seconds=1)
+    assert _row_is_currently_active(row, now) is False
+
+    row.expires_at = None
+    assert _row_is_currently_active(row, now) is True
+
+    row.is_active = False
+    assert _row_is_currently_active(row, now) is False

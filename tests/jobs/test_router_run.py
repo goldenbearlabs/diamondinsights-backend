@@ -134,6 +134,13 @@ def test_run_idle_sets_status_to_idle(monkeypatch):
         ("roster-update-aggregator", {}, "apps.jobs.roster_update_aggregator", "RosterUpdateAggregator", {}),
         ("your_ovr_sync", {}, "apps.jobs.your_ovr_sync", "YourOvrSync", {}),
         (
+            "revenuecat_entitlements_reconcile",
+            {},
+            "apps.jobs.revenuecat_entitlements_reconcile",
+            "RevenueCatEntitlementsReconcile",
+            {"firebase_id": None, "user_id": None, "batch_limit": None},
+        ),
+        (
             "card_position_overall_sync",
             {},
             "apps.jobs.card_position_overall_sync",
