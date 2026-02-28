@@ -42,11 +42,17 @@ class StubPusher:
     def prediction_sync(self):
         return "prediction_sync"
 
+    def card_position_overall_sync(self, weights_path=None):
+        return weights_path
+
     def roster_update_sync(self, reload_all_years=False):
         return reload_all_years
 
     def revenuecat_entitlements_reconcile(self, firebase_id=None, user_id=None, batch_limit=None):
         return (firebase_id, user_id, batch_limit)
+      
+    def your_ovr_sync(self):
+        return "your_ovr_sync"
 
 
 def _build_with_jobs(monkeypatch, jobs, *, pusher=None, timezone=None, scheduler_cls=FakeScheduler):
@@ -205,11 +211,16 @@ def test_module_entrypoint_runs_main(monkeypatch):
         def prediction_sync(self):
             return "prediction_sync"
 
+        def card_position_overall_sync(self, weights_path=None):
+            return weights_path
+
         def roster_update_sync(self, reload_all_years=False):
             return reload_all_years
 
         def revenuecat_entitlements_reconcile(self, firebase_id=None, user_id=None, batch_limit=None):
             return (firebase_id, user_id, batch_limit)
+        def your_ovr_sync(self):
+            return "your_ovr_sync"
 
     class FakeScheduler:
         def __init__(self, timezone=None):

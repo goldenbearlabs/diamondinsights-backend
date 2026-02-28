@@ -2,14 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const ADMIN_COOKIE_NAME = "di_admin_auth";
 
-const DEFAULT_BACKEND_URL = "http://localhost:8000";
-
-export function backendApiUrl(path: string): string {
-  const base = (process.env.BACKEND_API_URL || DEFAULT_BACKEND_URL).replace(/\/+$/, "");
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-  return `${base}${suffix}`;
-}
-
 export function encodeBasicAuth(username: string, password: string): string {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
@@ -34,11 +26,4 @@ export function adminUnauthorizedResponse(message = "Unauthorized"): NextRespons
     secure: process.env.NODE_ENV === "production",
   });
   return response;
-}
-
-export function backendUnavailableResponse(): NextResponse {
-  return NextResponse.json(
-    { detail: "Backend API unavailable. Verify BACKEND_API_URL and backend uptime." },
-    { status: 502 },
-  );
 }

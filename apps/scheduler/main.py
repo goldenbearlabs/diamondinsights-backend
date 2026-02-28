@@ -65,6 +65,16 @@ SCHEDULED_JOBS = [
         }, 
     },
     {
+        "func_name": "card_position_overall_sync",
+        "kwargs": {
+            "trigger": "cron",
+            "hour": "1,13",
+            "minute": "45",
+            "misfire_grace_time": 1200,
+            "coalesce": True,
+        },
+    },
+    {
         "func_name": "player_sync",
         "kwargs": {
             "trigger": "cron",
@@ -111,6 +121,15 @@ SCHEDULED_JOBS = [
             "hour": "*/1",
             "minute": "17",
             "misfire_grace_time": 900,
+        }
+    },
+  {
+        "func_name": "your_ovr_sync",
+        "kwargs": {
+            "trigger": "cron",
+            "hour": "2",
+            "minute": "30",
+            "misfire_grace_time": 1200,
             "coalesce": True,
         },
     },

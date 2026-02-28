@@ -484,6 +484,9 @@ class ShowGameRefresh(Job):
         t = re.sub(r"\s*\^b\d+\^\s*$", "", t).strip()
         return t.upper() == "CPU"
 
+    def _has_display_pitcher_info(self, obj: Mapping[str, Any]) -> bool:
+        return bool(str(obj.get("display_pitcher_info", "")).strip())
+
     def _is_cpu_game_obj(self, obj: Mapping[str, Any]) -> bool:
         return self._is_cpu_name(obj.get("home_full_name")) or self._is_cpu_name(obj.get("away_full_name"))
 
@@ -634,6 +637,8 @@ class ShowGameRefresh(Job):
                 if stop_at_game_id and gid == stop_at_game_id:
                     stop_hit = True
                     break
+                if not self._has_display_pitcher_info(obj):
+                    continue
                 game_objs.append(obj)
 
             if stop_hit:
@@ -658,7 +663,7 @@ class ShowGameRefresh(Job):
                 sampled_res = self._fetch_game_history_page(username, page=sampled_page)
                 sampled_items = self._json_get(sampled_res, "game_history", default=[]) or []
                 for obj in sampled_items:
-                    if self._is_cpu_game_obj(obj):
+                    if self._is_cpu_game_obj(obj) or not self._has_display_pitcher_info(obj):
                         continue
                     gid = str(obj.get("id", "")).strip()
                     if gid:

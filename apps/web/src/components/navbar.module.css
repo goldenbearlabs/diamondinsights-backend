@@ -1,0 +1,353 @@
+:global(:root) {
+  --nav-height: 66px;
+}
+
+.root {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.inner {
+  width: min(1180px, calc(100% - 28px));
+  margin-inline: auto;
+  min-height: var(--nav-height, 66px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.hamburger {
+  display: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.7);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.hamburger span {
+  width: 16px;
+  height: 2px;
+  border-radius: 99px;
+  background: #e2e8f0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brandBadge {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  background: rgba(2, 6, 23, 0.88);
+}
+
+.brandText {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.desktopGroups {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.group {
+  position: relative;
+}
+
+.groupButton {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.groupButton:hover {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.groupButtonActive {
+  color: var(--color-gold);
+}
+
+.groupChevron {
+  color: #9fb0c6;
+  font-size: 11px;
+}
+
+.dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  min-width: 220px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(2, 6, 23, 0.96);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.6);
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.dropdown::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  left: 0;
+  right: 0;
+  height: 12px;
+}
+
+.group:hover .dropdown,
+.group:focus-within .dropdown {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.dropdownLink {
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #d2dce9;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dropdownLink:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dropdownLinkActive {
+  color: #ffffff;
+  background: rgba(59, 130, 246, 0.24);
+}
+
+.desktopSearch {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.desktopSearch input {
+  width: clamp(220px, 26vw, 360px);
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  padding: 9px 11px;
+  font-size: 13px;
+}
+
+.desktopSearch input::placeholder {
+  color: #9fb0c6;
+}
+
+.desktopSearch button {
+  border-radius: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.42);
+  background: rgba(59, 130, 246, 0.2);
+  color: #e2efff;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+}
+
+.accountButton {
+  margin-left: 4px;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(15, 23, 42, 0.86);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.accountAvatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.mobileOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 1;
+}
+
+.mobileOverlayOpen {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mobileDrawer {
+  position: fixed;
+  top: calc(var(--nav-height, 66px) + 1px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  max-width: 100vw;
+  background: rgba(2, 6, 23, 0.97);
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 14px 40px rgba(2, 6, 23, 0.5);
+  transform: translateX(-102%);
+  transition: transform 0.22s ease;
+  padding: 16px 14px calc(20px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  z-index: 2;
+}
+
+.mobileDrawerOpen {
+  transform: translateX(0);
+}
+
+.mobileSearch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mobileSearch input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  padding: 9px 11px;
+  font-size: 13px;
+}
+
+.mobileSearch button {
+  border-radius: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.2);
+  color: #d8e8ff;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mobileSection {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  padding-top: 10px;
+  margin-top: 8px;
+}
+
+.mobileSection summary {
+  list-style: none;
+  font-size: 14px;
+  color: #e2e8f0;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mobileSection summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobileLinks {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.mobileLink {
+  padding: 8px 6px;
+  border-radius: 8px;
+  color: #c8d4e5;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mobileLinkActive {
+  background: rgba(59, 130, 246, 0.22);
+  color: #ffffff;
+}
+
+@media (max-width: 1120px) {
+  .desktopSearch input {
+    width: clamp(170px, 18vw, 260px);
+  }
+}
+
+@media (max-width: 960px) {
+  .desktopGroups,
+  .desktopSearch {
+    display: none;
+  }
+
+  .hamburger {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 560px) {
+  :global(:root) {
+    --nav-height: 62px;
+  }
+
+  .inner {
+    width: calc(100% - 18px);
+    gap: 8px;
+  }
+
+  .brandText {
+    display: none;
+  }
+}

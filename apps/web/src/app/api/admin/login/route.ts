@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  ADMIN_COOKIE_NAME,
-  backendApiUrl,
-  backendUnavailableResponse,
-  encodeBasicAuth,
-} from "@/lib/admin-api";
+import { backendApiUrl, backendUnavailableResponse } from "@/lib/backend-api";
+import { ADMIN_COOKIE_NAME, encodeBasicAuth } from "@/lib/admin-api";
 
 type LoginBody = {
   username?: string;
