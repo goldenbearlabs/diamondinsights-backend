@@ -48,6 +48,9 @@ class StubPusher:
     def roster_update_sync(self, reload_all_years=False):
         return reload_all_years
 
+    def revenuecat_entitlements_reconcile(self, firebase_id=None, user_id=None, batch_limit=None):
+        return (firebase_id, user_id, batch_limit)
+      
     def your_ovr_sync(self):
         return "your_ovr_sync"
 
@@ -214,6 +217,8 @@ def test_module_entrypoint_runs_main(monkeypatch):
         def roster_update_sync(self, reload_all_years=False):
             return reload_all_years
 
+        def revenuecat_entitlements_reconcile(self, firebase_id=None, user_id=None, batch_limit=None):
+            return (firebase_id, user_id, batch_limit)
         def your_ovr_sync(self):
             return "your_ovr_sync"
 

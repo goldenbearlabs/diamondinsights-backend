@@ -35,7 +35,7 @@ const GAMEPLAY_ROUTES = [
   "/team-builder",
   "/cards",
 ];
-const COMMUNITY_ROUTES = ["/trending", "/blogs", "/chat"];
+const COMMUNITY_ROUTES = ["/trending", "/chat"];
 
 const MARKET_ITEMS: MenuItem[] = [
   { label: "Predictions", route: "/(app)/predictions", icon: "chart-line" },
@@ -55,7 +55,6 @@ const GAMEPLAY_ITEMS: MenuItem[] = [
 const COMMUNITY_ITEMS: MenuItem[] = [
   { label: "Chat", route: "/(app)/chat", icon: "comment-dots" },
   { label: "Trending", route: "/(app)/trending", icon: "fire-alt" },
-  { label: "Blogs", route: "/(app)/blogs", icon: "newspaper" },
 ];
 
 const MENU_WIDTH = 220;

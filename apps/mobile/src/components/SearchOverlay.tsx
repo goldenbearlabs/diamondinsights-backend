@@ -34,6 +34,7 @@ type CardResult = {
   name: string;
   year: number;
   ovr: number;
+  meta_overall_rounded?: number | null;
   img: string;
   baked_img?: string; // Added baked_img
   series_name: string; // Added series_name

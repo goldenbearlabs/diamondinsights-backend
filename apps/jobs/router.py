@@ -167,6 +167,40 @@ class Router:
                             case "roster-update-aggregator":
                                 from apps.jobs.roster_update_aggregator import RosterUpdateAggregator
                                 RosterUpdateAggregator().run(session)
+
+                            case "revenuecat_entitlements_reconcile":
+                                from apps.jobs.revenuecat_entitlements_reconcile import (
+                                    RevenueCatEntitlementsReconcile,
+                                )
+
+                                firebase_id_raw = payload.args.get("firebase_id")
+                                firebase_id = (
+                                    str(firebase_id_raw).strip()
+                                    if firebase_id_raw is not None
+                                    else None
+                                )
+                                if firebase_id == "":
+                                    firebase_id = None
+
+                                user_id_raw = payload.args.get("user_id")
+                                user_id = (
+                                    int(user_id_raw)
+                                    if user_id_raw is not None and str(user_id_raw).strip() != ""
+                                    else None
+                                )
+
+                                batch_limit_raw = payload.args.get("batch_limit")
+                                batch_limit = (
+                                    int(batch_limit_raw)
+                                    if batch_limit_raw is not None and str(batch_limit_raw).strip() != ""
+                                    else None
+                                )
+
+                                RevenueCatEntitlementsReconcile(
+                                    firebase_id=firebase_id,
+                                    user_id=user_id,
+                                    batch_limit=batch_limit,
+                                ).run(session)
                             
                             case _:
                                 raise ValueError(f"Unknown job type: {payload.job_type}")

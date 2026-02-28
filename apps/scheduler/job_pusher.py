@@ -56,3 +56,19 @@ class JobPusher:
 
     def your_ovr_sync(self) -> Payload:
         return self.push("your_ovr_sync")
+
+    def revenuecat_entitlements_reconcile(
+        self,
+        *,
+        firebase_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        batch_limit: Optional[int] = None,
+    ) -> Payload:
+        args: dict[str, Any] = {}
+        if firebase_id:
+            args["firebase_id"] = firebase_id
+        if user_id is not None:
+            args["user_id"] = int(user_id)
+        if batch_limit is not None:
+            args["batch_limit"] = int(batch_limit)
+        return self.push("revenuecat_entitlements_reconcile", args)

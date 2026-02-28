@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+
 import { 
   View, 
   Text, 
@@ -6,18 +7,22 @@ import {
   TextInput, 
   TouchableOpacity, 
   FlatList, 
-  Image,
   ActivityIndicator,
   RefreshControl,
   Modal,
-  Pressable
+  Pressable,
+  DeviceEventEmitter
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
-import { apiGet } from '../../lib/api'; 
+
+import { useBackendProStatus } from '../../lib/proStatus';
+import { apiGet, apiGetAuth} from '../../lib/api';
+import { auth } from '../../lib/firebase';
 
 type CardData = {
   id: string;
@@ -34,10 +39,16 @@ type CardData = {
   user_prediction_count: number;
   predicted_ovr: number | null;
   predicted_attributes: Record<string, number> | null;
+  user_prediction: number | null;
 };
+
+const NON_PRO_ALLOWED_RARITIES = ['common', 'bronze'] as const;
+const ALL_RARITIES = ['common', 'bronze', 'silver', 'gold', 'diamond'] as const;
 
 export default function PredictionsScreen() {
   const router = useRouter();
+  const { isPro } = useBackendProStatus();
+  const enforceNonProRarity = isPro === false;
   
   
   const [cards, setCards] = useState<CardData[]>([]);
@@ -54,12 +65,17 @@ export default function PredictionsScreen() {
   const [tempSelectedDelta, setTempSelectedDelta] = useState<'none' | 'high' | 'low'>('none');
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [currentFilterGroup, setCurrentFilterGroup] = useState<string | null>(null);
+  const [showMyPredictions, setShowMyPredictions] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25); 
   const [hasMore, setHasMore] = useState(true); 
   const [refreshing, setRefreshing] = useState(false);
+
+  const effectiveSelectedRarities = enforceNonProRarity
+    ? [...NON_PRO_ALLOWED_RARITIES]
+    : selectedRarities;
 
   // DEBOUNCE SEARCH (Reset to Page 1)
   useEffect(() => {
@@ -74,7 +90,34 @@ export default function PredictionsScreen() {
   // Reload cards when page, limit, or filters change
   useEffect(() => {
     loadCards(page, limit, searchText);
-  }, [page, limit, selectedRarities, selectedPlayerType, selectedPopularity, selectedDelta]);
+  }, [page, limit, selectedRarities, selectedPlayerType, selectedPopularity, selectedDelta, enforceNonProRarity]);
+
+  useEffect(() => {
+    if (!enforceNonProRarity) return;
+    const forcedRarities = [...NON_PRO_ALLOWED_RARITIES];
+    setSelectedRarities(forcedRarities);
+    setTempSelectedRarities(forcedRarities);
+  }, [enforceNonProRarity]);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('PredictionUpdated', (event) => {
+      const { cardId, newPrediction } = event;
+      
+      // Update the local state silently without calling the API
+      setCards((currentCards) => 
+        currentCards.map((card) => {
+          if (card.id === cardId) {
+            // Found the card! Inject the new prediction to show the blue badge
+            return { ...card, user_prediction: newPrediction };
+          }
+          return card;
+        })
+      );
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   
   const loadCards = async (targetPage: number, targetLimit: number, query: string) => {
@@ -83,13 +126,17 @@ export default function PredictionsScreen() {
       const offset = (targetPage - 1) * targetLimit;
       
       let url = `/cards?series=live&year=25&offset=${offset}&limit=${targetLimit}`;
+      
       if (query.trim().length > 0) {
         url += `&name=${encodeURIComponent(query)}`;
       }
+      if (showMyPredictions) {
+        url += '&my_predictions=true';
+      }
       
       // Add rarity filter to URL if any are selected (server-side filtering)
-      if (selectedRarities.length > 0) {
-        url += `&rarity=${selectedRarities.join(',')}`;
+      if (effectiveSelectedRarities.length > 0) {
+        url += `&rarity=${effectiveSelectedRarities.join(',')}`;
       }
 
       // Add player type filter
@@ -106,7 +153,11 @@ export default function PredictionsScreen() {
         url += `&sort_by=predicted_ovr_delta&desc=${selectedDelta === 'high'}`;
       }
 
-      const newCards = await apiGet<CardData[]>(url); 
+      const newCards = (showMyPredictions || auth.currentUser)
+        ? await apiGetAuth<CardData[]>(url) 
+        : await apiGet<CardData[]>(url);
+
+      
       setCards(newCards);
       
       setHasMore(newCards.length === targetLimit);
@@ -132,7 +183,7 @@ export default function PredictionsScreen() {
         activeOpacity={0.7}
         onPress={() => router.push({ pathname: "/predictions/[id]", params: { id: item.id, cardData: JSON.stringify(item) } })}
       >
-        <Image source={{ uri: item.baked_img }} style={styles.playerCardImage} resizeMode="contain" />
+        <Image source={ item.baked_img } style={styles.playerCardImage} contentFit="contain" transition={200}/>
         <View style={styles.infoColumn}>
           <Text style={styles.playerName} numberOfLines={1}>{item.name}</Text>
           <View style={styles.teamRow}>
@@ -140,7 +191,21 @@ export default function PredictionsScreen() {
             <View style={styles.verticalDivider} />
             <View style={styles.socialItem}><Ionicons name="bar-chart" size={10} color="#a78bfa" /><Text style={styles.socialText}>{item.user_prediction_count ?? 0}</Text></View>
             <View style={styles.socialItem}><FontAwesome5 name="comment-alt" size={10} color={theme.colors.muted} solid /><Text style={styles.socialText}>{item.comment_count ?? 0}</Text></View>
+            {item.user_prediction != null && (
+              <>
+                <View style={styles.verticalDivider} />
+                <View style={styles.socialItem}>
+                  <Ionicons name="person" size={10} color="#3b82f6" />
+                  <Text style={[styles.socialText, { color: '#3b82f6' }]}>
+                    {item.user_prediction} OVR
+                  </Text>
+                </View>
+              </>
+            )}
+
           </View>
+
+
           <View style={styles.ratingRow}>
             <View style={styles.ratingBadge}><Text style={styles.ratingLabel}>CUR</Text><Text style={styles.currentRating}>{item.ovr}</Text></View>
             {item.predicted_ovr != null && (
@@ -231,7 +296,7 @@ export default function PredictionsScreen() {
             <TouchableOpacity 
               style={styles.filterBtn} 
               onPress={() => {
-                setTempSelectedRarities(selectedRarities);
+                setTempSelectedRarities(effectiveSelectedRarities);
                 setTempSelectedPlayerType(selectedPlayerType);
                 setTempSelectedPopularity(selectedPopularity);
                 setTempSelectedDelta(selectedDelta);
@@ -239,13 +304,34 @@ export default function PredictionsScreen() {
               }}
             >
               <Ionicons name="options" size={20} color="white" />
-              {(selectedRarities.length + (selectedPlayerType !== 'all' ? 1 : 0) + (selectedPopularity !== 'none' ? 1 : 0) + (selectedDelta !== 'none' ? 1 : 0)) > 0 && (
+              {((enforceNonProRarity ? 0 : selectedRarities.length) + (selectedPlayerType !== 'all' ? 1 : 0) + (selectedPopularity !== 'none' ? 1 : 0) + (selectedDelta !== 'none' ? 1 : 0)) > 0 && (
                 <View style={styles.filterBadge}>
-                  <Text style={styles.filterBadgeText}>{selectedRarities.length + (selectedPlayerType !== 'all' ? 1 : 0) + (selectedPopularity !== 'none' ? 1 : 0) + (selectedDelta !== 'none' ? 1 : 0)}</Text>
+                  <Text style={styles.filterBadgeText}>{(enforceNonProRarity ? 0 : selectedRarities.length) + (selectedPlayerType !== 'all' ? 1 : 0) + (selectedPopularity !== 'none' ? 1 : 0) + (selectedDelta !== 'none' ? 1 : 0)}</Text>
                 </View>
               )}
             </TouchableOpacity>
           </View>
+          
+          {/* Quick Filters Row */}
+          <View style={styles.quickFiltersRow}>
+            <TouchableOpacity 
+              style={[styles.quickFilterChip, showMyPredictions && styles.quickFilterChipActive]}
+              onPress={() => {
+                setShowMyPredictions(!showMyPredictions);
+                setPage(1); // Reset to page 1 when toggling
+              }}
+            >
+              <Ionicons 
+                name={showMyPredictions ? "checkbox" : "square-outline"} 
+                size={14} 
+                color={showMyPredictions ? "white" : theme.colors.muted} 
+              />
+              <Text style={[styles.quickFilterText, showMyPredictions && styles.quickFilterTextActive]}>
+                My Predictions
+              </Text>
+            </TouchableOpacity>
+          </View>
+
 
           {/* Filter Modal */}
           <Modal
@@ -269,9 +355,9 @@ export default function PredictionsScreen() {
                     <View style={styles.modalHeader}>
                       <Text style={styles.modalTitle}>Filters</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                        {(selectedRarities.length > 0 || selectedPlayerType !== 'all' || selectedPopularity !== 'none' || selectedDelta !== 'none') && (
+                        {((enforceNonProRarity ? false : selectedRarities.length > 0) || selectedPlayerType !== 'all' || selectedPopularity !== 'none' || selectedDelta !== 'none') && (
                           <TouchableOpacity onPress={() => {
-                            setSelectedRarities([]);
+                            setSelectedRarities(enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : []);
                             setSelectedPlayerType('all');
                             setSelectedPopularity('none');
                             setSelectedDelta('none');
@@ -343,7 +429,7 @@ export default function PredictionsScreen() {
                         <Text style={styles.filterGroupLabel}>Rarity</Text>
                       </View>
                       <View style={styles.filterGroupRight}>
-                        {tempSelectedRarities.length > 0 && (
+                        {(!enforceNonProRarity && tempSelectedRarities.length > 0) && (
                           <View style={styles.filterCountBadge}>
                             <Text style={styles.filterCountText}>{tempSelectedRarities.length}</Text>
                           </View>
@@ -358,7 +444,7 @@ export default function PredictionsScreen() {
                           setSelectedPlayerType(tempSelectedPlayerType);
                           setSelectedPopularity(tempSelectedPopularity);
                           setSelectedDelta(tempSelectedDelta);
-                          setSelectedRarities(tempSelectedRarities);
+                          setSelectedRarities(enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : tempSelectedRarities);
                           if (tempSelectedPopularity !== 'none') setSelectedDelta('none');
                           if (tempSelectedDelta !== 'none') setSelectedPopularity('none');
                           setFilterModalOpen(false);
@@ -532,37 +618,68 @@ export default function PredictionsScreen() {
                         <Ionicons name="close" size={24} color="white" />
                       </TouchableOpacity>
                     </View>
+                    {enforceNonProRarity ? (
+                      <Text style={styles.proRestrictionHint}>
+                        Non-Pro access includes Bronze/Common market predictions.
+                      </Text>
+                    ) : null}
                     <Text style={styles.modalSubtitle}>Select Rarities</Text>
-                    {['common', 'bronze', 'silver', 'gold', 'diamond'].map((rarity) => (
-                      <TouchableOpacity
-                        key={rarity}
-                        style={styles.checkboxRow}
-                        onPress={() => {
-                          setTempSelectedRarities(prev => 
-                            prev.includes(rarity)
-                              ? prev.filter(r => r !== rarity)
-                              : [...prev, rarity]
-                          );
-                        }}
-                      >
-                        <View style={[
-                          styles.checkbox,
-                          tempSelectedRarities.includes(rarity) && styles.checkboxChecked
-                        ]}>
-                          {tempSelectedRarities.includes(rarity) && (
-                            <Ionicons name="checkmark" size={16} color="white" />
-                          )}
+                    {ALL_RARITIES.map((rarity) => {
+                      const isAlwaysIncludedForNonPro = enforceNonProRarity && NON_PRO_ALLOWED_RARITIES.includes(rarity);
+                      const isLockedForNonPro = enforceNonProRarity && !NON_PRO_ALLOWED_RARITIES.includes(rarity);
+                      const isChecked = isAlwaysIncludedForNonPro || tempSelectedRarities.includes(rarity);
+                      const canToggle = !isLockedForNonPro && !isAlwaysIncludedForNonPro;
+
+                      return (
+                        <View key={rarity} style={[styles.checkboxRow, isLockedForNonPro && styles.checkboxRowLocked]}>
+                          <TouchableOpacity
+                            style={styles.checkboxRowMain}
+                            disabled={!canToggle}
+                            onPress={() => {
+                              if (!canToggle) return;
+                              setTempSelectedRarities(prev =>
+                                prev.includes(rarity)
+                                  ? prev.filter(r => r !== rarity)
+                                  : [...prev, rarity]
+                              );
+                            }}
+                          >
+                            <View style={[
+                              styles.checkbox,
+                              isChecked && styles.checkboxChecked,
+                              isAlwaysIncludedForNonPro && styles.checkboxForced
+                            ]}>
+                              {isChecked && (
+                                <Ionicons name="checkmark" size={16} color="white" />
+                              )}
+                            </View>
+                            <Text style={[styles.checkboxLabel, isLockedForNonPro && styles.checkboxLabelLocked]}>
+                              {rarity.charAt(0).toUpperCase() + rarity.slice(1)}
+                            </Text>
+                          </TouchableOpacity>
+                          {isLockedForNonPro ? (
+                            <View style={styles.lockedOverlay}>
+                              <Text style={styles.lockedOverlayText}>Subscribe to Pro to unlock</Text>
+                              <TouchableOpacity
+                                style={styles.lockedOverlayButton}
+                                onPress={() => {
+                                  setFilterModalOpen(false);
+                                  setCurrentFilterGroup(null);
+                                  router.push('/paywall');
+                                }}
+                              >
+                                <Text style={styles.lockedOverlayButtonText}>Go Pro</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : null}
                         </View>
-                        <Text style={styles.checkboxLabel}>
-                          {rarity.charAt(0).toUpperCase() + rarity.slice(1)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                      );
+                    })}
                     <View style={styles.modalActions}>
                       <TouchableOpacity
                         style={styles.clearButton}
                         onPress={() => {
-                          setTempSelectedRarities([]);
+                          setTempSelectedRarities(enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : []);
                           setCurrentFilterGroup(null);
                         }}
                       >
@@ -593,13 +710,13 @@ export default function PredictionsScreen() {
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />}
               ListFooterComponent={cards.length > 0 ? renderFooter : null} // Only show footer if we have data
               ListEmptyComponent={
-                (selectedRarities.length > 0 || selectedPlayerType !== 'all' || selectedPopularity !== 'none' || selectedDelta !== 'none') ? (
+                ((enforceNonProRarity ? false : selectedRarities.length > 0) || selectedPlayerType !== 'all' || selectedPopularity !== 'none' || selectedDelta !== 'none') ? (
                   <View style={styles.emptyContainer}>
                     <Text style={styles.emptyText}>No cards match your filters.</Text>
                     <TouchableOpacity 
                       style={styles.clearFiltersButton}
                       onPress={() => {
-                        setSelectedRarities([]);
+                        setSelectedRarities(enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : []);
                         setSelectedPlayerType('all');
                         setSelectedPopularity('none');
                         setSelectedDelta('none');
@@ -626,7 +743,7 @@ const styles = StyleSheet.create({
   backgroundLayer: { ...StyleSheet.absoluteFillObject, zIndex: -1 },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 0 },
   headerTitle: { fontSize: 28, fontWeight: '800', color: 'white', marginBottom: 16 },
-  searchRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  searchRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   searchInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12, paddingHorizontal: 12, height: 48, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
   searchInput: { flex: 1, color: 'white', fontSize: 16, fontWeight: '500' },
   filterBtn: { width: 48, height: 48, borderRadius: 12, backgroundColor: 'rgba(255, 255, 255, 0.05)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
@@ -646,6 +763,11 @@ const styles = StyleSheet.create({
   ratingLabel: { fontSize: 8, color: theme.colors.muted, fontWeight: '800', marginBottom: 1 },
   currentRating: { color: 'white', fontWeight: '700', fontSize: 14 },
   arrowContainer: { paddingLeft: 10 },
+  quickFiltersRow: { flexDirection: 'row', marginBottom: 12 },
+  quickFilterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', alignSelf: 'flex-start' },
+  quickFilterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
+  quickFilterText: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
+  quickFilterTextActive: { color: 'white', fontWeight: 'bold' },
 
   footerContainer: {
     marginTop: 20,
@@ -825,13 +947,19 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    position: 'relative',
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderRadius: 10,
     marginBottom: 8,
+  },
+  checkboxRowMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkboxRowLocked: {
+    backgroundColor: 'rgba(255, 255, 255, 0.015)',
   },
   checkbox: {
     width: 24,
@@ -847,10 +975,52 @@ const styles = StyleSheet.create({
     backgroundColor: '#3b82f6',
     borderColor: '#3b82f6',
   },
+  checkboxForced: {
+    backgroundColor: '#4b5563',
+    borderColor: '#9ca3af',
+  },
   checkboxLabel: {
     color: 'white',
     fontSize: 16,
     fontWeight: '500',
+  },
+  checkboxLabelLocked: {
+    color: 'rgba(255,255,255,0.45)',
+  },
+  lockedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.35)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+  },
+  lockedOverlayText: {
+    color: '#fde68a',
+    fontSize: 12,
+    fontWeight: '700',
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  lockedOverlayButton: {
+    backgroundColor: '#fbbf24',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  lockedOverlayButtonText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  proRestrictionHint: {
+    color: '#fcd34d',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 12,
   },
   modalActions: {
     flexDirection: 'row',

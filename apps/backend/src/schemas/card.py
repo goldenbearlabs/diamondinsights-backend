@@ -78,6 +78,7 @@ class CardResponse(BaseModel):
     user_prediction_count: Optional[int] = 0
     predicted_ovr: Optional[int] = None
     predicted_attributes: Optional[Dict[str, Any]] = None
+    user_prediction: Optional[int] = None
 
     class Config:
         from_attributes = True

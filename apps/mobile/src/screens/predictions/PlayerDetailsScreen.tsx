@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, DeviceEventEmitter} from 'react-native';
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
@@ -11,6 +12,7 @@ import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import Svg, { Path, G } from 'react-native-svg';
 import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
+import { useBackendProStatus } from '../../lib/proStatus';
 import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
 import { MarketSpreadChart } from '../../components/playerdetails/MarketSpreadChart';
 import { MarketVolumeChart } from '../../components/playerdetails/MarketVolumeChart';
@@ -41,6 +43,7 @@ const PITCHING_PREDICTION_KEYS = [
 export default function PlayerDetailsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { isPro, loading: proStatusLoading } = useBackendProStatus();
   const card = params.cardData ? JSON.parse(params.cardData as string) : null;
 
   if (!card) return null;
@@ -87,6 +90,9 @@ export default function PlayerDetailsScreen() {
   const [seasonStats, setSeasonStats] = useState<SeasonStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
   const [activeWindow, setActiveWindow] = useState<'season' | '7d' | '14d' | 'last_update'>('season');
+  const showProStatusPending = isPro === null && proStatusLoading;
+  const showProLock = isPro === false || (isPro === null && !proStatusLoading);
+  const canAccessLastUpdateWindow = isPro === true;
 
   useEffect(() => {
     if (card?.id) {
@@ -111,6 +117,7 @@ export default function PlayerDetailsScreen() {
       setLoadingPred(true);
       await saveUserPrediction({ card_id: card.id, predicted_ovr: val });
       setIsSubmitted(true);
+      DeviceEventEmitter.emit('PredictionUpdated', { cardId: card.id, newPrediction: val });
       Alert.alert("Success", "Your prediction has been saved!");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save prediction");
@@ -163,12 +170,20 @@ export default function PlayerDetailsScreen() {
   useEffect(() => {
     if (!card?.id) return;
     setLoadingStats(true);
-    const windowParam = activeWindow !== 'season' ? `&window=${activeWindow}` : '';
+    const effectiveWindow =
+      activeWindow === 'last_update' && !canAccessLastUpdateWindow ? 'season' : activeWindow;
+    const windowParam = effectiveWindow !== 'season' ? `&window=${effectiveWindow}` : '';
     apiGet<SeasonStats>(`/mlb_stats/season/${card.id}?season=2025${windowParam}`)
       .then(res => setSeasonStats(res))
       .catch(() => setSeasonStats(null))
       .finally(() => setLoadingStats(false));
-  }, [card?.id, activeWindow]);
+  }, [card?.id, activeWindow, canAccessLastUpdateWindow]);
+
+  useEffect(() => {
+    if (activeWindow === 'last_update' && !canAccessLastUpdateWindow) {
+      setActiveWindow('season');
+    }
+  }, [activeWindow, canAccessLastUpdateWindow]);
 
   useEffect(() => {
     if (!card?.id) return;
@@ -234,6 +249,22 @@ export default function PlayerDetailsScreen() {
     );
   };
 
+  const handleLastUpdateWindowPress = () => {
+    if (canAccessLastUpdateWindow) {
+      setActiveWindow('last_update');
+      return;
+    }
+
+    Alert.alert(
+      "Pro Feature",
+      "Since Last Roster Update stats are available for Pro users.",
+      [
+        { text: "Not now", style: "cancel" },
+        { text: "Go Pro", onPress: () => router.push('/paywall') },
+      ]
+    );
+  };
+
   const getSellNowPrice = (ovr: number): number => {
     if (ovr >= 95) return 10000;
     if (ovr >= 92) return 10000;
@@ -281,9 +312,10 @@ export default function PlayerDetailsScreen() {
           <View style={styles.glassCard}>
             <View style={styles.topRow}>
               <Image 
-                source={{ uri: card.baked_img }} 
+                source={card.baked_img}
                 style={styles.cardArt} 
-                resizeMode="contain" 
+                contentFit="contain"
+                transition={200}
               />
               <View style={styles.bioColumn}>
                 <Text style={styles.playerName}>{card.name}</Text>
@@ -637,12 +669,26 @@ export default function PlayerDetailsScreen() {
                   ))}
                 </View>
                 <TouchableOpacity
-                  style={[styles.windowPillFull, activeWindow === 'last_update' && styles.windowPillActive]}
-                  onPress={() => setActiveWindow('last_update')}
+                  style={[
+                    styles.windowPillFull,
+                    activeWindow === 'last_update' && styles.windowPillActive,
+                    !canAccessLastUpdateWindow && styles.windowPillLocked,
+                  ]}
+                  onPress={handleLastUpdateWindowPress}
                 >
-                  <Text style={[styles.windowPillText, activeWindow === 'last_update' && styles.windowPillTextActive]}>
-                    Since Last Roster Update
-                  </Text>
+                  <View style={styles.lockedWindowPillContent}>
+                    <Text
+                      style={[
+                        styles.windowPillText,
+                        activeWindow === 'last_update' && styles.windowPillTextActive,
+                      ]}
+                    >
+                      Since Last Roster Update
+                    </Text>
+                    {!canAccessLastUpdateWindow ? (
+                      <FontAwesome5 name="crown" size={10} color="#fbbf24" />
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
               </View>
               {(() => {
@@ -801,54 +847,84 @@ export default function PlayerDetailsScreen() {
                 </View>
                 <Text style={[styles.sectionTitle, { color: '#fbbf24', marginBottom: 0 }]}>Predicted Attributes</Text>
               </View>
-              <View style={styles.glassCard}>
+              <Text style={styles.proSectionSubheader}>
+                {showProLock || showProStatusPending
+                  ? 'See projected individual batting and pitching attribute changes for this card. Sign up for Pro to unlock full access.'
+                  : 'Projected individual batting and pitching attribute changes from our latest model run.'}
+              </Text>
+              <View style={[styles.glassCard, styles.proCard]}>
+                <View style={showProLock || showProStatusPending ? styles.proContentObscured : undefined}>
 
-                {/* Pitching Predictions */}
-                {PITCHING_PREDICTION_KEYS.some(({ key }) =>
-                  card.predicted_attributes?.[`pit_pred_${key}_new`] != null
-                ) && (
-                  <>
-                    <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
-                    <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
-                    {PITCHING_PREDICTION_KEYS.map(({ key, label }) => {
-                      const newVal = card.predicted_attributes?.[`pit_pred_${key}_new`];
-                      const delta = card.predicted_attributes?.[`pit_pred_${key}_delta`];
-                      if (newVal == null || delta == null) return null;
-                      return (
-                        <PredictionAttributeBar
-                          key={key}
-                          label={label}
-                          predictedValue={Math.round(newVal)}
-                          delta={delta}
-                        />
-                      );
-                    })}
-                    {showBatting && <View style={{ height: 24 }} />}
-                  </>
-                )}
+                  {/* Pitching Predictions */}
+                  {PITCHING_PREDICTION_KEYS.some(({ key }) =>
+                    card.predicted_attributes?.[`pit_pred_${key}_new`] != null
+                  ) && (
+                    <>
+                      <Text style={[styles.subHeader, { color: PITCHING_COLOR }]}>Pitching</Text>
+                      <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
+                      {PITCHING_PREDICTION_KEYS.map(({ key, label }) => {
+                        const newVal = card.predicted_attributes?.[`pit_pred_${key}_new`];
+                        const delta = card.predicted_attributes?.[`pit_pred_${key}_delta`];
+                        if (newVal == null || delta == null) return null;
+                        return (
+                          <PredictionAttributeBar
+                            key={key}
+                            label={label}
+                            predictedValue={Math.round(newVal)}
+                            delta={delta}
+                          />
+                        );
+                      })}
+                      {showBatting && <View style={{ height: 24 }} />}
+                    </>
+                  )}
 
-                {/* Batting Predictions */}
-                {BATTING_PREDICTION_KEYS.some(({ key }) =>
-                  card.predicted_attributes?.[`hit_pred_${key}_new`] != null
-                ) && (
-                  <>
-                    <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
-                    <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
-                    {BATTING_PREDICTION_KEYS.map(({ key, label }) => {
-                      const newVal = card.predicted_attributes?.[`hit_pred_${key}_new`];
-                      const delta = card.predicted_attributes?.[`hit_pred_${key}_delta`];
-                      if (newVal == null || delta == null) return null;
-                      return (
-                        <PredictionAttributeBar
-                          key={key}
-                          label={label}
-                          predictedValue={Math.round(newVal)}
-                          delta={delta}
-                        />
-                      );
-                    })}
-                  </>
-                )}
+                  {/* Batting Predictions */}
+                  {BATTING_PREDICTION_KEYS.some(({ key }) =>
+                    card.predicted_attributes?.[`hit_pred_${key}_new`] != null
+                  ) && (
+                    <>
+                      <Text style={[styles.subHeader, { color: BATTING_COLOR }]}>Batting</Text>
+                      <View style={[styles.subHeaderDivider, { backgroundColor: BATTING_COLOR }]} />
+                      {BATTING_PREDICTION_KEYS.map(({ key, label }) => {
+                        const newVal = card.predicted_attributes?.[`hit_pred_${key}_new`];
+                        const delta = card.predicted_attributes?.[`hit_pred_${key}_delta`];
+                        if (newVal == null || delta == null) return null;
+                        return (
+                          <PredictionAttributeBar
+                            key={key}
+                            label={label}
+                            predictedValue={Math.round(newVal)}
+                            delta={delta}
+                          />
+                        );
+                      })}
+                    </>
+                  )}
+                </View>
+
+                {showProStatusPending ? (
+                  <View style={styles.proPendingOverlay}>
+                    <ActivityIndicator size="small" color="#fbbf24" />
+                    <Text style={styles.proPendingText}>Checking Pro access...</Text>
+                  </View>
+                ) : null}
+
+                {showProLock ? (
+                  <View style={styles.proLockOverlay}>
+                    <Text style={styles.proLockTitle}>Sign up for Pro to see predicted attributes</Text>
+                    <Text style={styles.proLockDescription}>
+                      Unlock projected increases and decreases for key batting and pitching ratings before roster updates.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.proLockButton}
+                      onPress={() => router.push('/paywall')}
+                    >
+                      <FontAwesome5 name="crown" size={12} color="#111827" />
+                      <Text style={styles.proLockButtonText}>Go Pro</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
 
               </View>
             </>
@@ -940,6 +1016,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(15, 23, 42, 0.35)',
     alignItems: 'center',
+  },
+  windowPillLocked: {
+    borderColor: 'rgba(251, 191, 36, 0.45)',
+  },
+  lockedWindowPillContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   windowPillActive: {
     backgroundColor: 'rgba(59, 130, 246, 0.2)',
@@ -1086,6 +1170,72 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 10,
     letterSpacing: 0.4,
+  },
+  proSectionSubheader: {
+    color: theme.colors.muted,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  proCard: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  proContentObscured: {
+    opacity: 0.28,
+  },
+  proPendingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2, 6, 23, 0.42)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+  },
+  proPendingText: {
+    color: '#fde68a',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  proLockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2, 6, 23, 0.74)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.35)',
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  proLockTitle: {
+    color: '#fde68a',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  proLockDescription: {
+    color: '#e5e7eb',
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  proLockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fbbf24',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  proLockButtonText: {
+    color: '#111827',
+    fontWeight: '800',
+    fontSize: 12,
+    letterSpacing: 0.2,
   },
   subSectionTitle: {
     color: 'rgba(255,255,255,0.5)',

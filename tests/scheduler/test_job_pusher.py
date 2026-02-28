@@ -39,6 +39,12 @@ class FakeQueue:
         ("image_cleaner", {}, {}),
         ("show_profile_stats_updater", {}, {}),
         ("your_ovr_sync", {}, {}),
+        ("revenuecat_entitlements_reconcile", {}, {}),
+        (
+            "revenuecat_entitlements_reconcile",
+            {"firebase_id": "abc123", "user_id": 7, "batch_limit": 1},
+            {"firebase_id": "abc123", "user_id": 7, "batch_limit": 1},
+        ),
     ],
 )
 def test_job_pusher_methods_enqueue(method, kwargs, expected_args, monkeypatch):

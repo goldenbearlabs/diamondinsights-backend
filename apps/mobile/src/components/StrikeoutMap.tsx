@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 import { theme } from "../theme/colors";
 
@@ -31,6 +32,7 @@ type StrikeoutMapProps = {
   };
   selections?: StrikeoutSelection[];
   onSelectionChange?: (selection: StrikeoutSelection) => void;
+  maskedValues?: boolean;
 };
 
 export const StrikeoutMap = ({
@@ -39,6 +41,7 @@ export const StrikeoutMap = ({
   filterHitterSide,
   selections,
   onSelectionChange,
+  maskedValues = false,
 }: StrikeoutMapProps) => {
   const { width } = useWindowDimensions();
   const mapSize = Math.min(220, Math.max(140, Math.round(width - 240)));
@@ -89,6 +92,11 @@ export const StrikeoutMap = ({
   }, [zones, outside]);
 
   const heatStyle = (count: number, opts?: { soft?: boolean }) => {
+    if (maskedValues) {
+      return {
+        backgroundColor: "rgba(148, 163, 184, 0.3)",
+      };
+    }
     const intensity = Math.min(1, count / max);
     const base = opts?.soft ? 0.12 : 0.2;
     const scale = opts?.soft ? 0.55 : 0.65;
@@ -97,6 +105,18 @@ export const StrikeoutMap = ({
       backgroundColor: `rgba(248, 113, 113, ${alpha})`,
     };
   };
+  const renderZoneValue = (count: number) =>
+    maskedValues ? (
+      <Ionicons name="lock-closed" size={11} color="#fbbf24" />
+    ) : (
+      <Text style={styles.zoneValue}>{count}</Text>
+    );
+  const renderOutsideValue = (count: number) =>
+    maskedValues ? (
+      <Ionicons name="lock-closed" size={10} color="#fbbf24" />
+    ) : (
+      <Text style={styles.outsideValueText}>{count}</Text>
+    );
 
   return (
     <View style={styles.panel}>
@@ -193,7 +213,7 @@ export const StrikeoutMap = ({
                             onSelect({ kind: "zone", row: rowIndex, col: colIndex })
                           }
                         >
-                          <Text style={styles.zoneValue}>{count}</Text>
+                          {renderZoneValue(count)}
                           {selected ? (
                             <View pointerEvents="none" style={styles.zoneSelectionRing} />
                           ) : null}
@@ -218,7 +238,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "top_left" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.top_left}</Text>
+                  {renderOutsideValue(outside.top_left)}
                   {isSelected({ kind: "outside", key: "top_left" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -232,7 +252,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "top" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.top}</Text>
+                  {renderOutsideValue(outside.top)}
                   {isSelected({ kind: "outside", key: "top" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -245,7 +265,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "top_right" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.top_right}</Text>
+                  {renderOutsideValue(outside.top_right)}
                   {isSelected({ kind: "outside", key: "top_right" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -259,7 +279,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "right" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.right}</Text>
+                  {renderOutsideValue(outside.right)}
                   {isSelected({ kind: "outside", key: "right" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -272,7 +292,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "bottom_right" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.bottom_right}</Text>
+                  {renderOutsideValue(outside.bottom_right)}
                   {isSelected({ kind: "outside", key: "bottom_right" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -286,7 +306,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "bottom" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.bottom}</Text>
+                  {renderOutsideValue(outside.bottom)}
                   {isSelected({ kind: "outside", key: "bottom" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -299,7 +319,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "bottom_left" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.bottom_left}</Text>
+                  {renderOutsideValue(outside.bottom_left)}
                   {isSelected({ kind: "outside", key: "bottom_left" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}
@@ -313,7 +333,7 @@ export const StrikeoutMap = ({
                   ]}
                   onPress={() => onSelect({ kind: "outside", key: "left" })}
                 >
-                  <Text style={styles.outsideValueText}>{outside.left}</Text>
+                  {renderOutsideValue(outside.left)}
                   {isSelected({ kind: "outside", key: "left" }) ? (
                     <View pointerEvents="none" style={styles.outsideSelectionRing} />
                   ) : null}

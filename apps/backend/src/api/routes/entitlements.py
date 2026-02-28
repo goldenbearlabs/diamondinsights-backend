@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from shared.db.database import get_db
 from shared.db.models import RevenueCatWebhookEvent, UserEntitlement, Users
+from shared.queue.queue import Queue
+from shared.queue.redis_connector import RedisConnector
 from src.api.routes.users import firebase_claims
 
 PRO_ENTITLEMENT_ID = (os.getenv("REVENUECAT_PRO_ENTITLEMENT_ID") or "pro").strip() or "pro"
@@ -143,6 +145,15 @@ def _event_implies_active(event_type: str, expires_at: Optional[datetime.datetim
     return True
 
 
+def _row_is_currently_active(row: UserEntitlement, now: Optional[datetime.datetime] = None) -> bool:
+    if not row.is_active:
+        return False
+    check_at = now or _utcnow()
+    if row.expires_at is None:
+        return True
+    return row.expires_at > check_at
+
+
 def _upsert_entitlement(
     db: Session,
     *,
@@ -215,6 +226,14 @@ class EntitlementsMeOut(BaseModel):
     entitlements: list[EntitlementOut]
 
 
+class EntitlementReconcileEnqueueOut(BaseModel):
+    queued: bool
+    job_id: str
+    job_type: str
+    args: dict[str, Any]
+    enqueued_at: datetime.datetime
+
+
 @router.get("/me", response_model=EntitlementsMeOut)
 def get_my_entitlements(
     db: Session = Depends(get_db),
@@ -234,7 +253,8 @@ def get_my_entitlements(
         .order_by(UserEntitlement.entitlement_id.asc())
     ).all()
 
-    pro_rows = [r for r in rows if r.entitlement_id == PRO_ENTITLEMENT_ID and r.is_active]
+    now = _utcnow()
+    pro_rows = [r for r in rows if r.entitlement_id == PRO_ENTITLEMENT_ID and _row_is_currently_active(r, now)]
     pro_expires_at = max(
         (r.expires_at for r in pro_rows if r.expires_at is not None),
         default=None,
@@ -247,7 +267,7 @@ def get_my_entitlements(
         entitlements=[
             EntitlementOut(
                 entitlement_id=row.entitlement_id,
-                is_active=row.is_active,
+                is_active=_row_is_currently_active(row, now),
                 product_identifier=row.product_identifier,
                 store=row.store,
                 environment=row.environment,
@@ -256,6 +276,43 @@ def get_my_entitlements(
             )
             for row in rows
         ],
+    )
+
+
+@router.post("/reconcile", response_model=EntitlementReconcileEnqueueOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_my_entitlements_reconcile(
+    db: Session = Depends(get_db),
+    claims: dict = Depends(firebase_claims),
+) -> EntitlementReconcileEnqueueOut:
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    user = db.scalar(select(Users).where(Users.firebase_id == uid))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    args = {
+        "firebase_id": uid,
+        "user_id": int(user.id),
+        "batch_limit": 1,
+    }
+
+    try:
+        queue = Queue(redis_connector=RedisConnector())
+        payload = queue.enqueue("revenuecat_entitlements_reconcile", args=args)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to enqueue revenuecat_entitlements_reconcile: {exc}",
+        ) from exc
+
+    return EntitlementReconcileEnqueueOut(
+        queued=True,
+        job_id=payload.job_id,
+        job_type=payload.job_type,
+        args=payload.args,
+        enqueued_at=payload.enqueued_at,
     )
 
 
