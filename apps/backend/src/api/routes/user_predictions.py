@@ -11,6 +11,8 @@ from src.schemas.user_prediction import (
     UserPredictionCreate,
     UserPredictionResponse,
 )
+from redis import Redis
+from src.core.cache import get_cache_client
 
 router = APIRouter(prefix="/user-predictions", tags=["user_predictions"])
 
@@ -108,6 +110,7 @@ def upsert_prediction(
     body: UserPredictionCreate,
     db: Session = Depends(get_db),
     user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client),
 ):
     existing_pred = db.scalar(
         select(UserPrediction).where(
@@ -128,6 +131,29 @@ def upsert_prediction(
     
     db.commit()
     db.refresh(existing_pred)
+    """
+    if cache:
+        # Search Redis for any card ranking queries tied specifically to this user's ID
+        pattern = f"*:cards:rankings:{user.firebase_id}:*"
+        
+        # Safely iterate through the matching keys and delete them
+        for key in cache.scan_iter(pattern):
+            cache.delete(key)
+    """
+    if cache:
+        # 1. Broaden the wildcard pattern significantly. 
+        # This says: "Find any key that contains 'cards' AND the user's firebase ID anywhere inside it"
+        pattern = f"*cards*{user.firebase_id}*"
+        
+        # 2. Gather all matching keys into a list first (safer than deleting while iterating)
+        keys_to_delete = list(cache.scan_iter(match=pattern))
+        
+        # 3. Batch delete and log the result to the terminal!
+        if keys_to_delete:
+            print(f"SUCCESS: Destroying {len(keys_to_delete)} stale card caches for {user.firebase_id}")
+            cache.delete(*keys_to_delete) # Unpacks the list and deletes them all in one atomic command
+        else:
+            print(f"WARNING: Cache Miss! No keys found for pattern: {pattern}")
     return existing_pred
 
 @router.get("/{card_id}", response_model=UserPredictionResponse)
