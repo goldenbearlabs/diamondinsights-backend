@@ -99,6 +99,7 @@ type HitDataSectionProps = {
   hasAdvancedFilters: boolean;
   selectedZone?: HitZoneKey | null;
   onSelectZone?: (zone: HitZoneKey) => void;
+  maskedValues?: boolean;
 };
 
 const EMPTY_ZONES: Record<HitZoneKey, number> = {
@@ -111,6 +112,7 @@ const EMPTY_ZONES: Record<HitZoneKey, number> = {
   homerun_center: 0,
   homerun_right: 0,
 };
+const LOCKED_VALUE = "__locked__";
 
 const formatRate = (value: number) => {
   if (Number.isNaN(value)) return "—";
@@ -192,6 +194,7 @@ export const HitDataSection = ({
   hasAdvancedFilters,
   selectedZone,
   onSelectZone,
+  maskedValues = false,
 }: HitDataSectionProps) => {
   const { width } = useWindowDimensions();
   const [activeMenu, setActiveMenu] = React.useState<null | "stat" | "hitter" | "pitcher">(
@@ -295,6 +298,7 @@ export const HitDataSection = ({
   };
   const zoneValues = data?.zones ?? EMPTY_ZONES;
   const formatValue = (value: number) => {
+    if (maskedValues) return LOCKED_VALUE;
     if (statKey === "count") return Math.round(value).toString();
     if (statKey === "share") return formatPercent(value);
     return formatRate(value);
@@ -359,13 +363,16 @@ export const HitDataSection = ({
   ];
   const stats = data?.stats;
   const hitStatCards = [
-    { label: "Sweet Spot%", value: formatPercentValue(stats?.sweet_spot_pct) },
-    { label: "Popup%", value: formatPercentValue(stats?.popup_rate) },
-    { label: "Flyball%", value: formatPercentValue(stats?.flyball_rate) },
-    { label: "GB/Air%", value: formatPercentValue(stats?.gb_air_ratio) },
-    { label: "Pulled Air%", value: formatPercentValue(stats?.pulled_air_rate) },
-    { label: "Oppo Air%", value: formatPercentValue(stats?.oppo_air_rate) },
-    { label: "Perfect Perfect%", value: formatPercentValue(stats?.perfect_perfect_pct) },
+    { label: "Sweet Spot%", value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.sweet_spot_pct) },
+    { label: "Popup%", value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.popup_rate) },
+    { label: "Flyball%", value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.flyball_rate) },
+    { label: "GB/Air%", value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.gb_air_ratio) },
+    { label: "Pulled Air%", value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.pulled_air_rate) },
+    { label: "Oppo Air%", value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.oppo_air_rate) },
+    {
+      label: "Perfect Perfect%",
+      value: maskedValues ? LOCKED_VALUE : formatPercentValue(stats?.perfect_perfect_pct),
+    },
   ];
 
   return (
@@ -815,7 +822,11 @@ export const HitDataSection = ({
                   },
                 ]}
               >
-                <Text style={styles.hitZoneValue}>{zone.value}</Text>
+                {zone.value === LOCKED_VALUE ? (
+                  <Ionicons name="lock-closed" size={11} color="#fbbf24" />
+                ) : (
+                  <Text style={styles.hitZoneValue}>{zone.value}</Text>
+                )}
               </Pressable>
             );
           })}
@@ -874,9 +885,13 @@ export const HitDataSection = ({
               <Text style={styles.hitStatLabel} numberOfLines={1}>
                 {item.label}
               </Text>
-              <Text style={styles.hitStatValue} numberOfLines={1}>
-                {item.value}
-              </Text>
+              {item.value === LOCKED_VALUE ? (
+                <Ionicons name="lock-closed" size={11} color="#fbbf24" />
+              ) : (
+                <Text style={styles.hitStatValue} numberOfLines={1}>
+                  {item.value}
+                </Text>
+              )}
             </Pressable>
           ))}
         </View>

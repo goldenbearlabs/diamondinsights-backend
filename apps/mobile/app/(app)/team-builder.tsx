@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { apiGetAuth } from "../../src/lib/api";
 import { FloatingBackground } from "../../src/homescreencomponents/FloatingBackground";
+import { useBackendProStatus } from "../../src/lib/proStatus";
 import { theme } from "../../src/theme/colors";
 
 type TeamCard = {
@@ -967,6 +968,8 @@ const isSlotRequiringPositionFilter = (slotMeta: SlotMeta) => {
 };
 
 export default function TeamBuilder() {
+  const { isPro } = useBackendProStatus();
+  const hasProAccess = isPro === true;
   const [mode, setMode] = useState<RosterMode>("batters");
   const [roster, setRoster] = useState<Record<AnySlotKey, TeamCard | null>>(EMPTY_ROSTER);
   const [battingOrder, setBattingOrder] = useState<BattingLineupSlotKey[]>([
@@ -984,6 +987,7 @@ export default function TeamBuilder() {
   const [allHitterCardsCache, setAllHitterCardsCache] = useState<TeamCard[] | null>(null);
   const [allPitcherCardsCache, setAllPitcherCardsCache] = useState<TeamCard[] | null>(null);
   const [generating, setGenerating] = useState(false);
+  const isMetricLocked = (metric: ValueMetric) => metric === "your" && !hasProAccess;
 
   const requestIdRef = useRef(0);
   const battingOrderRef = useRef(battingOrder);
@@ -1001,6 +1005,12 @@ export default function TeamBuilder() {
   useEffect(() => {
     setActiveSlot(null);
   }, [mode]);
+
+  useEffect(() => {
+    if (hasProAccess) return;
+    if (teamMetric === "your") setTeamMetric("meta");
+    if (sortMetric === "your") setSortMetric("meta");
+  }, [hasProAccess, teamMetric, sortMetric]);
 
   const currentModeSlotKeys = useMemo(() => getModeSlotKeys(mode), [mode]);
 
@@ -1194,7 +1204,7 @@ export default function TeamBuilder() {
   };
 
   const openCardPicker = (slotKey: AnySlotKey) => {
-    setSortMetric(teamMetric);
+    setSortMetric(isMetricLocked(teamMetric) ? "meta" : teamMetric);
     setActiveSlot(slotKey);
   };
 
@@ -1478,12 +1488,14 @@ export default function TeamBuilder() {
                     {formatMetric(getSlotMetricValue(card, "meta", slotMeta))}
                   </Text>
                 </View>
-                <View style={[styles.metricPill, styles.metricPillYour]}>
-                  <Text style={styles.metricLabel}>YOUR</Text>
-                  <Text style={styles.metricValue}>
-                    {formatMetric(getSlotMetricValue(card, "your", slotMeta))}
-                  </Text>
-                </View>
+                {hasProAccess ? (
+                  <View style={[styles.metricPill, styles.metricPillYour]}>
+                    <Text style={styles.metricLabel}>YOUR</Text>
+                    <Text style={styles.metricValue}>
+                      {formatMetric(getSlotMetricValue(card, "your", slotMeta))}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
           </View>
@@ -1511,20 +1523,36 @@ export default function TeamBuilder() {
           <View style={styles.metricSelectorRow}>
             {VALUE_METRIC_OPTIONS.map((option) => {
               const selected = option.key === teamMetric;
+              const locked = isMetricLocked(option.key);
               return (
                 <TouchableOpacity
                   key={option.key}
-                  style={[styles.metricSelectorChip, selected && styles.metricSelectorChipActive]}
-                  onPress={() => setTeamMetric(option.key)}
+                  style={[
+                    styles.metricSelectorChip,
+                    locked && styles.metricSelectorChipLocked,
+                    selected && !locked && styles.metricSelectorChipActive,
+                  ]}
+                  onPress={() => {
+                    if (locked) return;
+                    setTeamMetric(option.key);
+                  }}
+                  disabled={locked}
                 >
-                  <Text
-                    style={[
-                      styles.metricSelectorChipText,
-                      selected && styles.metricSelectorChipTextActive,
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
+                  <View style={styles.metricSelectorChipInner}>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.metricSelectorChipText,
+                        selected && !locked && styles.metricSelectorChipTextActive,
+                        locked && styles.metricSelectorChipTextLocked,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                    {locked ? (
+                      <Ionicons name="lock-closed" size={12} color="rgba(148, 163, 184, 0.95)" />
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -1658,15 +1686,36 @@ export default function TeamBuilder() {
               <Text style={styles.sortLabel}>Sort by:</Text>
               {VALUE_METRIC_OPTIONS.map((option) => {
                 const selected = option.key === sortMetric;
+                const locked = isMetricLocked(option.key);
                 return (
                   <TouchableOpacity
                     key={option.key}
-                    style={[styles.sortChip, selected && styles.sortChipActive]}
-                    onPress={() => setSortMetric(option.key)}
+                    style={[
+                      styles.sortChip,
+                      locked && styles.sortChipLocked,
+                      selected && !locked && styles.sortChipActive,
+                    ]}
+                    onPress={() => {
+                      if (locked) return;
+                      setSortMetric(option.key);
+                    }}
+                    disabled={locked}
                   >
-                    <Text style={[styles.sortChipText, selected && styles.sortChipTextActive]}>
-                      {option.chip}
-                    </Text>
+                    <View style={styles.sortChipInner}>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.sortChipText,
+                          selected && !locked && styles.sortChipTextActive,
+                          locked && styles.sortChipTextLocked,
+                        ]}
+                      >
+                        {option.chip}
+                      </Text>
+                      {locked ? (
+                        <Ionicons name="lock-closed" size={10} color="rgba(148, 163, 184, 0.95)" />
+                      ) : null}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -1711,14 +1760,16 @@ export default function TeamBuilder() {
                         <Text style={styles.resultMetricText}>
                           META {formatMetric(activeSlotMeta ? getSlotMetricValue(item, "meta", activeSlotMeta) : getMetaOverallValue(item))}
                         </Text>
-                        <Text style={styles.resultMetricText}>
-                          YOUR{" "}
-                          {formatMetric(
-                            activeSlotMeta
-                              ? getSlotMetricValue(item, "your", activeSlotMeta)
-                              : getMetricValueForPosition(item, "your", getPrimaryPosition(item))
-                          )}
-                        </Text>
+                        {hasProAccess ? (
+                          <Text style={styles.resultMetricText}>
+                            YOUR{" "}
+                            {formatMetric(
+                              activeSlotMeta
+                                ? getSlotMetricValue(item, "your", activeSlotMeta)
+                                : getMetricValueForPosition(item, "your", getPrimaryPosition(item))
+                            )}
+                          </Text>
+                        ) : null}
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -1807,17 +1858,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
+  metricSelectorChipInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    flexWrap: "nowrap",
+  },
   metricSelectorChipActive: {
     borderColor: "rgba(59,130,246,0.75)",
     backgroundColor: "rgba(59,130,246,0.18)",
+  },
+  metricSelectorChipLocked: {
+    borderColor: "rgba(148,163,184,0.35)",
+    backgroundColor: "rgba(15,23,42,0.58)",
   },
   metricSelectorChipText: {
     color: theme.colors.muted,
     fontSize: 12,
     fontWeight: "700",
+    flexShrink: 0,
   },
   metricSelectorChipTextActive: {
     color: "white",
+  },
+  metricSelectorChipTextLocked: {
+    color: "rgba(148,163,184,0.95)",
   },
   summaryLabel: {
     color: "rgba(255,255,255,0.82)",
@@ -2109,17 +2174,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5,
   },
+  sortChipInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexWrap: "nowrap",
+  },
   sortChipActive: {
     borderColor: "rgba(251,191,36,0.6)",
     backgroundColor: "rgba(251,191,36,0.12)",
+  },
+  sortChipLocked: {
+    borderColor: "rgba(148,163,184,0.35)",
+    backgroundColor: "rgba(15,23,42,0.58)",
   },
   sortChipText: {
     color: theme.colors.muted,
     fontSize: 10,
     fontWeight: "800",
+    flexShrink: 0,
   },
   sortChipTextActive: {
     color: "#fde68a",
+  },
+  sortChipTextLocked: {
+    color: "rgba(148,163,184,0.95)",
   },
   statusWrap: {
     paddingVertical: 26,

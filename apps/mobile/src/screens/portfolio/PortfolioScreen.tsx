@@ -21,6 +21,7 @@ import { useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
 import { apiGet, apiPostAuth, apiDeleteAuth, apiGetAuth, apiPatchAuth, updatePortfolioHolding, getUserPrediction, saveUserPrediction } from '../../lib/api';
+import { useBackendProStatus } from '../../lib/proStatus';
 
 const STUB_ICON = require('../../../assets/images/stub.png');
 
@@ -89,6 +90,8 @@ const formatStubs = (n: number): string => {
 
 export default function PortfolioScreen() {
   const router = useRouter();
+  const { isPro } = useBackendProStatus();
+  const showModelPredictions = isPro === true;
 
   // Portfolio data
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
@@ -105,6 +108,7 @@ export default function PortfolioScreen() {
   const [notes, setNotes] = useState('');
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [isAddInvestmentOpen, setIsAddInvestmentOpen] = useState(false);
 
   // Edit modal state
   const [editingHolding, setEditingHolding] = useState<Holding | null>(null);
@@ -412,6 +416,9 @@ export default function PortfolioScreen() {
     const aiOvr = item.card.predicted_ovr ?? item.card.ovr;
     const aiValue = item.quantity * getQuicksellValue(aiOvr);
     const aiPL = aiValue - totalInvested;
+    const cardDataForDetails = showModelPredictions
+      ? item.card
+      : { ...item.card, predicted_ovr: item.user_predicted_ovr };
 
     return (
       <TouchableOpacity
@@ -422,7 +429,7 @@ export default function PortfolioScreen() {
             pathname: '/predictions/[id]',
             params: {
               id: item.card.id,
-              cardData: JSON.stringify(item.card),
+              cardData: JSON.stringify(cardDataForDetails),
             },
           })
         }
@@ -492,23 +499,27 @@ export default function PortfolioScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.plDivider} />
-          <View style={styles.plBlock}>
-            <View style={styles.plLabelRow}>
-              <View style={styles.proTagSmall}>
-                <FontAwesome5 name="crown" size={8} color="#fbbf24" style={styles.proIcon} />
-                <Text style={styles.proTagText}>PRO</Text>
+          {showModelPredictions ? (
+            <>
+              <View style={styles.plDivider} />
+              <View style={styles.plBlock}>
+                <View style={styles.plLabelRow}>
+                  <View style={styles.proTagSmall}>
+                    <FontAwesome5 name="crown" size={8} color="#fbbf24" style={styles.proIcon} />
+                    <Text style={styles.proTagText}>PRO</Text>
+                  </View>
+                  <Text style={styles.plBlockLabel}>({aiOvr} OVR)</Text>
+                </View>
+                <View style={styles.plValueRow}>
+                  <Image source={STUB_ICON} style={styles.stubIconSmall} />
+                  <Text style={[styles.plBlockValue, { color: plColor(aiPL) }]}>
+                    {aiPL >= 0 ? '+' : ''}
+                    {formatStubs(aiPL)}
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.plBlockLabel}>({aiOvr} OVR)</Text>
-            </View>
-            <View style={styles.plValueRow}>
-              <Image source={STUB_ICON} style={styles.stubIconSmall} />
-              <Text style={[styles.plBlockValue, { color: plColor(aiPL) }]}>
-                {aiPL >= 0 ? '+' : ''}
-                {formatStubs(aiPL)}
-              </Text>
-            </View>
-          </View>
+            </>
+          ) : null}
         </View>
       </TouchableOpacity>
     );
@@ -582,18 +593,42 @@ export default function PortfolioScreen() {
               </View>
 
               <View style={styles.summaryRow}>
-                {renderSummaryCard('Total Invested', totals.totalInvested)}
-                {renderSummaryCard('Value', totals.aiValue, undefined, true)}
-                {renderSummaryCard('P/L', totals.aiPL, true, true)}
+                {showModelPredictions ? (
+                  <>
+                    {renderSummaryCard('Total Invested', totals.totalInvested)}
+                    {renderSummaryCard('Value', totals.aiValue, undefined, true)}
+                    {renderSummaryCard('P/L', totals.aiPL, true, true)}
+                  </>
+                ) : (
+                  <>
+                    {renderSummaryCard('Total Invested', totals.totalInvested)}
+                    {renderSummaryCard('Your Value', totals.yourValue)}
+                    {renderSummaryCard('Your P/L', totals.yourPL, true)}
+                  </>
+                )}
               </View>
-              <View style={styles.summaryRow}>
-                {renderSummaryCard('Your Value', totals.yourValue)}
-                {renderSummaryCard('Your P/L', totals.yourPL, true)}
-              </View>
+              {showModelPredictions ? (
+                <View style={styles.summaryRow}>
+                  {renderSummaryCard('Your Value', totals.yourValue)}
+                  {renderSummaryCard('Your P/L', totals.yourPL, true)}
+                </View>
+              ) : null}
 
               {/* ── Section 2: Add New Investment ─────────────────────── */}
-              <Text style={styles.sectionTitle}>Add New Investment</Text>
-              <View style={styles.formCard}>
+              <TouchableOpacity
+                style={styles.collapsibleSectionHeader}
+                activeOpacity={0.8}
+                onPress={() => setIsAddInvestmentOpen((prev) => !prev)}
+              >
+                <Text style={[styles.sectionTitle, styles.collapsibleSectionTitle]}>Add New Investment</Text>
+                <Ionicons
+                  name={isAddInvestmentOpen ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={theme.colors.muted}
+                />
+              </TouchableOpacity>
+              {isAddInvestmentOpen ? (
+                <View style={styles.formCard}>
                 {/* Player Search */}
                 <View style={styles.searchContainer}>
                   <Ionicons
@@ -665,7 +700,7 @@ export default function PortfolioScreen() {
                             {card.ovr} OVR
                           </Text>
                         </View>
-                        {card.predicted_ovr != null && (
+                        {showModelPredictions && card.predicted_ovr != null && (
                           <View
                             style={[
                               styles.predBadge,
@@ -790,7 +825,8 @@ export default function PortfolioScreen() {
                     </>
                   )}
                 </TouchableOpacity>
-              </View>
+                </View>
+              ) : null}
 
               {/* ── Section 3: Header ─────────────────────────────────── */}
               <View style={styles.investmentsHeader}>
@@ -1078,6 +1114,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 14,
     marginBottom: 12,
+  },
+  collapsibleSectionHeader: {
+    marginTop: 14,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  collapsibleSectionTitle: {
+    marginTop: 0,
+    marginBottom: 0,
   },
 
   // Form card

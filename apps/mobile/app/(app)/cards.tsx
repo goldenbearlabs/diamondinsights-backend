@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
   Animated,
@@ -15,6 +16,7 @@ import {
 } from "react-native";
 
 import { ApiError, apiGet, apiGetAuth } from "../../src/lib/api";
+import { useBackendProStatus } from "../../src/lib/proStatus";
 import { theme } from "../../src/theme/colors";
 
 type CardRanking = {
@@ -69,6 +71,7 @@ type CardRanking = {
   pitch_control?: number | null;
   pitch_movement?: number | null;
   quirks?: { name: string }[];
+  year?: number | null;
 };
 
 type SortDirection = "asc" | "desc";
@@ -150,6 +153,8 @@ const HAND_OPTIONS = ["L", "R", "S"];
 const TEXT_SORT_KEYS: SortKey[] = ["name", "hands", "position"];
 
 export default function CardsRankingsScreen() {
+  const { isPro } = useBackendProStatus();
+  const hasProAccess = isPro === true;
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<CardRanking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -158,7 +163,7 @@ export default function CardsRankingsScreen() {
 
   const router = useRouter();
 
-  const [selectedYears, setSelectedYears] = useState<number[]>([25]);
+  const [selectedYear, setSelectedYear] = useState<number>(25);
   const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
   const [includeSecondary, setIncludeSecondary] = useState(false);
   const [selectedBatHands, setSelectedBatHands] = useState<string[]>([]);
@@ -180,10 +185,13 @@ export default function CardsRankingsScreen() {
     ),
     [tableScrollY]
   );
+  const requestSequenceRef = useRef(0);
 
   const offset = useMemo(() => (page - 1) * PAGE_SIZE, [page]);
 
   const loadRows = useCallback(async () => {
+    const requestSequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestSequence;
     setLoading(true);
     setError(null);
     try {
@@ -192,12 +200,7 @@ export default function CardsRankingsScreen() {
       params.set("offset", String(offset));
       params.set("sort_by", sortKey);
       params.set("sort_dir", sortDirection);
-
-      if (selectedYears.length === 1) {
-        params.set("year", String(selectedYears[0]));
-      } else if (selectedYears.length > 1) {
-        params.set("years", selectedYears.join(","));
-      }
+      params.set("year", String(selectedYear));
 
       if (selectedPositions.length === 1) {
         params.set("position", selectedPositions[0]);
@@ -223,25 +226,29 @@ export default function CardsRankingsScreen() {
       if (trimmedName.length > 0) params.set("name", trimmedName);
 
       const data = await fetchRankingCards(`/cards/?${params.toString()}`);
+      if (requestSequence !== requestSequenceRef.current) return;
       const safeRows = Array.isArray(data) ? data : [];
       const uniqueById = new Map<string, CardRanking>();
       for (const card of safeRows) {
         if (!uniqueById.has(card.id)) uniqueById.set(card.id, card);
       }
       const deduped = Array.from(uniqueById.values());
-      setRows(deduped);
-      setHasNext(deduped.length === PAGE_SIZE);
+      const yearFiltered = deduped.filter((card) => matchesSelectedYear(card.year, selectedYear));
+      setRows(yearFiltered);
+      setHasNext(yearFiltered.length === PAGE_SIZE);
     } catch (err) {
+      if (requestSequence !== requestSequenceRef.current) return;
       const message = err instanceof Error ? err.message : "Unable to load cards.";
       setError(message);
       setRows([]);
       setHasNext(false);
     } finally {
+      if (requestSequence !== requestSequenceRef.current) return;
       setLoading(false);
     }
   }, [
     offset,
-    selectedYears,
+    selectedYear,
     selectedPositions,
     includeSecondary,
     selectedBatHands,
@@ -255,6 +262,13 @@ export default function CardsRankingsScreen() {
     loadRows();
   }, [loadRows]);
 
+  useEffect(() => {
+    if (hasProAccess || sortKey !== "your") return;
+    setSortKey("meta");
+    setSortDirection("desc");
+    setPage(1);
+  }, [hasProAccess, sortKey]);
+
   const onPrev = () => {
     if (loading || page === 1) return;
     setPage((current) => Math.max(1, current - 1));
@@ -266,6 +280,7 @@ export default function CardsRankingsScreen() {
   };
 
   const onSortChange = (nextKey: SortKey) => {
+    if (!hasProAccess && nextKey === "your") return;
     if (sortKey === nextKey) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
       setPage(1);
@@ -277,10 +292,7 @@ export default function CardsRankingsScreen() {
   };
 
   const toggleYears = (value: number) => {
-    setSelectedYears((current) => {
-      const next = toggleSelection(current, value);
-      return next.length === 0 ? [25] : next;
-    });
+    setSelectedYear(value);
     setPage(1);
   };
 
@@ -301,7 +313,7 @@ export default function CardsRankingsScreen() {
 
   const clearMenuSelections = () => {
     if (openFilterMenu === "year") {
-      setSelectedYears([25]);
+      setSelectedYear(25);
       setPage(1);
       return;
     }
@@ -336,12 +348,12 @@ export default function CardsRankingsScreen() {
   }, [openFilterMenu]);
 
   const selectedSet = useMemo(() => {
-    if (openFilterMenu === "year") return new Set(selectedYears.map((value) => String(value)));
+    if (openFilterMenu === "year") return new Set([String(selectedYear)]);
     if (openFilterMenu === "position") return new Set(selectedPositions);
     if (openFilterMenu === "bat") return new Set(selectedBatHands);
     if (openFilterMenu === "pitch") return new Set(selectedPitchHands);
     return new Set<string>();
-  }, [openFilterMenu, selectedYears, selectedPositions, selectedBatHands, selectedPitchHands]);
+  }, [openFilterMenu, selectedYear, selectedPositions, selectedBatHands, selectedPitchHands]);
 
   const onMenuToggleOption = (key: string) => {
     if (openFilterMenu === "year") {
@@ -374,7 +386,7 @@ export default function CardsRankingsScreen() {
         <View style={styles.filtersRowCompact}>
           <FilterDropdownButton
             label="Year"
-            value={summaryLabel(selectedYears.map(String), "All")}
+            value={String(selectedYear)}
             onPress={() => setOpenFilterMenu("year")}
           />
           <FilterDropdownButton
@@ -383,12 +395,12 @@ export default function CardsRankingsScreen() {
             onPress={() => setOpenFilterMenu("position")}
           />
           <FilterDropdownButton
-            label="Bat"
+            label="Bats"
             value={summaryLabel(selectedBatHands, "All")}
             onPress={() => setOpenFilterMenu("bat")}
           />
           <FilterDropdownButton
-            label="Pitch"
+            label="Throws"
             value={summaryLabel(selectedPitchHands, "All")}
             onPress={() => setOpenFilterMenu("pitch")}
           />
@@ -558,6 +570,8 @@ export default function CardsRankingsScreen() {
                   onPress={onSortChange}
                   cellStyle={styles.overallCell}
                   center
+                  disabled={!hasProAccess}
+                  showLock={!hasProAccess}
                 />
                 <SortHeader
                   label="Meta"
@@ -699,7 +713,11 @@ export default function CardsRankingsScreen() {
                           styles.valueCell,
                         ]}
                       >
-                        <Text style={styles.centerCellText}>{formatOverall(yourOverall)}</Text>
+                        {hasProAccess ? (
+                          <Text style={styles.centerCellText}>{formatOverall(yourOverall)}</Text>
+                        ) : (
+                          <Ionicons name="lock-closed" size={12} color="rgba(148, 163, 184, 0.95)" />
+                        )}
                       </View>
                       <View
                         style={[
@@ -804,6 +822,8 @@ type SortHeaderProps = {
   onPress: (key: SortKey) => void;
   cellStyle: ViewStyle;
   center?: boolean;
+  disabled?: boolean;
+  showLock?: boolean;
 };
 
 function FilterDropdownButton({ label, value, onPress }: FilterDropdownButtonProps) {
@@ -825,28 +845,41 @@ function SortHeader({
   onPress,
   cellStyle,
   center,
+  disabled = false,
+  showLock = false,
 }: SortHeaderProps) {
-  const isActive = activeSortKey === sortKey;
+  const isActive = !disabled && activeSortKey === sortKey;
   return (
     <Pressable
-      onPress={() => onPress(sortKey)}
+      onPress={() => {
+        if (disabled) return;
+        onPress(sortKey);
+      }}
+      disabled={disabled}
       style={[
         styles.headerPressable,
         cellStyle,
         center && styles.headerPressableCentered,
+        disabled && styles.headerPressableDisabled,
         isActive && styles.headerPressableActive,
       ]}
     >
-      <Text
-        style={[
-          styles.headerCell,
-          center && styles.headerCellCentered,
-          isActive && styles.headerCellActive,
-        ]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
+      <View style={[styles.headerLabelRow, center && styles.headerLabelRowCentered]}>
+        <Text
+          style={[
+            styles.headerCell,
+            center && styles.headerCellCentered,
+            disabled && styles.headerCellDisabled,
+            isActive && styles.headerCellActive,
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+        {showLock ? (
+          <Ionicons name="lock-closed" size={10} color="rgba(148, 163, 184, 0.95)" />
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -905,10 +938,10 @@ async function fetchRankingCards(path: string): Promise<CardRanking[]> {
 }
 
 function filterMenuTitle(menu: FilterMenuKey | null): string {
-  if (menu === "year") return "Select Years";
+  if (menu === "year") return "Select Year";
   if (menu === "position") return "Select Positions";
-  if (menu === "bat") return "Select Bat Hands";
-  if (menu === "pitch") return "Select Pitch Hands";
+  if (menu === "bat") return "Select Bats";
+  if (menu === "pitch") return "Select Throws";
   return "Filter";
 }
 
@@ -986,6 +1019,12 @@ function formatHand(value: string | null | undefined) {
 function formatOverall(value: number | null | undefined): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(Math.round(value));
   return "-";
+}
+
+function matchesSelectedYear(cardYear: number | null | undefined, selectedYear: number): boolean {
+  if (typeof cardYear !== "number" || !Number.isFinite(cardYear)) return false;
+  const normalizedCardYear = cardYear >= 100 ? cardYear % 100 : cardYear;
+  return normalizedCardYear === selectedYear;
 }
 
 const styles = StyleSheet.create({
@@ -1319,8 +1358,19 @@ const styles = StyleSheet.create({
   headerPressableCentered: {
     alignItems: "center",
   },
+  headerPressableDisabled: {
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+  },
   headerPressableActive: {
     backgroundColor: "rgba(59, 130, 246, 0.16)",
+  },
+  headerLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  headerLabelRowCentered: {
+    justifyContent: "center",
   },
   headerCell: {
     color: "#cbd5e1",
@@ -1328,6 +1378,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.2,
     paddingVertical: 8,
+  },
+  headerCellDisabled: {
+    color: "rgba(148, 163, 184, 0.95)",
   },
   headerCellActive: {
     color: "#dbeafe",

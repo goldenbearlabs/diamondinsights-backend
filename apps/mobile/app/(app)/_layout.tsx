@@ -37,7 +37,6 @@ export default function TabLayout() {
       <Tabs.Screen name="cards" options={{ title: "Cards" }} />
       <Tabs.Screen name="card" options={{ title: "Card", href: null }} />
       <Tabs.Screen name="trending" options={{ title: "Trending" }} />
-      <Tabs.Screen name="blogs" options={{ title: "Blogs" }} />
       <Tabs.Screen name="chat" options={{ title: "Chat" }} />
       <Tabs.Screen name="explore" options={{ title: "Explore" }} />
       <Tabs.Screen name="account" options={{ title: "Account" }} />

@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   ActivityIndicator,
   Image,
@@ -19,6 +26,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ApiError, apiGet, apiGetAuth } from "../../src/lib/api";
 import { auth } from "../../src/lib/firebase";
 import { useProfileImageUri, resolveAvatarUrl } from "../../src/lib/profileImage";
+import { useBackendProStatus } from "../../src/lib/proStatus";
 import { Avatar } from "../../src/components/Avatar";
 import {
   HitDataSection,
@@ -298,6 +306,134 @@ const defaultHitAdvancedFilters = {
   maxSeen: "",
   pitcherCount: "all" as HitPitcherState,
 };
+
+const STRIKEOUT_OUTSIDE_KEYS: StrikeoutOutsideKey[] = [
+  "top_left",
+  "top",
+  "top_right",
+  "right",
+  "bottom_right",
+  "bottom",
+  "bottom_left",
+  "left",
+];
+
+const HIT_ZONE_KEYS: HitZoneKey[] = [
+  "infield_left",
+  "infield_right",
+  "outfield_left",
+  "outfield_center",
+  "outfield_right",
+  "homerun_left",
+  "homerun_center",
+  "homerun_right",
+];
+
+const BASIC_COUNTING_STAT_LABELS = new Set([
+  "PA",
+  "AB",
+  "R",
+  "H",
+  "RBI",
+  "1B",
+  "2B",
+  "3B",
+  "HR",
+  "BB",
+  "SO",
+]);
+
+const EMPTY_STRIKEOUT_STATS: StrikeoutStats = {
+  k_pct: 0,
+  chase_pct: 0,
+  freeze_pct: 0,
+  timing_pct: 0,
+  timing_k_pct: 0,
+  eye_k_pct: 0,
+  location_k_pct: 0,
+  heart_miss_k_pct: 0,
+  inzone_swing_k_pct: 0,
+};
+
+const EMPTY_STRIKEOUT_COUNTS: StrikeoutCounts = {
+  k: 0,
+  chase: 0,
+  look: 0,
+  eye: 0,
+  early: 0,
+  late: 0,
+};
+
+function maskStrikeoutMapForNonPro(data: StrikeoutMapData | null): StrikeoutMapData | null {
+  if (!data) return null;
+  const zoneShape = data.zones?.length
+    ? data.zones
+    : [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+      ];
+  const zones = zoneShape.map((row) => row.map(() => 0));
+  const outside = STRIKEOUT_OUTSIDE_KEYS.reduce((acc, key) => {
+    acc[key] = 0;
+    return acc;
+  }, {} as StrikeoutMapData["outside"]);
+  const statsByZone = zoneShape.map((row) =>
+    row.map(() => ({
+      ...EMPTY_STRIKEOUT_STATS,
+    }))
+  );
+  const countsByZone = zoneShape.map((row) =>
+    row.map(() => ({
+      ...EMPTY_STRIKEOUT_COUNTS,
+    }))
+  );
+  const statsByOutside = STRIKEOUT_OUTSIDE_KEYS.reduce((acc, key) => {
+    acc[key] = { ...EMPTY_STRIKEOUT_STATS };
+    return acc;
+  }, {} as Record<StrikeoutOutsideKey, StrikeoutStats>);
+  const countsByOutside = STRIKEOUT_OUTSIDE_KEYS.reduce((acc, key) => {
+    acc[key] = { ...EMPTY_STRIKEOUT_COUNTS };
+    return acc;
+  }, {} as Record<StrikeoutOutsideKey, StrikeoutCounts>);
+  return {
+    ...data,
+    zones,
+    outside,
+    total: 0,
+    pa: 0,
+    stats: { ...EMPTY_STRIKEOUT_STATS },
+    stats_by_zone: statsByZone,
+    stats_by_outside: statsByOutside,
+    counts_by_zone: countsByZone,
+    counts_by_outside: countsByOutside,
+  };
+}
+
+function maskHitDataForNonPro(data: HitDataMap | null): HitDataMap | null {
+  if (!data) return null;
+  const zones = HIT_ZONE_KEYS.reduce((acc, key) => {
+    acc[key] = 0;
+    return acc;
+  }, {} as Record<HitZoneKey, number>);
+  return {
+    ...data,
+    zones,
+    total: 0,
+    pa: 0,
+    stats: {
+      sweet_spot_pct: 0,
+      popup_rate: 0,
+      flyball_rate: 0,
+      groundball_rate: 0,
+      gb_air_ratio: 0,
+      pulled_air_rate: 0,
+      oppo_air_rate: 0,
+      perfect_perfect_pct: 0,
+      extreme_contact_nopp_pct: 0,
+    },
+  };
+}
 
 const STRIKEOUT_STAT_HELP: Record<string, StatHelp> = {
   "K%": {
@@ -616,6 +752,8 @@ export default function GameplayStatsScreen() {
   const { width } = useWindowDimensions();
   useProfileImageUri(); // keep subscription active for cache warming
   const router = useRouter();
+  const { isPro } = useBackendProStatus();
+  const hasProAccess = isPro === true;
   const localParams = useLocalSearchParams<{
     viewUsername?: string | string[];
     viewUserId?: string | string[];
@@ -1207,6 +1345,13 @@ export default function GameplayStatsScreen() {
     let active = true;
 
     const loadCardPitchingStats = async () => {
+      if (!hasProAccess) {
+        if (!active) return;
+        setCardPitchingStats([]);
+        setCardPitchingStatsError(null);
+        setCardPitchingStatsLoading(false);
+        return;
+      }
       setCardPitchingStatsLoading(true);
       setCardPitchingStatsError(null);
       try {
@@ -1238,12 +1383,19 @@ export default function GameplayStatsScreen() {
     return () => {
       active = false;
     };
-  }, [viewUserId, viewUsername, isSelfView]);
+  }, [viewUserId, viewUsername, isSelfView, hasProAccess]);
 
   useEffect(() => {
     let active = true;
 
     const loadGameLog = async () => {
+      if (!hasProAccess) {
+        if (!active) return;
+        setGameLog([]);
+        setGameLogError(null);
+        setGameLogLoading(false);
+        return;
+      }
       setGameLogLoading(true);
       setGameLogError(null);
       try {
@@ -1275,7 +1427,7 @@ export default function GameplayStatsScreen() {
     return () => {
       active = false;
     };
-  }, [viewUserId, viewUsername, isSelfView]);
+  }, [viewUserId, viewUsername, isSelfView, hasProAccess]);
 
   useEffect(() => {
     let active = true;
@@ -1370,6 +1522,13 @@ export default function GameplayStatsScreen() {
     let active = true;
 
     const loadCardStats = async () => {
+      if (!hasProAccess) {
+        if (!active) return;
+        setCardStats([]);
+        setCardStatsError(null);
+        setCardStatsLoading(false);
+        return;
+      }
       setCardStatsLoading(true);
       setCardStatsError(null);
       try {
@@ -1401,7 +1560,7 @@ export default function GameplayStatsScreen() {
     return () => {
       active = false;
     };
-  }, [viewUserId, viewUsername, isSelfView]);
+  }, [viewUserId, viewUsername, isSelfView, hasProAccess]);
 
   useEffect(() => {
     let active = true;
@@ -1450,7 +1609,7 @@ export default function GameplayStatsScreen() {
           ? await apiGetAuth<StrikeoutMapData>(path)
           : await apiGet<StrikeoutMapData>(path);
         if (!active) return;
-        setStrikeoutMap(data);
+        setStrikeoutMap(hasProAccess ? data : maskStrikeoutMapForNonPro(data));
       } catch (err: any) {
         if (!active) return;
         if (err instanceof ApiError && err.status === 404) {
@@ -1480,12 +1639,20 @@ export default function GameplayStatsScreen() {
     advancedFilters.outType,
     selectedPitcher?.mlb_id,
     selectedHitter?.mlb_id,
+    hasProAccess,
   ]);
 
   useEffect(() => {
     let active = true;
 
     const loadPitchTypeRanks = async () => {
+      if (!hasProAccess) {
+        if (!active) return;
+        setPitchTypeRanks([]);
+        setPitchTypeRanksError(null);
+        setPitchTypeRanksLoading(false);
+        return;
+      }
       setPitchTypeRanksLoading(true);
       setPitchTypeRanksError(null);
       try {
@@ -1581,6 +1748,7 @@ export default function GameplayStatsScreen() {
     advancedFilters.outType,
     selectedPitcher?.mlb_id,
     selectedHitter?.mlb_id,
+    hasProAccess,
   ]);
 
   useEffect(() => {
@@ -1634,7 +1802,7 @@ export default function GameplayStatsScreen() {
           ? await apiGetAuth<HitDataMap>(path)
           : await apiGet<HitDataMap>(path);
         if (!active) return;
-        setHitDataMap(data);
+        setHitDataMap(hasProAccess ? data : maskHitDataForNonPro(data));
       } catch (err: any) {
         if (!active) return;
         if (err instanceof ApiError && err.status === 404) {
@@ -1667,6 +1835,7 @@ export default function GameplayStatsScreen() {
     hitFocusZone,
     selectedPitcher?.mlb_id,
     selectedHitter?.mlb_id,
+    hasProAccess,
   ]);
 
   const currentSkills = skillMode === "Hitting" ? skills?.hitting : skills?.pitching;
@@ -1792,7 +1961,7 @@ export default function GameplayStatsScreen() {
     };
     strikeoutSelections.forEach((selection) => {
       const counts =
-        selection.kind === "zone"
+        selection?.kind === "zone"
           ? strikeoutCountsByZone?.[selection.row]?.[selection.col]
           : strikeoutCountsByOutside?.[selection.key];
       if (!counts) return;
@@ -1811,15 +1980,25 @@ export default function GameplayStatsScreen() {
     strikeoutCountsByOutside,
     strikeoutPa,
   ]);
-  const summaryStats = [
-    { label: "K%", value: formatPercent(activeStrikeoutStats?.k_pct) },
-    { label: "Chase %", value: formatPercent(activeStrikeoutStats?.chase_pct) },
-    { label: "Freeze %", value: formatPercent(activeStrikeoutStats?.freeze_pct) },
-    { label: "Timing Bias", value: formatTimingBias(activeStrikeoutStats?.timing_pct) },
-    { label: "Mistime K%", value: formatPercent(activeStrikeoutStats?.timing_k_pct) },
-    { label: "Eye K%", value: formatPercent(activeStrikeoutStats?.eye_k_pct) },
-    { label: "Location K%", value: formatPercent(activeStrikeoutStats?.location_k_pct) },
-  ];
+  const summaryStats = hasProAccess
+    ? [
+        { label: "K%", value: formatPercent(activeStrikeoutStats?.k_pct) },
+        { label: "Chase %", value: formatPercent(activeStrikeoutStats?.chase_pct) },
+        { label: "Freeze %", value: formatPercent(activeStrikeoutStats?.freeze_pct) },
+        { label: "Timing Bias", value: formatTimingBias(activeStrikeoutStats?.timing_pct) },
+        { label: "Mistime K%", value: formatPercent(activeStrikeoutStats?.timing_k_pct) },
+        { label: "Eye K%", value: formatPercent(activeStrikeoutStats?.eye_k_pct) },
+        { label: "Location K%", value: formatPercent(activeStrikeoutStats?.location_k_pct) },
+      ]
+    : [
+        { label: "K%", value: SUMMARY_LOCKED_VALUE },
+        { label: "Chase %", value: SUMMARY_LOCKED_VALUE },
+        { label: "Freeze %", value: SUMMARY_LOCKED_VALUE },
+        { label: "Timing Bias", value: SUMMARY_LOCKED_VALUE },
+        { label: "Mistime K%", value: SUMMARY_LOCKED_VALUE },
+        { label: "Eye K%", value: SUMMARY_LOCKED_VALUE },
+        { label: "Location K%", value: SUMMARY_LOCKED_VALUE },
+      ];
   const coachingMetrics = useMemo(() => {
     const hitStats = hitDataMap?.stats;
     const strikeStats = strikeoutStats;
@@ -1951,12 +2130,28 @@ export default function GameplayStatsScreen() {
       { label: "XBH%", value: formatPercent(aggregateStats.xbh_pct) },
       { label: "RS%", value: formatPercent(aggregateStats.rs_pct) },
     ];
+    if (!hasProAccess) {
+      const maskedBoxscore = boxscore.map((row) =>
+        BASIC_COUNTING_STAT_LABELS.has(row.label)
+          ? row
+          : { ...row, value: SUMMARY_LOCKED_VALUE }
+      );
+      const maskedAdvanced = advanced.map((row) => ({
+        ...row,
+        value: SUMMARY_LOCKED_VALUE,
+      }));
+      return {
+        boxscorePrimary: maskedBoxscore.slice(0, 9),
+        boxscoreSecondary: maskedBoxscore.slice(9),
+        advanced: maskedAdvanced,
+      };
+    }
     return {
       boxscorePrimary: boxscore.slice(0, 9),
       boxscoreSecondary: boxscore.slice(9),
       advanced,
     };
-  }, [aggregateStats]);
+  }, [aggregateStats, hasProAccess]);
   const cardFrozenDivider = 8;
   const filteredCardStats = useMemo(() => {
     const needle = cardHittingFilter.trim().toLowerCase();
@@ -2111,6 +2306,14 @@ export default function GameplayStatsScreen() {
     hitAdvancedFilters.pitcherCount !== "all" ||
     hitAdvancedFilters.minSeen !== "" ||
     hitAdvancedFilters.maxSeen !== "";
+  const battingOverallSkill = battingArchetype?.overall ?? null;
+  const battingTimingSkill = battingArchetype?.timing ?? null;
+  const battingLocationSkill = battingArchetype?.location ?? null;
+  const battingPowerSkill = battingArchetype?.power ?? null;
+  const pitchingOverallSkill = pitchingArchetype?.overall ?? null;
+  const pitchingConsistencySkill = pitchingArchetype?.consistency ?? null;
+  const pitchingStrikeoutSkill = pitchingArchetype?.strikeout ?? null;
+  const pitchingLocationSkill = pitchingArchetype?.location ?? null;
   const handleOpenStatHelp = (label: string) => {
     const help = STRIKEOUT_STAT_HELP[label] ?? HIT_DATA_STAT_HELP[label];
     if (!help) return;
@@ -2301,19 +2504,25 @@ export default function GameplayStatsScreen() {
                 </View>
               ) : (
                 <>
-                  {renderPercentRow("Batting", battingArchetype?.overall ?? null, {
+                  {renderPercentRow("Batting", battingOverallSkill, {
                     emphasis: true,
                   })}
-                  {renderPercentRow("Timing", battingArchetype?.timing ?? null)}
-                  {renderPercentRow("Location", battingArchetype?.location ?? null)}
-                  {renderPercentRow("Power", battingArchetype?.power ?? null)}
+                  {renderPercentRow("Timing", battingTimingSkill, { locked: !hasProAccess })}
+                  {renderPercentRow("Location", battingLocationSkill, { locked: !hasProAccess })}
+                  {renderPercentRow("Power", battingPowerSkill, { locked: !hasProAccess })}
                   <View style={styles.skillDivider} />
-                  {renderPercentRow("Pitching", pitchingArchetype?.overall ?? null, {
+                  {renderPercentRow("Pitching", pitchingOverallSkill, {
                     emphasis: true,
                   })}
-                  {renderPercentRow("Consistency", pitchingArchetype?.consistency ?? null)}
-                  {renderPercentRow("Strikeout", pitchingArchetype?.strikeout ?? null)}
-                  {renderPercentRow("Location", pitchingArchetype?.location ?? null)}
+                  {renderPercentRow("Consistency", pitchingConsistencySkill, {
+                    locked: !hasProAccess,
+                  })}
+                  {renderPercentRow("Strikeout", pitchingStrikeoutSkill, {
+                    locked: !hasProAccess,
+                  })}
+                  {renderPercentRow("Location", pitchingLocationSkill, {
+                    locked: !hasProAccess,
+                  })}
                 </>
               )}
             </View>
@@ -2341,6 +2550,13 @@ export default function GameplayStatsScreen() {
 
         {sectionTab === "Analytics" ? (
           <>
+            {!hasProAccess ? (
+              <ProUpsellCard
+                title="Analytics Preview"
+                description="You can browse layouts and filters here. Upgrade to Pro to reveal all metric values."
+                onGoPro={() => router.push("/paywall")}
+              />
+            ) : null}
             <StrikeoutsSection
               strikeoutMode={strikeoutMode}
               setStrikeoutMode={setStrikeoutMode}
@@ -2386,6 +2602,7 @@ export default function GameplayStatsScreen() {
               statHelpOpen={statHelpOpen}
               setStatHelpOpen={setStatHelpOpen}
               statHelp={statHelp}
+              maskedValues={!hasProAccess}
             />
 
             <HitDataSection
@@ -2426,6 +2643,7 @@ export default function GameplayStatsScreen() {
               onSelectZone={(zone) =>
                 setHitFocusZone((prev) => (prev === zone ? null : zone))
               }
+              maskedValues={!hasProAccess}
             />
 
             <StatsTableSection
@@ -2441,81 +2659,105 @@ export default function GameplayStatsScreen() {
         ) : null}
 
         {sectionTab === "Game Log" ? (
-          <GameLogSection
-            games={filteredGameLog}
-            totalGames={gameLog.length}
-            loading={gameLogLoading}
-            error={gameLogError}
-            difficulty={gameLogDifficulty}
-            setDifficulty={setGameLogDifficulty}
-            difficultyOptions={gameLogDifficultyOptions}
-            resultFilter={gameLogResult}
-            setResultFilter={setGameLogResult}
-            ballparkQuery={gameLogBallpark}
-            setBallparkQuery={setGameLogBallpark}
-            username={resolvedUsername}
-            onSelectGame={handleOpenGame}
-          />
+          hasProAccess ? (
+            <GameLogSection
+              games={filteredGameLog}
+              totalGames={gameLog.length}
+              loading={gameLogLoading}
+              error={gameLogError}
+              difficulty={gameLogDifficulty}
+              setDifficulty={setGameLogDifficulty}
+              difficultyOptions={gameLogDifficultyOptions}
+              resultFilter={gameLogResult}
+              setResultFilter={setGameLogResult}
+              ballparkQuery={gameLogBallpark}
+              setBallparkQuery={setGameLogBallpark}
+              username={resolvedUsername}
+              onSelectGame={handleOpenGame}
+            />
+          ) : (
+            <ProUpsellCard
+              title="Game Log is a Pro feature"
+              description="Unlock detailed match history, result and difficulty filters, plus per-game breakdowns."
+              onGoPro={() => router.push("/paywall")}
+            />
+          )
         ) : null}
 
         {sectionTab === "Cards" ? (
-          <>
-            <CardsTableSection
-              title="Hitting Cards"
-              subtitle="Boxscore, contact, and strikeout rates by MLB ID."
-              rows={sortedCardStats}
-              totalRows={cardStats.length}
-              loading={cardStatsLoading}
-              error={cardStatsError}
-              filter={cardHittingFilter}
-              setFilter={setCardHittingFilter}
-              minLabel="Min PA"
-              minValue={cardHittingMinPa}
-              setMinValue={setCardHittingMinPa}
-              filterPlaceholder="Filter by batter or ID..."
-              sortKey={cardSortKey}
-              sortDirection={cardSortDirection}
-              onSortChange={handleCardSort}
-              columns={CARD_COLUMNS}
-              frozenKeys={CARD_FROZEN_KEYS}
-              frozenDivider={cardFrozenDivider}
-            />
+          hasProAccess ? (
+            <>
+              <CardsTableSection
+                title="Hitting Cards"
+                subtitle="Boxscore, contact, and strikeout rates by MLB ID."
+                rows={sortedCardStats}
+                totalRows={cardStats.length}
+                loading={cardStatsLoading}
+                error={cardStatsError}
+                filter={cardHittingFilter}
+                setFilter={setCardHittingFilter}
+                minLabel="Min PA"
+                minValue={cardHittingMinPa}
+                setMinValue={setCardHittingMinPa}
+                filterPlaceholder="Filter by batter or ID..."
+                sortKey={cardSortKey}
+                sortDirection={cardSortDirection}
+                onSortChange={handleCardSort}
+                columns={CARD_COLUMNS}
+                frozenKeys={CARD_FROZEN_KEYS}
+                frozenDivider={cardFrozenDivider}
+              />
 
-            <CardsTableSection
-              title="Pitching Cards"
-              subtitle="Pitching outcomes with contact quality and strikeout rates."
-              rows={sortedCardPitchingStats}
-              totalRows={cardPitchingStats.length}
-              loading={cardPitchingStatsLoading}
-              error={cardPitchingStatsError}
-              filter={cardPitchingFilter}
-              setFilter={setCardPitchingFilter}
-              minLabel="Min BF"
-              minValue={cardPitchingMinBf}
-              setMinValue={setCardPitchingMinBf}
-              filterPlaceholder="Filter by pitcher or ID..."
-              sortKey={cardPitchingSortKey}
-              sortDirection={cardPitchingSortDirection}
-              onSortChange={handleCardPitchingSort}
-              columns={PITCHING_CARD_COLUMNS}
-              frozenKeys={CARD_FROZEN_KEYS}
-              frozenDivider={cardFrozenDivider}
+              <CardsTableSection
+                title="Pitching Cards"
+                subtitle="Pitching outcomes with contact quality and strikeout rates."
+                rows={sortedCardPitchingStats}
+                totalRows={cardPitchingStats.length}
+                loading={cardPitchingStatsLoading}
+                error={cardPitchingStatsError}
+                filter={cardPitchingFilter}
+                setFilter={setCardPitchingFilter}
+                minLabel="Min BF"
+                minValue={cardPitchingMinBf}
+                setMinValue={setCardPitchingMinBf}
+                filterPlaceholder="Filter by pitcher or ID..."
+                sortKey={cardPitchingSortKey}
+                sortDirection={cardPitchingSortDirection}
+                onSortChange={handleCardPitchingSort}
+                columns={PITCHING_CARD_COLUMNS}
+                frozenKeys={CARD_FROZEN_KEYS}
+                frozenDivider={cardFrozenDivider}
+              />
+            </>
+          ) : (
+            <ProUpsellCard
+              title="Cards breakdowns are a Pro feature"
+              description="Unlock full hitter and pitcher card tables with deep filters, sorting, and advanced splits."
+              onGoPro={() => router.push("/paywall")}
             />
-          </>
+          )
         ) : null}
 
         {sectionTab === "Coaching" ? (
-          <CoachingSection
-            launchTilt={coachingMetrics.launchTilt}
-            launchTiltAdvice={coachingMetrics.launchTiltAdvice}
-            heartMissK={coachingMetrics.heartMissK}
-            inzoneSwingK={coachingMetrics.inzoneSwingK}
-            extremeContact={coachingMetrics.extremeContact}
-            slamScore={coachingMetrics.slamScore}
-            pitchTypeRanks={pitchTypeRanks}
-            pitchTypeRanksLoading={pitchTypeRanksLoading}
-            pitchTypeRanksError={pitchTypeRanksError}
-          />
+          hasProAccess ? (
+            <CoachingSection
+              launchTilt={coachingMetrics.launchTilt}
+              launchTiltAdvice={coachingMetrics.launchTiltAdvice}
+              heartMissK={coachingMetrics.heartMissK}
+              inzoneSwingK={coachingMetrics.inzoneSwingK}
+              extremeContact={coachingMetrics.extremeContact}
+              slamScore={coachingMetrics.slamScore}
+              pitchTypeRanks={pitchTypeRanks}
+              pitchTypeRanksLoading={pitchTypeRanksLoading}
+              pitchTypeRanksError={pitchTypeRanksError}
+            />
+          ) : (
+            <ProUpsellCard
+              title="Coaching insights are a Pro feature"
+              description="Unlock Launch Tilt, PCI Slamming, and pitch-type coaching recommendations."
+              onGoPro={() => router.push("/paywall")}
+            />
+          )
         ) : null}
 
         <Modal
@@ -2785,11 +3027,19 @@ export default function GameplayStatsScreen() {
   );
 }
 
+const SUMMARY_LOCKED_VALUE = "__locked__";
+
 type SummaryStatItem = { label: string; value: string };
 
 type SectionPlaceholderProps = {
   title: string;
   description: string;
+};
+
+type ProUpsellCardProps = {
+  title: string;
+  description: string;
+  onGoPro: () => void;
 };
 
 type GameLogSectionProps = {
@@ -3194,6 +3444,22 @@ const SectionPlaceholder = ({ title, description }: SectionPlaceholderProps) => 
     <View style={styles.analyticsSection}>
       <Text style={styles.cardTitle}>{title}</Text>
       <Text style={styles.placeholderText}>{description}</Text>
+    </View>
+  );
+};
+
+const ProUpsellCard = ({ title, description, onGoPro }: ProUpsellCardProps) => {
+  return (
+    <View style={styles.proUpsellCard}>
+      <View style={styles.proUpsellHeader}>
+        <Ionicons name="lock-closed" size={13} color="#fbbf24" />
+        <Text style={styles.proUpsellHeaderText}>PRO</Text>
+      </View>
+      <Text style={styles.proUpsellTitle}>{title}</Text>
+      <Text style={styles.proUpsellDescription}>{description}</Text>
+      <TouchableOpacity style={styles.proUpsellButton} onPress={onGoPro}>
+        <Text style={styles.proUpsellButtonText}>Upgrade to Pro</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -3814,6 +4080,7 @@ type StrikeoutsSectionProps = {
   statHelpOpen: boolean;
   setStatHelpOpen: Dispatch<SetStateAction<boolean>>;
   statHelp: StatHelp | null;
+  maskedValues?: boolean;
 };
 
 const StrikeoutsSection = ({
@@ -3861,6 +4128,7 @@ const StrikeoutsSection = ({
   statHelpOpen,
   setStatHelpOpen,
   statHelp,
+  maskedValues = false,
 }: StrikeoutsSectionProps) => {
   return (
     <>
@@ -4131,6 +4399,7 @@ const StrikeoutsSection = ({
             filterHitterSide={filterHitterSide}
             selections={strikeoutSelections}
             onSelectionChange={onSelectionChange}
+            maskedValues={maskedValues}
           />
           <View style={styles.analyticsSummary}>
             {summaryStats.map((item) => (
@@ -4145,9 +4414,17 @@ const StrikeoutsSection = ({
                 <Text style={styles.summaryLabel} numberOfLines={1}>
                   {item.label}
                 </Text>
-                <Text style={styles.summaryValue} numberOfLines={1}>
-                  {item.value}
-                </Text>
+                {item.value === SUMMARY_LOCKED_VALUE ? (
+                  <Ionicons
+                    name="lock-closed"
+                    size={13}
+                    color="rgba(248, 250, 252, 0.85)"
+                  />
+                ) : (
+                  <Text style={styles.summaryValue} numberOfLines={1}>
+                    {item.value}
+                  </Text>
+                )}
               </Pressable>
             ))}
           </View>
@@ -4359,6 +4636,13 @@ const StatsTableSection = ({
   loading,
   error,
 }: StatsTableSectionProps) => {
+  const renderStatChipValue = (value: string) =>
+    value === SUMMARY_LOCKED_VALUE ? (
+      <Ionicons name="lock-closed" size={12} color="#fbbf24" />
+    ) : (
+      <Text style={styles.statsChipValue}>{value}</Text>
+    );
+
   return (
     <View style={styles.analyticsSection}>
       <View style={styles.sectionHeaderRow}>
@@ -4411,7 +4695,7 @@ const StatsTableSection = ({
               {boxscorePrimary.map((row) => (
                 <View key={row.label} style={styles.statsChip}>
                   <Text style={styles.statsChipLabel}>{row.label}</Text>
-                  <Text style={styles.statsChipValue}>{row.value}</Text>
+                  {renderStatChipValue(row.value)}
                 </View>
               ))}
             </ScrollView>
@@ -4424,7 +4708,7 @@ const StatsTableSection = ({
                 {boxscoreSecondary.map((row) => (
                   <View key={row.label} style={styles.statsChip}>
                     <Text style={styles.statsChipLabel}>{row.label}</Text>
-                    <Text style={styles.statsChipValue}>{row.value}</Text>
+                    {renderStatChipValue(row.value)}
                   </View>
                 ))}
               </ScrollView>
@@ -4441,7 +4725,7 @@ const StatsTableSection = ({
                 {advanced.map((row) => (
                   <View key={row.label} style={styles.statsChip}>
                     <Text style={styles.statsChipLabel}>{row.label}</Text>
-                    <Text style={styles.statsChipValue}>{row.value}</Text>
+                    {renderStatChipValue(row.value)}
                   </View>
                 ))}
               </ScrollView>
@@ -4546,9 +4830,37 @@ function lerpColor(a: string, b: string, t: number) {
 function renderPercentRow(
   label: string,
   value: number | null,
-  opts?: { emphasis?: boolean }
+  opts?: { emphasis?: boolean; locked?: boolean }
 ) {
   const emphasis = opts?.emphasis ?? false;
+  const locked = opts?.locked ?? false;
+
+  if (locked) {
+    return (
+      <View style={[styles.percentRow, emphasis && styles.percentRowEmphasis]}>
+        <View style={styles.percentRowHeader}>
+          <Text style={[styles.detailLabel, emphasis && styles.detailLabelEmphasis]}>
+            {label}
+          </Text>
+          <View style={styles.percentLockedValueWrap}>
+            <Ionicons name="lock-closed" size={10} color="#fbbf24" />
+            <Text
+              style={[
+                styles.percentValue,
+                styles.percentValueLocked,
+                emphasis && styles.percentValueEmphasis,
+              ]}
+            >
+              PRO
+            </Text>
+          </View>
+        </View>
+        <View style={[styles.percentTrack, emphasis && styles.percentTrackEmphasis]}>
+          <View style={[styles.percentFill, { width: "100%", backgroundColor: "rgba(148, 163, 184, 0.22)" }]} />
+        </View>
+      </View>
+    );
+  }
 
   if (value === null || Number.isNaN(value)) {
     return (
@@ -4922,6 +5234,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  percentLockedValueWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   percentValue: {
     fontSize: 12,
     fontWeight: "700",
@@ -4932,6 +5249,10 @@ const styles = StyleSheet.create({
   },
   percentValueMuted: {
     color: "rgba(226, 232, 240, 0.45)",
+  },
+  percentValueLocked: {
+    color: "#fbbf24",
+    letterSpacing: 0.2,
   },
   percentTrack: {
     width: "100%",
@@ -5273,6 +5594,114 @@ const styles = StyleSheet.create({
     color: "rgba(226, 232, 240, 0.6)",
     fontSize: 12,
     fontWeight: "600",
+  },
+  proUpsellCard: {
+    marginTop: 4,
+    marginBottom: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(251, 191, 36, 0.3)",
+    backgroundColor: "rgba(15, 23, 42, 0.92)",
+    padding: 12,
+    gap: 8,
+  },
+  proUpsellHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  proUpsellHeaderText: {
+    color: "#fbbf24",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  proUpsellTitle: {
+    color: "#fde68a",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  proUpsellDescription: {
+    color: "#e2e8f0",
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
+  proUpsellButton: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    backgroundColor: "#fbbf24",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  proUpsellButtonText: {
+    color: "#111827",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  proLockedSection: {
+    position: "relative",
+  },
+  proLockedPreview: {
+    opacity: 0.2,
+  },
+  proLockedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    backgroundColor: "rgba(2, 6, 23, 0.82)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(251, 191, 36, 0.35)",
+    gap: 10,
+  },
+  proLockedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(251, 191, 36, 0.6)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  proLockedBadgeText: {
+    color: "#fbbf24",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  proLockedTitle: {
+    color: "#fde68a",
+    fontSize: 16,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  proLockedDescription: {
+    color: "#e2e8f0",
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+    textAlign: "center",
+    maxWidth: 320,
+  },
+  proLockedButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    backgroundColor: "#fbbf24",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  proLockedButtonText: {
+    color: "#111827",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.2,
   },
   gameLogFilters: {
     marginTop: 12,

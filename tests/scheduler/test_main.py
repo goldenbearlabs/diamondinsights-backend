@@ -45,6 +45,9 @@ class StubPusher:
     def roster_update_sync(self, reload_all_years=False):
         return reload_all_years
 
+    def revenuecat_entitlements_reconcile(self, firebase_id=None, user_id=None, batch_limit=None):
+        return (firebase_id, user_id, batch_limit)
+
 
 def _build_with_jobs(monkeypatch, jobs, *, pusher=None, timezone=None, scheduler_cls=FakeScheduler):
     monkeypatch.setattr(scheduler_main, "SCHEDULED_JOBS", jobs)
@@ -204,6 +207,9 @@ def test_module_entrypoint_runs_main(monkeypatch):
 
         def roster_update_sync(self, reload_all_years=False):
             return reload_all_years
+
+        def revenuecat_entitlements_reconcile(self, firebase_id=None, user_id=None, batch_limit=None):
+            return (firebase_id, user_id, batch_limit)
 
     class FakeScheduler:
         def __init__(self, timezone=None):

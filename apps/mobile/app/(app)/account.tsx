@@ -29,6 +29,8 @@ import {
 import { toReadableAuthError } from "../../src/lib/authErrors";
 import { auth } from "../../src/lib/firebase";
 import { invalidateAvatarCache } from "../../src/lib/profileImage";
+import { useBackendProStatus } from "../../src/lib/proStatus";
+import { openRevenueCatManageSubscriptions } from "../../src/lib/revenuecat";
 import { uploadProfileImage } from "../../src/lib/storage";
 import { Avatar } from "../../src/components/Avatar";
 import { theme } from "../../src/theme/colors";
@@ -125,6 +127,9 @@ export default function AccountScreen() {
   const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
+  const [managingMembership, setManagingMembership] = useState(false);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const { isPro: isBackendPro, loading: proStatusLoading, refresh: refreshProStatus } = useBackendProStatus();
 
   useEffect(() => {
     let active = true;
@@ -225,6 +230,11 @@ export default function AccountScreen() {
       active = false;
     };
   }, [profile, profile?.id, profile?.is_me, activeTab]);
+
+  useEffect(() => {
+    if (!profile?.is_me) return;
+    void refreshProStatus(true);
+  }, [profile?.is_me, refreshProStatus]);
 
 
   const openSettings = () => {
@@ -391,6 +401,18 @@ export default function AccountScreen() {
     );
   };
 
+  const manageMembership = async () => {
+    setManagingMembership(true);
+    setMembershipError(null);
+    try {
+      await openRevenueCatManageSubscriptions();
+    } catch (err: any) {
+      setMembershipError(err?.message ?? "Unable to open subscription management.");
+    } finally {
+      setManagingMembership(false);
+    }
+  };
+
   const sortedOnlineStats = [...(showProfile?.online_stats ?? [])].sort((a, b) => a.year - b.year);
   const summaryStats = sortedOnlineStats.length ? sortedOnlineStats[sortedOnlineStats.length - 1] : null;
   const aggregateRecord = sortedOnlineStats.reduce(
@@ -459,18 +481,40 @@ export default function AccountScreen() {
             </View>
 
             {profile.is_me ? (
-              <View style={styles.proCtaCard}>
-                <Text style={styles.proCtaTitle}>Become Pro Member</Text>
-                <Text style={styles.proCtaDescription}>
-                  Unlock premium Diamond Insights features with a Pro membership.
-                </Text>
-                <TouchableOpacity
-                  style={styles.proCtaButton}
-                  onPress={() => router.push("/paywall")}
-                >
-                  <Text style={styles.proCtaButtonText}>Become Pro Member</Text>
-                </TouchableOpacity>
-              </View>
+              proStatusLoading && isBackendPro === null ? (
+                <View style={styles.proManageCard}>
+                  <ActivityIndicator color={theme.colors.text} />
+                </View>
+              ) : isBackendPro ? (
+                <View style={styles.proManageCard}>
+                  <View style={styles.proManageRow}>
+                    <Text style={styles.proManageTitle}>Pro membership active</Text>
+                    <TouchableOpacity
+                      style={[styles.proManageButton, managingMembership && styles.buttonDisabled]}
+                      onPress={manageMembership}
+                      disabled={managingMembership}
+                    >
+                      <Text style={styles.proManageButtonText}>
+                        {managingMembership ? "Opening..." : "Manage Subscription"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {membershipError ? <Text style={styles.errorText}>{membershipError}</Text> : null}
+                </View>
+              ) : (
+                <View style={styles.proCtaCard}>
+                  <Text style={styles.proCtaTitle}>Become Pro Member</Text>
+                  <Text style={styles.proCtaDescription}>
+                    Unlock premium Diamond Insights features with a Pro membership.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.proCtaButton}
+                    onPress={() => router.push("/paywall")}
+                  >
+                    <Text style={styles.proCtaButtonText}>Become Pro Member</Text>
+                  </TouchableOpacity>
+                </View>
+              )
             ) : null}
 
             <View style={styles.tabRow}>
@@ -906,6 +950,44 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontSize: 14,
     fontWeight: "800",
+  },
+  proManageCard: {
+    padding: theme.spacing.m,
+    borderRadius: 16,
+    backgroundColor: "rgba(59, 130, 246, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.28)",
+    gap: 8,
+    minHeight: 56,
+    justifyContent: "center",
+  },
+  proManageRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  proManageTitle: {
+    color: theme.colors.text,
+    fontSize: 15,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  proManageButton: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  proManageButtonText: {
+    color: theme.colors.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  buttonDisabled: {
+    opacity: 0.65,
   },
   tabRow: {
     flexDirection: "row",

@@ -104,6 +104,16 @@ SCHEDULED_JOBS = [
             "coalesce": True,
         },
     },
+    {
+        "func_name": "revenuecat_entitlements_reconcile",
+        "kwargs": {
+            "trigger": "cron",
+            "hour": "*/1",
+            "minute": "17",
+            "misfire_grace_time": 900,
+            "coalesce": True,
+        },
+    },
 ]
 
 
