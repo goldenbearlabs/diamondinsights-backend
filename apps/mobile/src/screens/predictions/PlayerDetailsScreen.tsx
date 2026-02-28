@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, DeviceEventEmitter} from 'react-native';
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
@@ -111,6 +112,7 @@ export default function PlayerDetailsScreen() {
       setLoadingPred(true);
       await saveUserPrediction({ card_id: card.id, predicted_ovr: val });
       setIsSubmitted(true);
+      DeviceEventEmitter.emit('PredictionUpdated', { cardId: card.id, newPrediction: val });
       Alert.alert("Success", "Your prediction has been saved!");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save prediction");
@@ -281,9 +283,10 @@ export default function PlayerDetailsScreen() {
           <View style={styles.glassCard}>
             <View style={styles.topRow}>
               <Image 
-                source={{ uri: card.baked_img }} 
+                source={card.baked_img}
                 style={styles.cardArt} 
-                resizeMode="contain" 
+                contentFit="contain"
+                transition={200}
               />
               <View style={styles.bioColumn}>
                 <Text style={styles.playerName}>{card.name}</Text>

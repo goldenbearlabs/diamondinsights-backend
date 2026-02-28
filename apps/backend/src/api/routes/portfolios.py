@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+from redis import Redis 
 
 from shared.db.database import get_db
 from shared.db.models import (
@@ -20,11 +21,14 @@ from src.schemas.portfolio import (
     HoldingCardInfo,
     PortfolioResponse,
 )
+from src.core.cache import build_cache_key, get_cache_client, get_cached_json, set_cached_json
 
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
 
+PORTFOLIO_CACHE_TTL_SEC = 3600
 
-# ── Auth dependency (same pattern as user_predictions) ──────────────────────────
+
+# ── Auth dependency ─────────────────────────────────────────────────────────────
 
 def get_current_user(
     db: Session = Depends(get_db),
@@ -80,8 +84,15 @@ def attach_predicted_ovr(db: Session, holdings: list[PortfolioHolding]) -> None:
 def get_my_portfolio(
     db: Session = Depends(get_db),
     user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client), # <-- Injected Cache
 ):
     """Return the authenticated user's portfolio with all holdings and card data."""
+    
+    cache_key = build_cache_key("portfolio", user.id)
+    cached = get_cached_json(cache, cache_key)
+    if cached is not None:
+        return PortfolioResponse.model_validate(cached)
+
     portfolio = get_or_create_portfolio(db, user)
 
     # Re-fetch with eager-loaded holdings + cards
@@ -95,7 +106,11 @@ def get_my_portfolio(
 
     attach_predicted_ovr(db, portfolio.holdings)
 
-    return portfolio
+    # Save to Cache
+    out = PortfolioResponse.model_validate(portfolio)
+    set_cached_json(cache, cache_key, out.model_dump(mode="json"), ttl_sec=PORTFOLIO_CACHE_TTL_SEC)
+    
+    return out
 
 
 # ── POST /portfolios/me/holdings ────────────────────────────────────────────────
@@ -105,6 +120,7 @@ def add_holding(
     body: HoldingCreate,
     db: Session = Depends(get_db),
     user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client), # <-- Injected Cache
 ):
     """Add a holding to the user's portfolio. Upserts if card already exists."""
     portfolio = get_or_create_portfolio(db, user)
@@ -174,6 +190,9 @@ def add_holding(
     if holding.card:
         holding.card.predicted_ovr = pred
 
+    if cache:
+        cache.delete(build_cache_key("portfolio", user.id))
+
     return holding
 
 
@@ -185,6 +204,7 @@ def update_holding(
     body: HoldingUpdate,
     db: Session = Depends(get_db),
     user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client), # <-- Injected Cache
 ):
     """Partially update an existing holding."""
     portfolio = get_or_create_portfolio(db, user)
@@ -225,6 +245,9 @@ def update_holding(
     if holding.card:
         holding.card.predicted_ovr = pred
 
+    if cache:
+        cache.delete(build_cache_key("portfolio", user.id))
+
     return holding
 
 
@@ -235,8 +258,10 @@ def delete_holding(
     card_id: str,
     db: Session = Depends(get_db),
     user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client), 
 ):
     """Remove a holding from the user's portfolio."""
+
     portfolio = get_or_create_portfolio(db, user)
 
     holding = db.scalar(
@@ -263,6 +288,9 @@ def delete_holding(
     db.delete(holding)
     db.commit()
 
+    if cache:
+        cache.delete(build_cache_key("portfolio", user.id))
+
 
 # ── PATCH /portfolios/me ────────────────────────────────────────────────────────
 
@@ -271,6 +299,7 @@ def update_portfolio_privacy(
     body: PortfolioPrivacyUpdate,
     db: Session = Depends(get_db),
     user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client), 
 ):
     """Toggle portfolio privacy (public/private)."""
     portfolio = get_or_create_portfolio(db, user)
@@ -290,6 +319,10 @@ def update_portfolio_privacy(
     
     attach_predicted_ovr(db, portfolio.holdings)
     
+    # 4. Invalidate Cache since the portfolio changed
+    if cache:
+        cache.delete(build_cache_key("portfolio", user.id))
+
     return portfolio
 
 
@@ -300,9 +333,25 @@ def get_user_portfolio(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client), # <-- Injected Cache
 ):
     """Get a user's portfolio. Only visible if portfolio is public or if requesting user is the owner."""
-    # Find the user
+    
+    cache_key = build_cache_key("portfolio", user_id)
+    cached = get_cached_json(cache, cache_key)
+    
+    if cached is not None:
+        # Enforce Privacy on Cache Hit
+        is_owner = current_user.id == user_id
+        if not cached.get("is_public") and not is_owner:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This portfolio is private"
+            )
+        return PortfolioResponse.model_validate(cached)
+
+
+    # 2. Database Fallback (Cache Miss)
     user = db.scalar(select(Users).where(Users.id == user_id))
     if not user:
         raise HTTPException(
@@ -323,7 +372,7 @@ def get_user_portfolio(
             status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio not found"
         )
     
-    # Check privacy: only allow if public or if owner
+    # Enforce Privacy on Cache Miss
     is_owner = current_user.id == user_id
     if not portfolio.is_public and not is_owner:
         raise HTTPException(
@@ -333,4 +382,8 @@ def get_user_portfolio(
     
     attach_predicted_ovr(db, portfolio.holdings)
     
-    return portfolio
+    # 3. Save to Cache for next time
+    out = PortfolioResponse.model_validate(portfolio)
+    set_cached_json(cache, cache_key, out.model_dump(mode="json"), ttl_sec=PORTFOLIO_CACHE_TTL_SEC)
+
+    return out
