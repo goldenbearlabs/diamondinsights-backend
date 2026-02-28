@@ -910,7 +910,7 @@ export default function PortfolioScreen() {
                 <View style={styles.modalInputSection}>
                   <View style={styles.inputRow}>
                     <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Quantity</Text>
+                      <Text style={styles.inputLabel} numberOfLines={1} adjustsFontSizeToFit>Quantity</Text>
                       <TextInput
                         style={styles.numberInput}
                         placeholder="0"
@@ -921,7 +921,7 @@ export default function PortfolioScreen() {
                       />
                     </View>
                     <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>Avg Buy Price</Text>
+                      <Text style={styles.inputLabel} numberOfLines={1} adjustsFontSizeToFit>Avg Buy Price</Text>
                       <TextInput
                         style={styles.numberInput}
                         placeholder="0"
@@ -935,7 +935,7 @@ export default function PortfolioScreen() {
 
                   <View style={{ marginTop: 12 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 4 }}>
-                      <Text style={[styles.inputLabel, { marginBottom: 0 }]}>Predicted OVR</Text>
+                      <Text style={[styles.inputLabel, { marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit>Predicted OVR</Text>
                       <TouchableOpacity onPress={() => Alert.alert('Predicted OVR', 'This value is synced with your Leaderboard predictions. Any value you enter here will become your official prediction for this card.')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                         <Ionicons name="information-circle-outline" size={14} color={theme.colors.muted} />
                       </TouchableOpacity>

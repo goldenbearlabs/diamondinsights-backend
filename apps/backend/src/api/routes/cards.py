@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import ValidationError
 from redis import Redis
 from sqlalchemy import or_, func
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, selectinload, aliased
 from shared.db.database import get_db
 from shared.db.models import Card, Comment, UserPrediction, CardPrediction, Users
 from src.schemas.card import CardResponse
@@ -304,6 +304,7 @@ def get_cards(
     desc: bool = Query(True),
     limit: int = Query(50, le=100),
     offset: int = 0,
+    my_predictions: bool = Query(False),
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims_optional),
     cache: Redis | None = Depends(get_cache_client),
@@ -358,6 +359,7 @@ def get_cards(
         normalized_sort_dir,
         normalized_limit,
         normalized_offset,
+        int(my_predictions),
     )
     cached = get_cached_json(cache, cache_key)
     if cached is not None:
@@ -401,10 +403,40 @@ def get_cards(
         .label("predicted_attributes")
     )
 
-    query = db.query(Card, comment_count_sub, prediction_count_sub, predicted_ovr_sub, predicted_attrs_sub).options(
+    current_user_id = -1
+    uid = (claims or {}).get("uid")
+    if uid:
+        user_for_pred = db.query(Users).filter(Users.firebase_id == uid).first()
+        if user_for_pred:
+            current_user_id = user_for_pred.id
+
+    UP_Alias = aliased(UserPrediction)
+
+    user_prediction_sub = (
+        db.query(UP_Alias.predicted_ovr)
+        .filter(UP_Alias.card_id == Card.id, UP_Alias.user_id == current_user_id)
+        .correlate(Card)
+        .scalar_subquery()
+        .label("user_prediction")
+    )
+
+    query = db.query(Card, comment_count_sub, prediction_count_sub, predicted_ovr_sub, predicted_attrs_sub, user_prediction_sub).options(
         selectinload(Card.position_overalls),
         selectinload(Card.quirks),
     )
+
+
+    if my_predictions:
+        uid = (claims or {}).get("uid")
+        if not uid:
+            raise HTTPException(status_code=401, detail="Must be logged in to view your predictions")
+        
+        user = db.query(Users).filter(Users.firebase_id == uid).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        query = query.join(UserPrediction, UserPrediction.card_id == Card.id).filter(UserPrediction.user_id == user.id)
+
 
     if is_hitter is not None:
         query = query.filter(Card.is_hitter == is_hitter)
@@ -471,11 +503,12 @@ def get_cards(
     rows = query.all()
     cards: List[Card] = []
     for row in rows:
-        card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes = row
+        card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes, user_prediction = row
         card.comment_count = comment_count or 0
         card.user_prediction_count = user_prediction_count or 0
         card.predicted_ovr = predicted_ovr
         card.predicted_attributes = predicted_attributes
+        card.user_prediction = user_prediction
         cards.append(card)
 
     # Defensive dedupe to ensure one row per card id in all modes.

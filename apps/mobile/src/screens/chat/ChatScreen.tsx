@@ -72,9 +72,7 @@ export default function ChatScreen() {
         {/* HEADER SECTION */}
         <View style={styles.headerContent}>
           <Text style={styles.headerTitle}>Chat Room</Text>
-          <Text style={styles.headerSubtitle}>
-            Share and Discuss MLB The Show Roster Update Predictions!
-          </Text>
+          
         </View>
 
        

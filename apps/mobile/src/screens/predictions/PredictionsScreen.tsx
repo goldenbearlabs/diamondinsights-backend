@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+
 import { 
   View, 
   Text, 
@@ -6,19 +7,22 @@ import {
   TextInput, 
   TouchableOpacity, 
   FlatList, 
-  Image,
   ActivityIndicator,
   RefreshControl,
   Modal,
-  Pressable
+  Pressable,
+  DeviceEventEmitter
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
-import { apiGet } from '../../lib/api'; 
+
 import { useBackendProStatus } from '../../lib/proStatus';
+import { apiGet, apiGetAuth} from '../../lib/api';
+import { auth } from '../../lib/firebase';
 
 type CardData = {
   id: string;
@@ -35,6 +39,7 @@ type CardData = {
   user_prediction_count: number;
   predicted_ovr: number | null;
   predicted_attributes: Record<string, number> | null;
+  user_prediction: number | null;
 };
 
 const NON_PRO_ALLOWED_RARITIES = ['common', 'bronze'] as const;
@@ -60,6 +65,7 @@ export default function PredictionsScreen() {
   const [tempSelectedDelta, setTempSelectedDelta] = useState<'none' | 'high' | 'low'>('none');
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [currentFilterGroup, setCurrentFilterGroup] = useState<string | null>(null);
+  const [showMyPredictions, setShowMyPredictions] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -93,6 +99,26 @@ export default function PredictionsScreen() {
     setTempSelectedRarities(forcedRarities);
   }, [enforceNonProRarity]);
 
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('PredictionUpdated', (event) => {
+      const { cardId, newPrediction } = event;
+      
+      // Update the local state silently without calling the API
+      setCards((currentCards) => 
+        currentCards.map((card) => {
+          if (card.id === cardId) {
+            // Found the card! Inject the new prediction to show the blue badge
+            return { ...card, user_prediction: newPrediction };
+          }
+          return card;
+        })
+      );
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   
   const loadCards = async (targetPage: number, targetLimit: number, query: string) => {
     setLoading(true);
@@ -100,8 +126,12 @@ export default function PredictionsScreen() {
       const offset = (targetPage - 1) * targetLimit;
       
       let url = `/cards?series=live&year=25&offset=${offset}&limit=${targetLimit}`;
+      
       if (query.trim().length > 0) {
         url += `&name=${encodeURIComponent(query)}`;
+      }
+      if (showMyPredictions) {
+        url += '&my_predictions=true';
       }
       
       // Add rarity filter to URL if any are selected (server-side filtering)
@@ -123,7 +153,11 @@ export default function PredictionsScreen() {
         url += `&sort_by=predicted_ovr_delta&desc=${selectedDelta === 'high'}`;
       }
 
-      const newCards = await apiGet<CardData[]>(url); 
+      const newCards = (showMyPredictions || auth.currentUser)
+        ? await apiGetAuth<CardData[]>(url) 
+        : await apiGet<CardData[]>(url);
+
+      
       setCards(newCards);
       
       setHasMore(newCards.length === targetLimit);
@@ -149,7 +183,7 @@ export default function PredictionsScreen() {
         activeOpacity={0.7}
         onPress={() => router.push({ pathname: "/predictions/[id]", params: { id: item.id, cardData: JSON.stringify(item) } })}
       >
-        <Image source={{ uri: item.baked_img }} style={styles.playerCardImage} resizeMode="contain" />
+        <Image source={ item.baked_img } style={styles.playerCardImage} contentFit="contain" transition={200}/>
         <View style={styles.infoColumn}>
           <Text style={styles.playerName} numberOfLines={1}>{item.name}</Text>
           <View style={styles.teamRow}>
@@ -157,7 +191,21 @@ export default function PredictionsScreen() {
             <View style={styles.verticalDivider} />
             <View style={styles.socialItem}><Ionicons name="bar-chart" size={10} color="#a78bfa" /><Text style={styles.socialText}>{item.user_prediction_count ?? 0}</Text></View>
             <View style={styles.socialItem}><FontAwesome5 name="comment-alt" size={10} color={theme.colors.muted} solid /><Text style={styles.socialText}>{item.comment_count ?? 0}</Text></View>
+            {item.user_prediction != null && (
+              <>
+                <View style={styles.verticalDivider} />
+                <View style={styles.socialItem}>
+                  <Ionicons name="person" size={10} color="#3b82f6" />
+                  <Text style={[styles.socialText, { color: '#3b82f6' }]}>
+                    {item.user_prediction} OVR
+                  </Text>
+                </View>
+              </>
+            )}
+
           </View>
+
+
           <View style={styles.ratingRow}>
             <View style={styles.ratingBadge}><Text style={styles.ratingLabel}>CUR</Text><Text style={styles.currentRating}>{item.ovr}</Text></View>
             {item.predicted_ovr != null && (
@@ -263,6 +311,27 @@ export default function PredictionsScreen() {
               )}
             </TouchableOpacity>
           </View>
+          
+          {/* Quick Filters Row */}
+          <View style={styles.quickFiltersRow}>
+            <TouchableOpacity 
+              style={[styles.quickFilterChip, showMyPredictions && styles.quickFilterChipActive]}
+              onPress={() => {
+                setShowMyPredictions(!showMyPredictions);
+                setPage(1); // Reset to page 1 when toggling
+              }}
+            >
+              <Ionicons 
+                name={showMyPredictions ? "checkbox" : "square-outline"} 
+                size={14} 
+                color={showMyPredictions ? "white" : theme.colors.muted} 
+              />
+              <Text style={[styles.quickFilterText, showMyPredictions && styles.quickFilterTextActive]}>
+                My Predictions
+              </Text>
+            </TouchableOpacity>
+          </View>
+
 
           {/* Filter Modal */}
           <Modal
@@ -674,7 +743,7 @@ const styles = StyleSheet.create({
   backgroundLayer: { ...StyleSheet.absoluteFillObject, zIndex: -1 },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 0 },
   headerTitle: { fontSize: 28, fontWeight: '800', color: 'white', marginBottom: 16 },
-  searchRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  searchRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   searchInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 12, paddingHorizontal: 12, height: 48, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
   searchInput: { flex: 1, color: 'white', fontSize: 16, fontWeight: '500' },
   filterBtn: { width: 48, height: 48, borderRadius: 12, backgroundColor: 'rgba(255, 255, 255, 0.05)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
@@ -694,6 +763,11 @@ const styles = StyleSheet.create({
   ratingLabel: { fontSize: 8, color: theme.colors.muted, fontWeight: '800', marginBottom: 1 },
   currentRating: { color: 'white', fontWeight: '700', fontSize: 14 },
   arrowContainer: { paddingLeft: 10 },
+  quickFiltersRow: { flexDirection: 'row', marginBottom: 12 },
+  quickFilterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', alignSelf: 'flex-start' },
+  quickFilterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
+  quickFilterText: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
+  quickFilterTextActive: { color: 'white', fontWeight: 'bold' },
 
   footerContainer: {
     marginTop: 20,

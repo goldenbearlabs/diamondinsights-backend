@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, Image, Dimensions, StyleSheet, Animated } from 'react-native';
+import { View, Text, Dimensions, StyleSheet, Animated } from 'react-native';
+import { Image } from 'expo-image';
 import { apiGet } from '../lib/api';
 import { theme } from '../theme/colors';
 
@@ -10,7 +11,6 @@ const SPACING = 10;
 const SNAP_INTERVAL = CARD_WIDTH + SPACING * 2;
 const SPACER_WIDTH = (width - SNAP_INTERVAL) / 2;
 
-// 1. Added predicted_ovr to the type
 type CardData = {
   id: string;
   name: string;
@@ -19,7 +19,6 @@ type CardData = {
   predicted_ovr: number | null; 
 };
 
-// Removed the getFakePrediction function here
 
 export const PredictionCarousel = () => {
   const [cards, setCards] = useState<CardData[]>([]);
@@ -75,7 +74,7 @@ export const PredictionCarousel = () => {
 
           return (
             <Animated.View style={[styles.cardWrapper, { transform: [{ scale }], opacity }]}>
-              <Image source={{ uri: item.img }} style={styles.cardImage} resizeMode="contain" />
+              <Image source={item.img} style={styles.cardImage} contentFit="contain" transition={200} />
               
               <View style={styles.predictionPill}>
                 <View style={styles.scoreRow}>

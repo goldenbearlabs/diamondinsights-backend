@@ -33,7 +33,7 @@ const RosterCountdown = () => {
 };
 
 export default function HomeScreen() {
-  const router = useRouter(); // <-- 2. Initialized router
+  const router = useRouter(); 
 
   return (
     <View style={styles.container}>
@@ -49,8 +49,13 @@ export default function HomeScreen() {
         >
           {/* THE GLASS CARD */}
           <View style={styles.mainCard}>
-            <View style={styles.headerContainer}>
-              <Text style={styles.titleMain}>
+            <View 
+            style={styles.headerContainer}>
+              <Text 
+              style={styles.titleMain}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              >
                 Diamond<Text style={styles.titleHighlight}>Insights</Text>
               </Text>
               <Text style={styles.subtitle}>
@@ -121,7 +126,7 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
   },
   headerContainer: { marginBottom: 24, alignItems: 'center' },
-  titleMain: { fontSize: 38, fontWeight: '800', color: theme.colors.text, textAlign: 'center', lineHeight: 42 },
+  titleMain: { fontSize: 38, fontWeight: '800', color: theme.colors.text, textAlign: 'center' },
   titleHighlight: { color: theme.colors.primary },
   subtitle: { marginTop: theme.spacing.m, fontSize: 22, color: theme.colors.muted, textAlign: 'center', fontWeight: '600' },
   goldText: { color: '#fbbf24', fontWeight: '900', fontSize: 34 },
