@@ -1,12 +1,13 @@
 import os
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import ValidationError
 from redis import Redis
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, selectinload, aliased
 from shared.db.database import get_db
-from shared.db.models import Card, Comment, UserPrediction, CardPrediction, Users
+from shared.db.models import Card, Comment, UserPrediction, CardPrediction, Users, Listing
 from src.schemas.card import CardResponse
 from src.api.routes.users import firebase_claims_optional
 from src.api.routes.show_profiles.profile import _get_profile_for_user
@@ -207,6 +208,117 @@ def _attach_card_your_overall_fields(card: Card, your_weight_map: dict[str, floa
     card.your_overall_by_position = your_by_position
 
 
+def _quicksell_value_for_ovr(ovr: Optional[int]) -> Optional[int]:
+    if ovr is None:
+        return None
+
+    if ovr < 65:
+        return 5
+    if ovr <= 74:
+        return 25
+    if ovr <= 79:
+        return 50 + ((ovr - 75) * 25)
+
+    quicksell_by_ovr = {
+        80: 400,
+        81: 600,
+        82: 900,
+        83: 1200,
+        84: 1500,
+        85: 3000,
+        86: 3750,
+        87: 4500,
+        88: 5500,
+        89: 7000,
+        90: 8000,
+        91: 9000,
+    }
+    if ovr >= 92:
+        return 10000
+    return quicksell_by_ovr.get(ovr)
+
+
+def _normalized_listing_price(price: Optional[int], ovr: Optional[int]) -> Optional[int]:
+    if price is None or price == 0:
+        return _quicksell_value_for_ovr(ovr)
+    return price
+
+
+def _apply_market_prices_to_card(
+    card: Card,
+    best_buy_price: Optional[int],
+    best_sell_price: Optional[int],
+) -> None:
+    quicksell_value = _quicksell_value_for_ovr(card.ovr)
+    normalized_buy_price = _normalized_listing_price(best_buy_price, card.ovr)
+    normalized_sell_price = _normalized_listing_price(best_sell_price, card.ovr)
+
+    card.quicksell_value = quicksell_value
+    card.best_buy_price = normalized_buy_price
+    card.best_sell_price = normalized_sell_price
+    card.buy_now_uses_quicksell = (
+        quicksell_value is not None
+        and normalized_buy_price is not None
+        and normalized_buy_price == quicksell_value
+    )
+
+    if card.buy_now_uses_quicksell:
+        card.buy_now_above_quicksell_pct = 0.0
+        return
+
+    if quicksell_value is None or quicksell_value <= 0 or normalized_buy_price is None:
+        card.buy_now_above_quicksell_pct = None
+        return
+
+    premium_pct = ((float(normalized_buy_price) - float(quicksell_value)) / float(quicksell_value)) * 100.0
+    card.buy_now_above_quicksell_pct = round(premium_pct, 1)
+
+
+def _community_prediction_value(user_predictions: List[int], base_prediction: Optional[int]) -> Optional[int]:
+    if not user_predictions:
+        return _rounded_number(base_prediction)
+
+    raw_mean = float(sum(user_predictions)) / float(len(user_predictions))
+    filtered = [value for value in user_predictions if abs(float(value) - raw_mean) <= 10.0]
+
+    values_for_average: List[float] = [float(value) for value in filtered]
+    if base_prediction is not None:
+        values_for_average.append(float(base_prediction))
+
+    if not values_for_average:
+        return _rounded_number(raw_mean)
+
+    return _rounded_number(sum(values_for_average) / float(len(values_for_average)))
+
+
+def _community_prediction_map_for_cards(
+    db: Session,
+    cards: List[Card],
+) -> Dict[str, Optional[int]]:
+    if not cards:
+        return {}
+
+    card_ids = [card.id for card in cards]
+    rows = (
+        db.query(UserPrediction.card_id, UserPrediction.predicted_ovr)
+        .filter(UserPrediction.card_id.in_(card_ids))
+        .all()
+    )
+
+    grouped_predictions: Dict[str, List[int]] = defaultdict(list)
+    for card_id, predicted_ovr in rows:
+        try:
+            grouped_predictions[card_id].append(int(predicted_ovr))
+        except (TypeError, ValueError):
+            continue
+
+    out: Dict[str, Optional[int]] = {}
+    for card in cards:
+        base_prediction = _rounded_number(getattr(card, "predicted_ovr", None))
+        out[card.id] = _community_prediction_value(grouped_predictions.get(card.id, []), base_prediction)
+    return out
+
+
 @router.get("/{card_id}", response_model=CardResponse)
 def get_card(
     card_id: str,
@@ -260,10 +372,32 @@ def get_card(
         .scalar_subquery()
         .label("predicted_attributes")
     )
+    best_buy_price_sub = (
+        db.query(Listing.best_buy_price)
+        .filter(Listing.card_id == Card.id)
+        .correlate(Card)
+        .scalar_subquery()
+        .label("best_buy_price")
+    )
+    best_sell_price_sub = (
+        db.query(Listing.best_sell_price)
+        .filter(Listing.card_id == Card.id)
+        .correlate(Card)
+        .scalar_subquery()
+        .label("best_sell_price")
+    )
 
     row = (
-        db.query(Card, comment_count_sub, prediction_count_sub, predicted_ovr_sub, predicted_attrs_sub)
-        .options(selectinload(Card.position_overalls))
+        db.query(
+            Card,
+            comment_count_sub,
+            prediction_count_sub,
+            predicted_ovr_sub,
+            predicted_attrs_sub,
+            best_buy_price_sub,
+            best_sell_price_sub,
+        )
+        .options(selectinload(Card.position_overalls), selectinload(Card.quirks))
         .filter(Card.id == card_id)
         .first()
     )
@@ -271,11 +405,13 @@ def get_card(
     if not row:
         raise HTTPException(status_code=404, detail="Card not found")
     
-    card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes = row
+    card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes, best_buy_price, best_sell_price = row
     card.comment_count = comment_count or 0
     card.user_prediction_count = user_prediction_count or 0
     card.predicted_ovr = predicted_ovr
     card.predicted_attributes = predicted_attributes
+    _apply_market_prices_to_card(card, best_buy_price, best_sell_price)
+    card.community_predicted_ovr = _community_prediction_map_for_cards(db, [card]).get(card.id)
     your_weight_map = _your_weight_map_for_claims(db, claims)
     _attach_card_your_overall_fields(card, your_weight_map)
     return card
@@ -343,7 +479,7 @@ def get_cards(
     user_id_for_cache = str((claims or {}).get("uid") or "anon")
     cache_key = build_cache_key(
         "cards",
-        "rankings_v2",
+        "rankings_v3",
         user_id_for_cache,
         is_hitter if is_hitter is not None else "any",
         _normalize_cache_text(team),
@@ -402,6 +538,20 @@ def get_cards(
         .scalar_subquery()
         .label("predicted_attributes")
     )
+    best_buy_price_sub = (
+        db.query(Listing.best_buy_price)
+        .filter(Listing.card_id == Card.id)
+        .correlate(Card)
+        .scalar_subquery()
+        .label("best_buy_price")
+    )
+    best_sell_price_sub = (
+        db.query(Listing.best_sell_price)
+        .filter(Listing.card_id == Card.id)
+        .correlate(Card)
+        .scalar_subquery()
+        .label("best_sell_price")
+    )
 
     current_user_id = -1
     uid = (claims or {}).get("uid")
@@ -420,10 +570,16 @@ def get_cards(
         .label("user_prediction")
     )
 
-    query = db.query(Card, comment_count_sub, prediction_count_sub, predicted_ovr_sub, predicted_attrs_sub, user_prediction_sub).options(
-        selectinload(Card.position_overalls),
-        selectinload(Card.quirks),
-    )
+    query = db.query(
+        Card,
+        comment_count_sub,
+        prediction_count_sub,
+        predicted_ovr_sub,
+        predicted_attrs_sub,
+        best_buy_price_sub,
+        best_sell_price_sub,
+        user_prediction_sub,
+    ).options(selectinload(Card.position_overalls), selectinload(Card.quirks))
 
 
     if my_predictions:
@@ -503,11 +659,12 @@ def get_cards(
     rows = query.all()
     cards: List[Card] = []
     for row in rows:
-        card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes, user_prediction = row
+        card, comment_count, user_prediction_count, predicted_ovr, predicted_attributes, best_buy_price, best_sell_price, user_prediction = row
         card.comment_count = comment_count or 0
         card.user_prediction_count = user_prediction_count or 0
         card.predicted_ovr = predicted_ovr
         card.predicted_attributes = predicted_attributes
+        _apply_market_prices_to_card(card, best_buy_price, best_sell_price)
         card.user_prediction = user_prediction
         cards.append(card)
 
@@ -560,7 +717,12 @@ def get_cards(
 
     start = normalized_offset
     end = start + normalized_limit
-    response_cards = [CardResponse.model_validate(card) for card in cards[start:end]]
+    page_cards = cards[start:end]
+    community_prediction_map = _community_prediction_map_for_cards(db, page_cards)
+    for card in page_cards:
+        card.community_predicted_ovr = community_prediction_map.get(card.id)
+
+    response_cards = [CardResponse.model_validate(card) for card in page_cards]
     set_cached_json(
         cache,
         cache_key,
