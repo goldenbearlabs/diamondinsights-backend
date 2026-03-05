@@ -173,3 +173,36 @@ def get_prediction(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prediction not found")
         
     return pred
+
+@router.delete("/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_prediction(
+    card_id: str,
+    db: Session = Depends(get_db),
+    user: Users = Depends(get_current_user),
+    cache: Redis | None = Depends(get_cache_client),
+):
+    pred = db.scalar(
+        select(UserPrediction).where(
+            UserPrediction.user_id == user.id,
+            UserPrediction.card_id == card_id
+        )
+    )
+    
+    if not pred:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prediction not found")
+        
+    db.delete(pred)
+    db.commit()
+    
+    # Wipe the Redis Cache for this user so their lists update
+    if cache:
+        pattern = f"*cards*{user.firebase_id}*"
+        keys_to_delete = list(cache.scan_iter(match=pattern))
+        
+        if keys_to_delete:
+            print(f"SUCCESS: Destroying {len(keys_to_delete)} stale card caches for {user.firebase_id} after deletion")
+            cache.delete(*keys_to_delete)
+        else:
+            print(f"WARNING: Cache Miss! No keys found for pattern: {pattern}")
+            
+    return {"detail": "Prediction deleted successfully"}

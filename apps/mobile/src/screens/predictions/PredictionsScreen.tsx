@@ -65,7 +65,6 @@ export default function PredictionsScreen() {
   const [tempSelectedDelta, setTempSelectedDelta] = useState<'none' | 'high' | 'low'>('none');
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [currentFilterGroup, setCurrentFilterGroup] = useState<string | null>(null);
-  const [showMyPredictions, setShowMyPredictions] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -100,22 +99,65 @@ export default function PredictionsScreen() {
   }, [enforceNonProRarity]);
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('PredictionUpdated', (event) => {
-      const { cardId, newPrediction } = event;
-      
-      // Update the local state silently without calling the API
+    // Listen for Predictions (Updates value AND increments count if new)
+    const predSub = DeviceEventEmitter.addListener('PredictionUpdated', (event) => {
+      const { cardId, newPrediction, isNewPrediction } = event;
       setCards((currentCards) => 
         currentCards.map((card) => {
           if (card.id === cardId) {
-            // Found the card! Inject the new prediction to show the blue badge
-            return { ...card, user_prediction: newPrediction };
+            return { 
+              ...card, 
+              user_prediction: newPrediction,
+              // Only increase the total count if this wasn't an edit!
+              user_prediction_count: isNewPrediction ? (card.user_prediction_count || 0) + 1 : card.user_prediction_count
+            };
           }
           return card;
         })
       );
     });
+
+    // Listen for New Comments (Increments count)
+    const commentAddSub = DeviceEventEmitter.addListener('CommentAdded', (event) => {
+      const { cardId } = event;
+      setCards((currentCards) => 
+        currentCards.map((card) => 
+          card.id === cardId ? { ...card, comment_count: (card.comment_count || 0) + 1 } : card
+        )
+      );
+    });
+
+    // Listen for Deleted Comments (Decrements count)
+    const commentDelSub = DeviceEventEmitter.addListener('CommentDeleted', (event) => {
+      const { cardId } = event;
+      setCards((currentCards) => 
+        currentCards.map((card) => 
+          card.id === cardId ? { ...card, comment_count: Math.max(0, (card.comment_count || 0) - 1) } : card
+        )
+      );
+    });
+    const predDelSub = DeviceEventEmitter.addListener('PredictionDeleted', (event) => {
+      const { cardId } = event;
+      setCards((currentCards) => 
+        currentCards.map((card) => {
+          if (card.id === cardId) {
+            return { 
+              ...card, 
+              user_prediction: null, // Strips the blue badge away
+              user_prediction_count: Math.max(0, (card.user_prediction_count || 0) - 1)
+            };
+          }
+          return card;
+        })
+      );
+    });
+
+    // Cleanup all listeners when screen unmounts
     return () => {
-      subscription.remove();
+      predSub.remove();
+      commentAddSub.remove();
+      commentDelSub.remove();
+      predDelSub.remove();
     };
   }, []);
 
@@ -130,9 +172,7 @@ export default function PredictionsScreen() {
       if (query.trim().length > 0) {
         url += `&name=${encodeURIComponent(query)}`;
       }
-      if (showMyPredictions) {
-        url += '&my_predictions=true';
-      }
+      
       
       // Add rarity filter to URL if any are selected (server-side filtering)
       if (effectiveSelectedRarities.length > 0) {
@@ -153,7 +193,7 @@ export default function PredictionsScreen() {
         url += `&sort_by=predicted_ovr_delta&desc=${selectedDelta === 'high'}`;
       }
 
-      const newCards = (showMyPredictions || auth.currentUser)
+      const newCards = auth.currentUser
         ? await apiGetAuth<CardData[]>(url) 
         : await apiGet<CardData[]>(url);
 
@@ -315,18 +355,13 @@ export default function PredictionsScreen() {
           {/* Quick Filters Row */}
           <View style={styles.quickFiltersRow}>
             <TouchableOpacity 
-              style={[styles.quickFilterChip, showMyPredictions && styles.quickFilterChipActive]}
+              style={styles.quickFilterChip}
               onPress={() => {
-                setShowMyPredictions(!showMyPredictions);
-                setPage(1); // Reset to page 1 when toggling
+                router.push('/(app)/my-predictions');
               }}
             >
-              <Ionicons 
-                name={showMyPredictions ? "checkbox" : "square-outline"} 
-                size={14} 
-                color={showMyPredictions ? "white" : theme.colors.muted} 
-              />
-              <Text style={[styles.quickFilterText, showMyPredictions && styles.quickFilterTextActive]}>
+              <Ionicons name="list" size={14} color="white" />
+              <Text style={styles.quickFilterText}>
                 My Predictions
               </Text>
             </TouchableOpacity>

@@ -11,7 +11,7 @@ import { theme } from '../../theme/colors';
 import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import Svg, { Path, G } from 'react-native-svg';
-import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
+import { apiGet, getUserPrediction, saveUserPrediction, deleteUserPrediction } from '../../lib/api';
 import { useBackendProStatus } from '../../lib/proStatus';
 import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
 import { MarketSpreadChart } from '../../components/playerdetails/MarketSpreadChart';
@@ -116,14 +116,46 @@ export default function PlayerDetailsScreen() {
     try {
       setLoadingPred(true);
       await saveUserPrediction({ card_id: card.id, predicted_ovr: val });
+
+      const isNewPrediction = !isSubmitted
       setIsSubmitted(true);
-      DeviceEventEmitter.emit('PredictionUpdated', { cardId: card.id, newPrediction: val });
+      DeviceEventEmitter.emit('PredictionUpdated', { cardId: card.id, newPrediction: val, isNewPrediction: isNewPrediction});
       Alert.alert("Success", "Your prediction has been saved!");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save prediction");
     } finally {
       setLoadingPred(false);
     }
+  };
+
+  const handleDeletePrediction = () => {
+    Alert.alert(
+      "Remove Prediction",
+      "Are you sure you want to delete this prediction?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setLoadingPred(true);
+              await deleteUserPrediction(card.id);
+              
+              setIsSubmitted(false);
+              setUserPrediction('');
+              
+              DeviceEventEmitter.emit('PredictionDeleted', { cardId: card.id });
+              
+            } catch (e: any) {
+              Alert.alert("Error", e.message || "Failed to delete prediction");
+            } finally {
+              setLoadingPred(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   useEffect(() => {
@@ -360,7 +392,7 @@ export default function PlayerDetailsScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <Ionicons name="checkmark-circle" size={32} color="#22c55e" />
                   <View>
-                    <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                    <Text style={{ color: 'white', fontSize: 14, fontWeight: 'bold' }}>
                       Prediction Submitted
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 14 }}>
@@ -369,17 +401,41 @@ export default function PlayerDetailsScreen() {
                   </View>
                 </View>
 
-                <TouchableOpacity 
-                  onPress={() => setIsSubmitted(false)}
-                  style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                    borderRadius: 8
-                  }}
-                >
-                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>Change</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity 
+                    onPress={() => setIsSubmitted(false)}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      backgroundColor: 'rgba(255,255,255,0.1)',
+                      borderRadius: 8,
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>Change</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    onPress={handleDeletePrediction}
+                    disabled={loadingPred}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      backgroundColor: 'rgba(239, 68, 68, 0.15)', // Light red background
+                      borderWidth: 1,
+                      borderColor: '#ef4444',
+                      borderRadius: 8,
+                      justifyContent: 'center',
+                      opacity: loadingPred ? 0.5 : 1
+                    }}
+                  >
+                    {loadingPred ? (
+                      <ActivityIndicator size="small" color="#ef4444" />
+                    ) : (
+                      <FontAwesome5 name="trash" size={14} color="#ef4444" />
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
               <>
