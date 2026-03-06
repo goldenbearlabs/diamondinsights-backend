@@ -16,6 +16,8 @@ import { useRouter, Stack} from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
 import { apiGetAuth } from '../../lib/api'; 
+import { useBackendProStatus } from '../../lib/proStatus';
+
 
 type CardData = {
   id: string;
@@ -36,7 +38,8 @@ type CardData = {
 
 export default function MyPredictionsScreen() {
   const router = useRouter();
-  
+  const { isPro, loading: proStatusLoading } = useBackendProStatus();
+  const showProLock = isPro === false || (isPro === null && !proStatusLoading);
   const [cards, setCards] = useState<CardData[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -121,6 +124,8 @@ export default function MyPredictionsScreen() {
   };
 
   const renderItem = ({ item }: { item: CardData }) => {
+    const isLiveSeries = item.series?.toLowerCase().includes('live') || (item as any).series_name?.toLowerCase().includes('live');
+    const isPredLocked = showProLock && isLiveSeries && item.ovr >= 75;
     return (
       <TouchableOpacity 
         style={styles.cardContainer} 
@@ -136,7 +141,7 @@ export default function MyPredictionsScreen() {
             <View style={styles.socialItem}><Ionicons name="bar-chart" size={10} color="#a78bfa" /><Text style={styles.socialText}>{item.user_prediction_count ?? 0}</Text></View>
             <View style={styles.socialItem}><FontAwesome5 name="comment-alt" size={10} color={theme.colors.muted} solid /><Text style={styles.socialText}>{item.comment_count ?? 0}</Text></View>
             
-            {/* User Prediction Badge is guaranteed to show here! */}
+            {/* User Prediction Badge */}
             {item.user_prediction != null && (
               <>
                 <View style={styles.verticalDivider} />
@@ -152,14 +157,31 @@ export default function MyPredictionsScreen() {
 
           <View style={styles.ratingRow}>
             <View style={styles.ratingBadge}><Text style={styles.ratingLabel}>CUR</Text><Text style={styles.currentRating}>{item.ovr}</Text></View>
+            
             {item.predicted_ovr != null && (
-              <>
-                <Ionicons name="arrow-forward" size={14} color={item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : theme.colors.muted} style={{ marginHorizontal: 8 }} />
-                <View style={[styles.ratingBadge, { borderColor: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : 'rgba(255,255,255,0.1)' }]}>
-                  <Text style={[styles.ratingLabel, { color: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : theme.colors.muted }]}>PRED</Text>
-                  <Text style={[styles.currentRating, { color: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : 'white' }]}>{item.predicted_ovr}</Text>
-                </View>
-              </>
+              isPredLocked ? (
+                // --- LOCKED COMMUNITY PRED BADGE ---
+                <>
+                  <Ionicons name="arrow-forward" size={14} color="#fbbf24" style={{ marginHorizontal: 8 }} />
+                  <TouchableOpacity 
+                    style={[styles.ratingBadge, { borderColor: '#fbbf24', paddingHorizontal: 12, alignItems: 'center' }]}
+                    onPress={() => router.push('/paywall')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.ratingLabel, { color: '#fbbf24' }]}>PRED</Text>
+                    <FontAwesome5 name="lock" size={12} color="#fbbf24" style={{ marginTop: 2 }} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                // --- UNLOCKED COMMUNITY PRED BADGE ---
+                <>
+                  <Ionicons name="arrow-forward" size={14} color={item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : theme.colors.muted} style={{ marginHorizontal: 8 }} />
+                  <View style={[styles.ratingBadge, { borderColor: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : 'rgba(255,255,255,0.1)' }]}>
+                    <Text style={[styles.ratingLabel, { color: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : theme.colors.muted }]}>PRED</Text>
+                    <Text style={[styles.currentRating, { color: item.predicted_ovr > item.ovr ? '#4ade80' : item.predicted_ovr < item.ovr ? '#f87171' : 'white' }]}>{item.predicted_ovr}</Text>
+                  </View>
+                </>
+              )
             )}
           </View>
         </View>

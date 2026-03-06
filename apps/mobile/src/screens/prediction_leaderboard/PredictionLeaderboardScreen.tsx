@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Image,
@@ -30,10 +31,10 @@ function formatOrdinal(value: number): string {
   return `${value}th`;
 }
 
-// 1. Define the available Roster Updates
 const ROSTER_UPDATES = ["Roster Update 1"];
 
 export default function PredictionLeaderboardScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +43,6 @@ export default function PredictionLeaderboardScreen() {
   const [myRank, setMyRank] = useState<number | null>(null);
   const [myPredictionCount, setMyPredictionCount] = useState<number | null>(null);
 
-  // 2. Add state for the dropdown
   const [selectedUpdate, setSelectedUpdate] = useState(ROSTER_UPDATES[0]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -83,6 +83,7 @@ export default function PredictionLeaderboardScreen() {
 
   const renderRow = (entry: LeaderboardEntry) => {
     const isTop3 = entry.rank <= 3;
+    const isMe = entry.rank === myRank;
     return (
       <View
         key={entry.user_id}
@@ -106,9 +107,26 @@ export default function PredictionLeaderboardScreen() {
           <Text style={styles.displayName} numberOfLines={1}>
             {entry.display_name}
           </Text>
-          <Text style={styles.predCountText}>
-            {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
-          </Text>
+          
+
+          {isMe ? (
+            // --- CLICKABLE LINK FOR CURRENT USER ---
+            <TouchableOpacity 
+              style={styles.myPredsButton} 
+              onPress={() => router.push('/(app)/my-predictions')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.myPredsText}>
+                {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
+              </Text>
+              <Ionicons name="open-outline" size={12} color="#3b82f6" />
+            </TouchableOpacity>
+          ) : (
+            // --- PLAIN TEXT FOR EVERYONE ELSE ---
+            <Text style={styles.predCountText}>
+              {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
+            </Text>
+          )}
         </View>
 
         {/* Score */}
@@ -434,6 +452,17 @@ const styles = StyleSheet.create({
     color: theme.colors.muted,
     fontSize: 11,
     marginTop: 1,
+  },
+  myPredsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  myPredsText: {
+    color: "#3b82f6", 
+    fontSize: 11,
+    fontWeight: "600",
   },
   scoreCol: {
     alignItems: "center",

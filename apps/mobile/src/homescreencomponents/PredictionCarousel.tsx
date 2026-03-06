@@ -69,7 +69,6 @@ export const PredictionCarousel = () => {
             extrapolate: 'clamp',
           });
 
-          // 2. Use the real prediction from the database, fallback to '-' if null
           const displayPrediction = item.predicted_ovr != null ? Math.round(item.predicted_ovr) : '-';
 
           return (
@@ -82,13 +81,12 @@ export const PredictionCarousel = () => {
                     <Text style={styles.arrow}>➔</Text>
                     <Text style={[
                       styles.predictedScore, 
-                      // 3. Optional visual flair: change color to red if the prediction is a downgrade
                       item.predicted_ovr != null && item.predicted_ovr < item.ovr && { color: '#f87171' }
                     ]}>
                       {displayPrediction}
                     </Text>
                 </View>
-                <Text style={styles.fakeLabel}>PRO PREDICTION</Text>
+                <Text style={styles.fakeLabel}>Free PRO PREDICTION</Text>
               </View>
             </Animated.View>
           );
