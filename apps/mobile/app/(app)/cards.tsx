@@ -374,6 +374,24 @@ export default function CardsRankingsScreen() {
       togglePitchHands(key);
     }
   };
+  const handleCardPress = (card: CardRanking) => {
+    // Check if the card is a Live Series card
+    const isLive = card.series_name?.toLowerCase() === 'live';
+    
+    if (isLive) {
+      // Route to PlayerDetailsScreen (predictions route)
+      router.push({ 
+        pathname: '/predictions/[id]', 
+        params: { id: card.id, cardData: JSON.stringify(card) } 
+      });
+    } else {
+      // Route to standard CardScreen (non-live route)
+      router.push({ 
+        pathname: '/(app)/card', 
+        params: { cardData: JSON.stringify(card) } 
+      });
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -514,10 +532,8 @@ export default function CardsRankingsScreen() {
                   <Pressable
                     key={`pinned-${card.id}`}
                     style={[styles.pinnedImageCell, index % 2 === 0 ? styles.evenRow : styles.oddRow]}
-                    onPress={() => {
-                      router.push({ pathname: '/(app)/card', params: { cardData: JSON.stringify(card) } });
-
-                    }}
+                    onPress={() => handleCardPress(card)}
+                  
                   >
                     <CardImage uri={card.baked_img || card.img || null} />
                   </Pressable>
@@ -661,9 +677,7 @@ export default function CardsRankingsScreen() {
                       <Pressable
                         key={card.id}
                         style={[styles.row, index % 2 === 0 ? styles.evenRow : styles.oddRow]}
-                        onPress={() => {
-                          router.push({ pathname: '/(app)/card', params: { cardData: JSON.stringify(card) } });
-                        }}
+                        onPress={() => handleCardPress(card)}
                       >
                         <View
                           style={[

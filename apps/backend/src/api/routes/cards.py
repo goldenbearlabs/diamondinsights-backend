@@ -541,6 +541,14 @@ def get_cards(
                 return -1
             weighted = _rounded_number(float(base) * _your_weight_for_card(card, your_weight_map))
             return -1 if weighted is None else weighted
+        
+        if normalized_sort_by == "popularity":
+            return card.user_prediction_count if card.user_prediction_count is not None else -1
+            
+        if normalized_sort_by == "predicted_ovr_delta":
+            if card.predicted_ovr is not None and card.ovr is not None:
+                return card.predicted_ovr - card.ovr
+            return -999  if reverse else 999
 
         value = getattr(card, normalized_sort_by, None)
         rounded = _rounded_number(value)

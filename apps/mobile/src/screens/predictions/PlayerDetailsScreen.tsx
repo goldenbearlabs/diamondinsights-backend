@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, DeviceEventEmitter} from 'react-native';
 import { Image } from 'expo-image';
+import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
@@ -11,7 +12,7 @@ import { theme } from '../../theme/colors';
 import { TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import Svg, { Path, G } from 'react-native-svg';
-import { apiGet, getUserPrediction, saveUserPrediction } from '../../lib/api';
+import { apiGet, getUserPrediction, saveUserPrediction, deleteUserPrediction } from '../../lib/api';
 import { useBackendProStatus } from '../../lib/proStatus';
 import { CardCommentsSection } from '../../components/predictions/CardCommentsSection';
 import { MarketSpreadChart } from '../../components/playerdetails/MarketSpreadChart';
@@ -93,6 +94,13 @@ export default function PlayerDetailsScreen() {
   const showProStatusPending = isPro === null && proStatusLoading;
   const showProLock = isPro === false || (isPro === null && !proStatusLoading);
   const canAccessLastUpdateWindow = isPro === true;
+  const hasNoSeriesData = !card.series && !card.series_name;
+  const isLiveSeries = 
+    hasNoSeriesData || 
+    card.series?.toLowerCase().includes('live') || 
+    card.series_name?.toLowerCase().includes('live');
+    
+  const isPredLocked = showProLock && isLiveSeries && card.ovr >= 75;
 
   useEffect(() => {
     if (card?.id) {
@@ -116,14 +124,46 @@ export default function PlayerDetailsScreen() {
     try {
       setLoadingPred(true);
       await saveUserPrediction({ card_id: card.id, predicted_ovr: val });
+
+      const isNewPrediction = !isSubmitted
       setIsSubmitted(true);
-      DeviceEventEmitter.emit('PredictionUpdated', { cardId: card.id, newPrediction: val });
+      DeviceEventEmitter.emit('PredictionUpdated', { cardId: card.id, newPrediction: val, isNewPrediction: isNewPrediction});
       Alert.alert("Success", "Your prediction has been saved!");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save prediction");
     } finally {
       setLoadingPred(false);
     }
+  };
+
+  const handleDeletePrediction = () => {
+    Alert.alert(
+      "Remove Prediction",
+      "Are you sure you want to delete this prediction?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setLoadingPred(true);
+              await deleteUserPrediction(card.id);
+              
+              setIsSubmitted(false);
+              setUserPrediction('');
+              
+              DeviceEventEmitter.emit('PredictionDeleted', { cardId: card.id });
+              
+            } catch (e: any) {
+              Alert.alert("Error", e.message || "Failed to delete prediction");
+            } finally {
+              setLoadingPred(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   useEffect(() => {
@@ -330,17 +370,34 @@ export default function PlayerDetailsScreen() {
                     <Text style={styles.statValue}>{card.ovr}</Text>
                   </View>
                   {card.predicted_ovr != null && (
-                    <View style={[styles.statBadge, {
-                      backgroundColor: card.predicted_ovr > card.ovr ? 'rgba(74, 222, 128, 0.15)' : card.predicted_ovr < card.ovr ? 'rgba(248, 113, 113, 0.15)' : 'rgba(107, 114, 128, 0.15)',
-                      borderColor: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
-                    }]}>
-                      <Text style={[styles.statLabel, {
-                        color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
-                      }]}>PRED</Text>
-                      <Text style={[styles.statValue, {
-                        color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
-                      }]}>{card.predicted_ovr}</Text>
-                    </View>
+                    isPredLocked ? (
+                      <TouchableOpacity 
+                        style={[styles.statBadge, {
+                          backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                          borderColor: '#fbbf24',
+                          justifyContent: 'center',
+                          paddingHorizontal: 20,
+                          alignSelf: 'stretch' 
+                        }]}
+                        activeOpacity={0.7}
+                        onPress={() => router.push('/paywall')}
+                      >
+                        <Text style={[styles.statLabel, { color: '#fbbf24', marginBottom: 3 }]}>PRED</Text>
+                        <FontAwesome5 name="lock" size={20} color="#fbbf24" />
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={[styles.statBadge, {
+                        backgroundColor: card.predicted_ovr > card.ovr ? 'rgba(74, 222, 128, 0.15)' : card.predicted_ovr < card.ovr ? 'rgba(248, 113, 113, 0.15)' : 'rgba(107, 114, 128, 0.15)',
+                        borderColor: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                      }]}>
+                        <Text style={[styles.statLabel, {
+                          color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                        }]}>PRED</Text>
+                        <Text style={[styles.statValue, {
+                          color: card.predicted_ovr > card.ovr ? '#4ade80' : card.predicted_ovr < card.ovr ? '#f87171' : '#6b7280',
+                        }]}>{card.predicted_ovr}</Text>
+                      </View>
+                    )
                   )}
                 </View>
               </View>
@@ -360,7 +417,7 @@ export default function PlayerDetailsScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <Ionicons name="checkmark-circle" size={32} color="#22c55e" />
                   <View>
-                    <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>
+                    <Text style={{ color: 'white', fontSize: 14, fontWeight: 'bold' }}>
                       Prediction Submitted
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 14 }}>
@@ -369,17 +426,41 @@ export default function PlayerDetailsScreen() {
                   </View>
                 </View>
 
-                <TouchableOpacity 
-                  onPress={() => setIsSubmitted(false)}
-                  style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                    borderRadius: 8
-                  }}
-                >
-                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>Change</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity 
+                    onPress={() => setIsSubmitted(false)}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      backgroundColor: 'rgba(255,255,255,0.1)',
+                      borderRadius: 8,
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <Text style={{ color: 'white', fontWeight: '600', fontSize: 12 }}>Change</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    onPress={handleDeletePrediction}
+                    disabled={loadingPred}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      backgroundColor: 'rgba(239, 68, 68, 0.15)', // Light red background
+                      borderWidth: 1,
+                      borderColor: '#ef4444',
+                      borderRadius: 8,
+                      justifyContent: 'center',
+                      opacity: loadingPred ? 0.5 : 1
+                    }}
+                  >
+                    {loadingPred ? (
+                      <ActivityIndicator size="small" color="#ef4444" />
+                    ) : (
+                      <FontAwesome5 name="trash" size={14} color="#ef4444" />
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
               <>
@@ -852,7 +933,11 @@ export default function PlayerDetailsScreen() {
                   ? 'See projected individual batting and pitching attribute changes for this card. Sign up for Pro to unlock full access.'
                   : 'Projected individual batting and pitching attribute changes from our latest model run.'}
               </Text>
-              <View style={[styles.glassCard, styles.proCard]}>
+              <View style={[
+                styles.glassCard, 
+                styles.proCard,
+                showProLock && { borderColor: 'rgba(251, 191, 36, 0.4)' } 
+              ]}>
                 <View style={showProLock || showProStatusPending ? styles.proContentObscured : undefined}>
 
                   {/* Pitching Predictions */}
@@ -911,7 +996,7 @@ export default function PlayerDetailsScreen() {
                 ) : null}
 
                 {showProLock ? (
-                  <View style={styles.proLockOverlay}>
+                  <BlurView intensity={50} tint="dark" style={styles.proLockOverlay}>
                     <Text style={styles.proLockTitle}>Sign up for Pro to see predicted attributes</Text>
                     <Text style={styles.proLockDescription}>
                       Unlock projected increases and decreases for key batting and pitching ratings before roster updates.
@@ -923,7 +1008,7 @@ export default function PlayerDetailsScreen() {
                       <FontAwesome5 name="crown" size={12} color="#111827" />
                       <Text style={styles.proLockButtonText}>Go Pro</Text>
                     </TouchableOpacity>
-                  </View>
+                  </BlurView>
                 ) : null}
 
               </View>
@@ -1199,10 +1284,10 @@ const styles = StyleSheet.create({
   },
   proLockOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2, 6, 23, 0.74)',
-    borderWidth: 1,
-    borderColor: 'rgba(251, 191, 36, 0.35)',
-    borderRadius: 16,
+    //backgroundColor: 'rgba(2, 6, 23, 0.74)',
+    //borderWidth: 1,
+    //borderColor: 'rgba(251, 191, 36, 0.35)',
+    borderRadius: 10,
     paddingHorizontal: 18,
     justifyContent: 'center',
     alignItems: 'center',
