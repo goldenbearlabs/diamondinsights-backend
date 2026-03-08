@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  Alert,
+  Linking,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { createUserWithEmailAndPassword, deleteUser, updateProfile, type User } from "firebase/auth";
@@ -31,11 +33,36 @@ export default function SignUpScreen() {
 
   const pickImage = async () => {
     setError(null);
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError("Photo permission denied.");
+
+    const { status, canAskAgain } = await ImagePicker.getMediaLibraryPermissionsAsync();
+
+    if (status === "denied" && !canAskAgain) {
+      Alert.alert(
+        "Photo Access Required",
+        "You previously denied photo access. Please enable it in Settings to set a profile photo.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ]
+      );
       return;
     }
+
+    if (status !== "granted") {
+      await new Promise<void>((resolve) =>
+        Alert.alert(
+          "Photo Access",
+          "Diamond Insights needs access to your photo library to let you set a profile photo.",
+          [{ text: "Continue", onPress: () => resolve() }]
+        )
+      );
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError("Photo permission denied.");
+        return;
+      }
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         allowsEditing: true,

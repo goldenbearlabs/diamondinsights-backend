@@ -1,7 +1,8 @@
 // apps/mobile/src/components/chat/ChatRow.tsx
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { FontAwesome5, Ionicons } from "@expo/vector-icons"; 
+import { FontAwesome5, Ionicons } from "@expo/vector-icons";
+import {useRouter} from "expo-router";
 import { auth } from "../../lib/firebase"; 
 
 import { Avatar } from "../Avatar";
@@ -16,7 +17,16 @@ interface ChatRowProps {
 
 export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps) => {
   const currentUserUid = auth.currentUser?.uid;
-  
+  const router = useRouter();
+  const handleProfilePress = () => {
+    
+    if (message.userId) {
+      router.push({
+        pathname: "/(app)/account",
+        params: { userId: message.userId }
+      });
+    }
+  };
   const likeCount = message.likedByFirebaseIds?.length || 0;
   
   const isLikedByMe = currentUserUid 
@@ -40,13 +50,17 @@ export const ChatRow = ({ message, onReply, onLongPress, onLike }: ChatRowProps)
       activeOpacity={0.7}
     >
       <View style={styles.avatar}>
-        <Avatar firebasePath={message.userImage} size={40} />
+        <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+          <Avatar firebasePath={message.userImage} size={40} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Text style={styles.username}>{message.userName}</Text>
+            <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+              <Text style={styles.username}>{message.userName}</Text>
+            </TouchableOpacity>
             <Text style={styles.timestamp}>{timeString}</Text>
             {message.editedAt && <Text style={styles.edited}>(edited)</Text>}
           </View>

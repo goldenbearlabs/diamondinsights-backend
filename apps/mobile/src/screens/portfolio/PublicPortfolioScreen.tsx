@@ -11,7 +11,7 @@ import {
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
-import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../../theme/colors';
 import { apiGetAuth } from '../../lib/api';
 import { ApiError } from '../../lib/api';
@@ -86,7 +86,7 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
     try {
       setError(null);
       const data = await apiGetAuth<PortfolioData>(
-        `/users/${userId}/portfolio`
+        `/portfolios/users/${userId}/portfolio`
       );
       setPortfolio(data);
     } catch (err: any) {
@@ -233,50 +233,37 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.backgroundLayer}>
-          <FloatingBackground />
-        </View>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#fbbf24" />
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error === 'private') {
     return (
-      <View style={styles.container}>
-        <View style={styles.backgroundLayer}>
-          <FloatingBackground />
-        </View>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <Ionicons name="lock-closed" size={48} color="rgba(255,255,255,0.15)" />
           <Text style={styles.emptyTitle}>{username}'s portfolio is private</Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.container}>
-        <View style={styles.backgroundLayer}>
-          <FloatingBackground />
-        </View>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.loadingContainer}>
           <Text style={styles.emptyTitle}>{error}</Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.backgroundLayer}>
-        <FloatingBackground />
-      </View>
-
+    <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         data={holdings}
         keyExtractor={(item) => item.card_id}
@@ -329,7 +316,7 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
           </View>
         }
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -337,7 +324,6 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
-  backgroundLayer: { ...StyleSheet.absoluteFillObject, zIndex: -1 },
   listContent: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
 
@@ -363,7 +349,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     color: theme.colors.muted,
-    fontSize: 10,
+    fontSize: 8.5,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,

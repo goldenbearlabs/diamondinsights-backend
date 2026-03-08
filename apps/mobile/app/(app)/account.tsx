@@ -4,6 +4,7 @@ import {
   Alert,
   DeviceEventEmitter,
   Image,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -12,6 +13,11 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard
+
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -45,6 +51,7 @@ type UserProfile = {
   profile_img_path: string;
   latest_points_total?: number | null;
   is_me: boolean;
+  description?: string | null;
 };
 
 type ShowProfile = {
@@ -117,10 +124,12 @@ export default function AccountScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const [newPhotoUri, setNewPhotoUri] = useState<string | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUsername, setLinkUsername] = useState("");
@@ -144,6 +153,7 @@ export default function AccountScreen() {
         setProfile(data);
         setEditName(data.display_name);
         setEditEmail(data.email ?? "");
+        setEditDescription(data.description ?? "");
       } catch (err: any) {
         if (!active) return;
         setPageError(err?.message ?? "Failed to load profile");
@@ -202,7 +212,7 @@ export default function AccountScreen() {
       try {
         const path = profile.is_me 
           ? "/portfolios/me" 
-          : `/users/${profile.id}/portfolio`;
+          : `/portfolios/users/${profile.id}/portfolio`;
         const data = await apiGetAuth<UserPortfolio>(path);
         if (!active) return;
         setPortfolioData(data);
@@ -241,6 +251,7 @@ export default function AccountScreen() {
     if (!profile) return;
     setEditName(profile.display_name);
     setEditEmail(profile.email ?? "");
+    setEditDescription
     setNewPhotoUri(null);
     setNotice(null);
     setModalError(null);
@@ -249,11 +260,36 @@ export default function AccountScreen() {
 
   const pickProfilePhoto = async () => {
     setNotice(null);
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setNotice("Photo permission denied.");
+
+    const { status, canAskAgain } = await ImagePicker.getMediaLibraryPermissionsAsync();
+
+    if (status === "denied" && !canAskAgain) {
+      Alert.alert(
+        "Photo Access Required",
+        "You previously denied photo access. Please enable it in Settings to set a profile photo.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ]
+      );
       return;
     }
+
+    if (status !== "granted") {
+      await new Promise<void>((resolve) =>
+        Alert.alert(
+          "Photo Access",
+          "Diamond Insights needs access to your photo library to let you set a profile photo.",
+          [{ text: "Continue", onPress: () => resolve() }]
+        )
+      );
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setNotice("Photo permission denied.");
+        return;
+      }
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsEditing: true,
@@ -290,7 +326,7 @@ export default function AccountScreen() {
         if (err.status === 404) {
           setLinkError("No MLB The Show account found for that username.");
         } else if (err.status === 409) {
-          setLinkError("That MLB The Show username is already linked.");
+          setLinkError("That MLB The Show username is already linked. If this is your account, please contact support@goldenbearlabs.com.");
         } else {
           setLinkError(err.body || "Failed to link account");
         }
@@ -309,15 +345,19 @@ export default function AccountScreen() {
     setNotice(null);
     setModalError(null);
     try {
-      const updates: Record<string, string> = {};
+      const updates: Record<string, any> = {};
       const nextName = editName.trim();
       const nextEmail = editEmail.trim();
+      const nextDescription = editDescription.trim();
 
       if (nextName && nextName !== profile.display_name) {
         updates.display_name = nextName;
       }
       if (nextEmail && nextEmail !== (profile.email ?? "")) {
         updates.email = nextEmail;
+      }
+      if (nextDescription !== (profile.description ?? "")) {
+        updates.description = nextDescription === "" ? null : nextDescription;
       }
 
       let profileImgPath = profile.profile_img_path;
@@ -401,6 +441,32 @@ export default function AccountScreen() {
     );
   };
 
+  const confirmLogOut = () => {
+    Alert.alert(
+      "Log out",
+      "Are you sure you want to log out? You will need your password to sign back in.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Log out",
+          style: "destructive", 
+          onPress: async () => {
+            setSigningOut(true);
+            try {
+              await signOut(auth);
+              setSettingsOpen(false);
+              router.replace("/(auth)/signin");
+            } catch (err: any) {
+              setModalError(err?.message ?? "Failed to log out");
+            } finally {
+              setSigningOut(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const manageMembership = async () => {
     setManagingMembership(true);
     setMembershipError(null);
@@ -438,7 +504,25 @@ export default function AccountScreen() {
     <SafeAreaView style={styles.safeArea} edges={["left", "right"]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
-          <Text style={styles.title}>Account</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, paddingRight: 16 }}>
+            {userId ? (
+              <TouchableOpacity 
+                onPress={() => router.back()} 
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+            ) : null}
+            <Text 
+              style={[styles.title, { flexShrink: 1 }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.65}
+            >
+              {profile && !profile.is_me ? `${profile.display_name}'s Account` : "Account"}
+            </Text>
+          </View>
+
           {profile?.is_me ? (
             <TouchableOpacity style={styles.settingsButton} onPress={openSettings}>
               <Ionicons name="settings-outline" size={20} color={theme.colors.text} />
@@ -464,7 +548,21 @@ export default function AccountScreen() {
                 />
               </View>
               <View style={styles.profileInfo}>
-                <Text style={styles.nameLarge}>{profile.display_name}</Text>
+                <View>
+                  <Text 
+                    style={styles.nameLarge}
+                    numberOfLines={1}                
+                    adjustsFontSizeToFit={true}      
+                    minimumFontScale={0.7}           
+                  >
+                    {profile.display_name}
+                  </Text>
+                  {profile.description ? (
+                    <Text style={{ marginTop: 4, color: theme.colors.muted, fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
+                      {profile.description}
+                    </Text>
+                  ) : null}
+                </View>
                 <View style={styles.summaryRow}>
                   <View style={styles.summaryItem}>
                     <Text style={[styles.summaryValue, styles.summaryValueAccent]}>
@@ -723,111 +821,164 @@ export default function AccountScreen() {
       </ScrollView>
 
       <Modal transparent visible={settingsOpen} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setSettingsOpen(false)} />
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Account</Text>
-              <TouchableOpacity onPress={() => setSettingsOpen(false)}>
-                <Ionicons name="close" size={22} color={theme.colors.text} />
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          {/* Dismiss keyboard AND close modal if they click the dark background */}
+          <Pressable 
+            style={styles.modalBackdrop} 
+            onPress={() => { Keyboard.dismiss(); setSettingsOpen(false); }} 
+          />
+          
+          {/* Dismiss keyboard if they click empty space inside the card */}
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Account</Text>
+                <TouchableOpacity onPress={() => { Keyboard.dismiss(); setSettingsOpen(false); }}>
+                  <Ionicons name="close" size={22} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.photoButton} onPress={pickProfilePhoto}>
+                <Ionicons name="image-outline" size={18} color={theme.colors.text} />
+                <Text style={styles.photoButtonText}>
+                  {newPhotoUri ? "Change selected photo" : "Change profile photo"}
+                </Text>
               </TouchableOpacity>
-            </View>
 
-            <TouchableOpacity style={styles.photoButton} onPress={pickProfilePhoto}>
-              <Ionicons name="image-outline" size={18} color={theme.colors.text} />
-              <Text style={styles.photoButtonText}>
-                {newPhotoUri ? "Change selected photo" : "Change profile photo"}
-              </Text>
-            </TouchableOpacity>
+              {newPhotoUri ? (
+                <Image source={{ uri: newPhotoUri }} style={styles.photoPreview} />
+              ) : null}
 
-            {newPhotoUri ? (
-              <Image source={{ uri: newPhotoUri }} style={styles.photoPreview} />
-            ) : null}
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Display name</Text>
+              <View style={styles.fieldGroup}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                <Text style={styles.label}>Display name</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
+                  {editName.length} / 20
+                </Text>
+              </View>
               <TextInput
                 value={editName}
                 onChangeText={setEditName}
                 placeholder="Display name"
                 placeholderTextColor={theme.colors.muted}
+                maxLength={20} 
                 style={styles.input}
               />
             </View>
 
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Email</Text>
-              <TextInput
-                value={editEmail}
-                onChangeText={setEditEmail}
-                placeholder="Email address"
-                placeholderTextColor={theme.colors.muted}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                style={styles.input}
-              />
-            </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  placeholder="Email address"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  style={styles.input}
+                />
+              </View>
 
-            {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
-            {modalError ? <Text style={styles.errorText}>{modalError}</Text> : null}
+              <View style={styles.fieldGroup}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                  <Text style={styles.label}>Bio</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
+                    {editDescription.length} / 70
+                  </Text>
+                </View>
+                <TextInput
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  placeholder="Tell us about yourself..."
+                  placeholderTextColor={theme.colors.muted}
+                  multiline
+                  maxLength={70}
+                  style={[styles.input, { minHeight: 80, textAlignVertical: "top" }]}
+                />
+              </View>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.resetButton} onPress={resetPassword} disabled={saving || deletingAccount}>
-                <Text style={styles.resetText}>Reset password</Text>
+              {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
+              {modalError ? <Text style={styles.errorText}>{modalError}</Text> : null}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.resetButton} onPress={resetPassword} disabled={saving || deletingAccount}>
+                  <Text style={styles.resetText}>Reset password</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={saving || deletingAccount}>
+                  <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.logoutButton, signingOut && styles.buttonDisabled]}
+                onPress={confirmLogOut}
+                disabled={saving || deletingAccount || signingOut}
+              >
+                <Text style={styles.logoutText}>
+                  {signingOut ? "Logging out..." : "Log out"}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={saving || deletingAccount}>
-                <Text style={styles.saveText}>{saving ? "Saving..." : "Save changes"}</Text>
+
+              <TouchableOpacity
+                style={[styles.deleteAccountButton, deletingAccount && styles.deleteAccountButtonDisabled]}
+                onPress={confirmDeleteAccount}
+                disabled={saving || deletingAccount}
+              >
+                <Text style={styles.deleteAccountText}>
+                  {deletingAccount ? "Deleting account..." : "Delete account"}
+                </Text>
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={[styles.deleteAccountButton, deletingAccount && styles.deleteAccountButtonDisabled]}
-              onPress={confirmDeleteAccount}
-              disabled={saving || deletingAccount}
-            >
-              <Text style={styles.deleteAccountText}>
-                {deletingAccount ? "Deleting account..." : "Delete account"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal transparent visible={linkOpen} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setLinkOpen(false)} />
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Link MLB The Show</Text>
-              <TouchableOpacity onPress={() => setLinkOpen(false)}>
-                <Ionicons name="close" size={22} color={theme.colors.text} />
-              </TouchableOpacity>
-            </View>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <Pressable 
+            style={styles.modalBackdrop} 
+            onPress={() => { Keyboard.dismiss(); setLinkOpen(false); }} 
+          />
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Link MLB The Show Account</Text>
+                <TouchableOpacity onPress={() => { Keyboard.dismiss(); setLinkOpen(false); }}>
+                  <Ionicons name="close" size={22} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Username</Text>
-              <TextInput
-                value={linkUsername}
-                onChangeText={setLinkUsername}
-                placeholder="MLB The Show username"
-                placeholderTextColor={theme.colors.muted}
-                autoCapitalize="none"
-                style={styles.input}
-              />
-            </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Username</Text>
+                <TextInput
+                  value={linkUsername}
+                  onChangeText={setLinkUsername}
+                  placeholder="MLB The Show username"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  style={styles.input}
+                />
+              </View>
 
-            {linkError ? <Text style={styles.errorText}>{linkError}</Text> : null}
+              {linkError ? <Text style={styles.errorText}>{linkError}</Text> : null}
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.resetButton} onPress={() => setLinkOpen(false)}>
-                <Text style={styles.resetText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={linkShowProfile} disabled={linking}>
-                <Text style={styles.saveText}>{linking ? "Linking..." : "Link account"}</Text>
-              </TouchableOpacity>
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.resetButton} onPress={() => { Keyboard.dismiss(); setLinkOpen(false); }}>
+                  <Text style={styles.resetText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.saveButton} onPress={linkShowProfile} disabled={linking}>
+                  <Text style={styles.saveText}>{linking ? "Linking..." : "Link account"}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1216,6 +1367,21 @@ const styles = StyleSheet.create({
   },
   saveText: {
     color: "white",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  logoutButton: {
+    borderRadius: 12,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    marginTop: 12,
+    marginBottom: -4, 
+  },
+  logoutText: {
+    color: theme.colors.text,
     fontSize: 13,
     fontWeight: "700",
   },
