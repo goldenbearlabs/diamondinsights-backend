@@ -75,15 +75,27 @@ export default function PredictionLeaderboardScreen() {
   }, [fetchLeaderboard]);
 
   const rankColor = (rank: number) => {
-    if (rank === 1) return "#fbbf24"; // gold
-    if (rank === 2) return "#cbd5e1"; // silver
-    if (rank === 3) return "#d97706"; // bronze
+    if (rank === 1) return "#fbbf24"; 
+    if (rank === 2) return "#cbd5e1"; 
+    if (rank === 3) return "#d97706"; 
     return theme.colors.muted;
   };
 
   const renderRow = (entry: LeaderboardEntry) => {
     const isTop3 = entry.rank <= 3;
-    const isMe = entry.rank === myRank;
+    const isMe = entry.rank === myRank; 
+
+    // --- NEW: Profile Navigation Handler ---
+    const handleProfilePress = () => {
+      if (entry.user_id) {
+        router.push({
+          pathname: "/(app)/account",
+          params: { userId: entry.user_id }
+        });
+      }
+    };
+    // ---------------------------------------
+
     return (
       <View
         key={entry.user_id}
@@ -96,24 +108,27 @@ export default function PredictionLeaderboardScreen() {
           </Text>
         </View>
 
-        {/* Avatar */}
-        <Avatar
-          firebasePath={entry.profile_img_path}
-          size={36}
-        />
+        {/* --- WRAPPED AVATAR --- */}
+        <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+          <Avatar
+            firebasePath={entry.profile_img_path}
+            size={36}
+          />
+        </TouchableOpacity>
 
         {/* Name + predictions count */}
         <View style={styles.infoCol}>
-          <Text style={styles.displayName} numberOfLines={1}>
-            {entry.display_name}
-          </Text>
+          {/* --- WRAPPED USERNAME --- */}
+          <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+            <Text style={styles.displayName} numberOfLines={1}>
+              {entry.display_name}
+            </Text>
+          </TouchableOpacity>
           
-
           {isMe ? (
-            // --- CLICKABLE LINK FOR CURRENT USER ---
             <TouchableOpacity 
               style={styles.myPredsButton} 
-              onPress={() => router.push('/(app)/my-predictions')}
+              onPress={() => router.push('/my-predictions')}
               activeOpacity={0.7}
             >
               <Text style={styles.myPredsText}>
@@ -122,7 +137,6 @@ export default function PredictionLeaderboardScreen() {
               <Ionicons name="open-outline" size={12} color="#3b82f6" />
             </TouchableOpacity>
           ) : (
-            // --- PLAIN TEXT FOR EVERYONE ELSE ---
             <Text style={styles.predCountText}>
               {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
             </Text>

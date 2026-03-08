@@ -66,7 +66,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 class SignUpBody(BaseModel):
-    display_name: str = Field(min_length=1, max_length=80)
+    display_name: str = Field(min_length=1, max_length=20)
     profile_img_path: Optional[str] = None
 
 
@@ -76,6 +76,7 @@ class UserProfileOut(BaseModel):
     email: Optional[str] = None
     display_name: str
     profile_img_path: str
+    description: Optional[str] = None
     latest_points_total: Optional[float] = None
     is_me: bool
 
@@ -87,6 +88,7 @@ class UserProfileOut(BaseModel):
             email=u.email if is_me else None,
             display_name=u.display_name,
             profile_img_path=u.profile_img_url,
+            description=u.description,
             latest_points_total=latest_points_total,
             is_me=is_me,
         )
@@ -114,10 +116,10 @@ def _user_profile_out(db: Session, user: Users, *, is_me: bool) -> UserProfileOu
 
 
 class UpdateUserBody(BaseModel):
-    display_name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=20)
     email: Optional[EmailStr] = None
     profile_img_path: Optional[str] = None
-
+    description: Optional[str] = Field(default=None, max_length=70)
 
 @router.post("/signup", response_model=UserProfileOut)
 def signup(
@@ -182,7 +184,7 @@ class DisplayNameAvailabilityOut(BaseModel):
 
 @router.get("/display-name-available", response_model=DisplayNameAvailabilityOut)
 def is_display_name_available(
-    display_name: str = Query(min_length=1, max_length=80),
+    display_name: str = Query(min_length=1, max_length=20),
     db: Session = Depends(get_db),
 ) -> DisplayNameAvailabilityOut:
     normalized = _normalize_search(display_name)
@@ -269,10 +271,12 @@ def update_me(
     current_display_name = user.display_name
     current_email = user.email
     current_profile_img = user.profile_img_url
+    
 
     next_display_name = body.display_name if body.display_name is not None else current_display_name
     next_email = body.email if body.email is not None else current_email
     next_profile_img = body.profile_img_path if body.profile_img_path is not None else current_profile_img
+    
 
     if next_display_name != current_display_name:
         _ensure_display_name_unique(db, next_display_name, current_user_id=user.id)
@@ -303,6 +307,10 @@ def update_me(
     user.search_display_name = _normalize_search(next_display_name)
     user.email = next_email
     user.profile_img_url = next_profile_img
+    update_data = body.model_dump(exclude_unset=True) if hasattr(body, 'model_dump') else body.dict(exclude_unset=True)
+    
+    if "description" in update_data:
+        user.description = update_data["description"]
 
     try:
         db.commit()
