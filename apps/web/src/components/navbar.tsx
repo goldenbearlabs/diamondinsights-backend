@@ -70,10 +70,12 @@ export default function Navbar() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [openDesktopGroup, setOpenDesktopGroup] = useState<string | null>(null);
   const [desktopSearch, setDesktopSearch] = useState("");
   const [mobileSearch, setMobileSearch] = useState("");
   const [accountHref, setAccountHref] = useState("/signin");
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+  const isSignedIn = accountHref === "/account";
 
   const activeGroups = useMemo(
     () => new Set(NAV_GROUPS.filter((group) => isGroupActive(pathname, group)).map((group) => group.label)),
@@ -206,7 +208,6 @@ export default function Navbar() {
             placeholder="Search users or cards"
             aria-label="Search"
           />
-          <button type="submit">Go</button>
         </form>
 
         {NAV_GROUPS.map((group) => (
@@ -248,15 +249,35 @@ export default function Navbar() {
           </button>
 
           <Link href="/" className={styles.brand} onClick={() => setMobileMenuOpen(false)}>
-            <span className={styles.brandBadge}>DI</span>
-            <span className={styles.brandText}>Diamond Insights</span>
+            <Image src="/images/logo.png" alt="DiamondInsights" width={44} height={44} className={styles.brandLogo} priority />
+            <span className={styles.brandText}>
+              <span>Diamond</span>
+              <span className={styles.brandTextInsights}>Insights</span>
+            </span>
           </Link>
         </div>
 
-        <div className={styles.desktopGroups}>
+        <div className={styles.desktopGroups} onMouseLeave={() => setOpenDesktopGroup(null)}>
           {NAV_GROUPS.map((group) => (
-            <div key={group.label} className={styles.group}>
-              <button type="button" className={styles.groupButton}>
+            <div
+              key={group.label}
+              className={styles.group}
+              onMouseEnter={() => setOpenDesktopGroup(group.label)}
+              onFocus={() => setOpenDesktopGroup(group.label)}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setOpenDesktopGroup(null);
+                }
+              }}
+            >
+              <button
+                type="button"
+                className={styles.groupButton}
+                aria-haspopup="menu"
+                aria-expanded={openDesktopGroup === group.label}
+                aria-controls={`desktop-dropdown-${group.label.toLowerCase()}`}
+                onClick={() => setOpenDesktopGroup((prev) => (prev === group.label ? null : group.label))}
+              >
                 <span className={activeGroups.has(group.label) ? styles.groupButtonActive : ""}>
                   {group.label}
                 </span>
@@ -265,13 +286,21 @@ export default function Navbar() {
                 </span>
               </button>
 
-              <div className={styles.dropdown}>
+              <div
+                id={`desktop-dropdown-${group.label.toLowerCase()}`}
+                className={`${styles.dropdown} ${openDesktopGroup === group.label ? styles.dropdownOpen : ""}`}
+                role="menu"
+              >
                 {group.items.map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}
-                    onClick={() => setMobileMenuOpen(false)}
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      setOpenDesktopGroup(null);
+                    }}
                     className={`${styles.dropdownLink} ${isItemActive(pathname, item.href) ? styles.dropdownLinkActive : ""}`}
+                    role="menuitem"
                   >
                     {item.label}
                   </Link>
@@ -289,25 +318,30 @@ export default function Navbar() {
             placeholder="Search users or cards"
             aria-label="Search"
           />
-          <button type="submit">Search</button>
         </form>
 
         <div className={styles.right}>
-          <Link
-            href={accountHref}
-            className={styles.accountButton}
-            aria-label="Open account"
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <Image
-              src={avatarSrc || "/images/default_profile.png"}
-              alt={avatarSrc ? "Profile" : "Default profile"}
-              width={30}
-              height={30}
-              className={styles.accountAvatar}
-              unoptimized={Boolean(avatarSrc)}
-            />
-          </Link>
+          {isSignedIn ? (
+            <Link
+              href={accountHref}
+              className={styles.accountButton}
+              aria-label="Open account"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              <Image
+                src={avatarSrc || "/images/default_profile.png"}
+                alt={avatarSrc ? "Profile" : "Default profile"}
+                width={30}
+                height={30}
+                className={styles.accountAvatar}
+                unoptimized={Boolean(avatarSrc)}
+              />
+            </Link>
+          ) : (
+            <Link href="/signin" className={styles.signInButton} onClick={() => setMobileMenuOpen(false)}>
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
       {mounted ? createPortal(mobileLayer, document.body) : null}

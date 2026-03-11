@@ -1,0 +1,804 @@
+.page {
+  min-height: 100vh;
+  position: relative;
+  background: radial-gradient(1200px 800px at 15% -10%, rgba(59, 130, 246, 0.22), transparent 60%),
+    radial-gradient(900px 680px at 85% 0%, rgba(99, 102, 241, 0.16), transparent 58%), var(--color-background);
+}
+
+.texture {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 0);
+  background-size: 22px 22px;
+  opacity: 0.3;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  width: min(1240px, calc(100% - 30px));
+  margin: 24px auto 80px;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.header {
+  margin-bottom: 14px;
+}
+
+.header h1 {
+  font-size: clamp(1.8rem, 2.2vw, 2.15rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.header p {
+  margin-top: 8px;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+}
+
+.toolbarRow {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.searchInputContainer {
+  width: min(220px, 100%);
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+}
+
+.searchInputContainer input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.searchInputContainer input::placeholder {
+  color: var(--color-muted);
+}
+
+.filterControl {
+  display: grid;
+  gap: 4px;
+  position: relative;
+}
+
+.filterControl span {
+  font-size: 0.68rem;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.filterTitleWithTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #f8fafc;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.proTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.48);
+  background: rgba(251, 191, 36, 0.12);
+  color: #facc15;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  text-transform: none;
+}
+
+.filterControl .proTag {
+  color: #facc15;
+  text-transform: none;
+}
+
+.proTag svg {
+  color: #facc15;
+}
+
+.filterControl select {
+  min-width: 150px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  padding: 0 10px;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.filterDropdownTrigger {
+  min-width: 150px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  padding: 0 11px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.filterDropdownValue {
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.filterControl .filterDropdownValue {
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.filterDropdownMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  min-width: 170px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.55);
+  padding: 8px;
+  z-index: 10;
+}
+
+.filterDropdownList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.filterDropdownOption {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #e2e8f0;
+  padding: 8px 9px;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.filterDropdownOption:hover {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.filterDropdownOptionActive {
+  border-color: rgba(59, 130, 246, 0.7);
+  background: rgba(59, 130, 246, 0.22);
+  color: #dbeafe;
+}
+
+.lockedRarityTrigger {
+  min-width: 170px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  padding: 0 11px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.lockedRarityValue {
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.filterControl .lockedRarityValue {
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.lockIcon {
+  display: inline-flex;
+  align-items: center;
+  color: #fcd34d;
+}
+
+.chevronIcon {
+  display: inline-flex;
+  align-items: center;
+  color: #e2e8f0;
+}
+
+.lockedRarityMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 260px;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.38);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.55);
+  padding: 10px;
+  z-index: 10;
+}
+
+.lockedUpgradeText {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.lockedRarityList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.lockedRarityItem {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(226, 232, 240, 0.85);
+  padding: 8px 9px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.freeRarityItem {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 9px;
+}
+
+.freeRarityLabel {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.freeRarityLabel input {
+  accent-color: #3b82f6;
+}
+
+.upgradeLink {
+  margin-top: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  border-radius: 9px;
+  border: 1px solid rgba(251, 191, 36, 0.7);
+  background: rgba(251, 191, 36, 0.9);
+  color: #1f2937;
+  font-size: 0.79rem;
+  font-weight: 800;
+  padding: 8px 10px;
+}
+
+.quickFilterChip {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-muted);
+  border-radius: 10px;
+  padding: 9px 12px;
+  height: 40px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.quickFilterChipActive {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.predictionsToggle {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  border-radius: 10px;
+  padding: 9px 12px;
+  height: 40px;
+  min-width: 196px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.predictionsToggleLabel {
+  color: #f8fafc;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.predictionsToggleTrack {
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: rgba(148, 163, 184, 0.2);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.predictionsToggleThumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #f8fafc;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.18s ease;
+}
+
+.predictionsToggleActive {
+  border-color: rgba(59, 130, 246, 0.7);
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.predictionsToggleActive .predictionsToggleTrack {
+  border-color: rgba(59, 130, 246, 0.85);
+  background: rgba(59, 130, 246, 0.65);
+}
+
+.predictionsToggleActive .predictionsToggleThumb {
+  transform: translateX(17px);
+}
+
+.quickLink {
+  font-size: 0.82rem;
+  color: #93c5fd;
+  align-self: center;
+}
+
+.errorMessage {
+  color: #fca5a5;
+  margin: 8px 0 14px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.loadingState {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  margin: 64px 0;
+  color: var(--color-muted);
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 3px solid rgba(148, 163, 184, 0.25);
+  border-top-color: var(--color-gold);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.emptyState {
+  margin-top: 34px;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.clearFiltersButton {
+  border: 1px solid var(--color-primary);
+  background: rgba(59, 130, 246, 0.23);
+  color: #fff;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.resultsScroll {
+  max-height: min(58vh, 640px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.resultsScroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.resultsScroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.45);
+  border-radius: 999px;
+}
+
+.resultsScroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+}
+
+.cardList {
+  display: grid;
+  gap: 12px;
+}
+
+.cardRowLink {
+  display: block;
+}
+
+.cardRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(2, 6, 23, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.cardImageWrap {
+  width: 56px;
+  min-width: 56px;
+  height: 78px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cardImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.cardImageFallback {
+  color: var(--color-muted);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cardInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardInfo h2 {
+  font-size: 1.02rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.teamRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.teamName {
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.verticalDivider {
+  width: 1px;
+  height: 12px;
+  background: rgba(148, 163, 184, 0.34);
+}
+
+.statPill {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.marketStat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.marketLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stubIcon {
+  width: 11px;
+  height: 11px;
+  object-fit: contain;
+}
+
+.quicksellStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+}
+
+.quicksellStatusIcon {
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.quicksellStatusGood {
+  color: #4ade80;
+}
+
+.quicksellStatusBad {
+  color: #f87171;
+}
+
+.userPrediction {
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ratingRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ratingBadge {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 9px;
+  line-height: 1;
+  min-width: 48px;
+  text-align: center;
+}
+
+.badgeLabel {
+  display: block;
+  font-size: 0.58rem;
+  color: var(--color-muted);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  margin-bottom: 3px;
+}
+
+.ratingBadge strong {
+  font-size: 0.97rem;
+}
+
+.predBadge.up,
+.commBadge.up,
+.arrow.up {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.5);
+}
+
+.predBadge.down,
+.commBadge.down,
+.arrow.down {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.48);
+}
+
+.predBadge.neutral,
+.commBadge.neutral,
+.arrow.neutral {
+  color: var(--color-muted);
+}
+
+.yourBadge {
+  border-color: rgba(59, 130, 246, 0.55);
+  color: #93c5fd;
+}
+
+.yourBadge.noPrediction {
+  color: var(--color-muted);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.arrow {
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.footer {
+  margin-top: 22px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.footerRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.inlineLimitControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.inlineLimitSelect {
+  height: 30px;
+  min-width: 62px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  padding: 0 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.navRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.navButton {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.navButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pageNumber {
+  min-width: 72px;
+  text-align: center;
+  font-weight: 800;
+}
+
+@media (max-width: 960px) {
+  .content {
+    width: calc(100% - 16px);
+    padding: 14px;
+    margin-top: 14px;
+  }
+
+  .toolbarRow {
+    align-items: stretch;
+  }
+
+  .searchInputContainer {
+    width: 100%;
+  }
+
+  .filterControl {
+    width: 100%;
+  }
+
+  .lockedRarityTrigger,
+  .lockedRarityMenu,
+  .filterDropdownTrigger,
+  .filterDropdownMenu {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .filterControl select {
+    width: 100%;
+  }
+
+  .quickFilterChip,
+  .predictionsToggle {
+    width: 100%;
+  }
+
+  .resultsScroll {
+    max-height: 64vh;
+  }
+
+  .footerRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .footerLimitControl {
+    align-self: stretch;
+  }
+
+  .inlineLimitControl {
+    width: fit-content;
+  }
+
+  .navRow {
+    justify-content: center;
+  }
+}

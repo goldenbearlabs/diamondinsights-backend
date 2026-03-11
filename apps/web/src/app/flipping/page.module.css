@@ -1,0 +1,415 @@
+.page {
+  min-height: 100vh;
+  position: relative;
+  background: radial-gradient(1200px 800px at 15% -10%, rgba(59, 130, 246, 0.22), transparent 60%),
+    radial-gradient(900px 680px at 85% 0%, rgba(99, 102, 241, 0.16), transparent 58%), var(--color-background);
+}
+
+.texture {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 0);
+  background-size: 22px 22px;
+  opacity: 0.3;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  width: min(1280px, calc(100% - 30px));
+  margin: 24px auto 80px;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.header h1 {
+  font-size: clamp(1.8rem, 2.2vw, 2.15rem);
+  line-height: 1.1;
+}
+
+.header p {
+  margin-top: 8px;
+  color: var(--color-muted);
+  font-size: 0.92rem;
+}
+
+.filtersCard {
+  margin-top: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.filtersTopRow {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.searchInputWrap {
+  display: grid;
+  gap: 4px;
+}
+
+.searchInputWrap span {
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.searchInputWrap input {
+  width: min(320px, 90vw);
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  padding: 0 10px;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.searchInputWrap input::placeholder {
+  color: #94a3b8;
+}
+
+.profitableToggle,
+.applyButton,
+.clearButton {
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.85);
+  color: #dbeafe;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.profitableToggleOn {
+  border-color: rgba(34, 197, 94, 0.75);
+  background: rgba(21, 128, 61, 0.25);
+  color: #dcfce7;
+}
+
+.applyButton {
+  border-color: rgba(59, 130, 246, 0.75);
+  background: rgba(37, 99, 235, 0.28);
+}
+
+.clearButton {
+  border-color: rgba(248, 113, 113, 0.52);
+  background: rgba(153, 27, 27, 0.2);
+  color: #fecaca;
+}
+
+.rangeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rangeGroup {
+  display: grid;
+  gap: 5px;
+}
+
+.rangeGroup span {
+  color: #94a3b8;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rangeInputs {
+  display: flex;
+  gap: 8px;
+}
+
+.rangeInputs input {
+  width: 100%;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  padding: 0 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.filterSummary {
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.errorCard {
+  margin-top: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 10px 12px;
+}
+
+.tableCard {
+  margin-top: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.62);
+  position: relative;
+  overflow: hidden;
+}
+
+.tableScroll {
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(30, 41, 59, 0.95);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 0;
+}
+
+.table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  padding: 7px 6px;
+  vertical-align: middle;
+}
+
+.evenRow {
+  background: rgba(15, 23, 42, 0.44);
+}
+
+.oddRow {
+  background: rgba(15, 23, 42, 0.2);
+}
+
+.sortHeader {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 6px;
+  cursor: pointer;
+}
+
+.sortHeaderActive {
+  background: rgba(59, 130, 246, 0.16);
+  color: #dbeafe;
+}
+
+.activeColumn {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.imageCol {
+  width: 52px;
+  min-width: 52px;
+  text-align: center;
+}
+
+.cardCol {
+  width: 240px;
+  min-width: 240px;
+}
+
+.ovrCol {
+  width: 62px;
+  min-width: 62px;
+}
+
+.moneyCol {
+  width: 102px;
+  min-width: 102px;
+}
+
+.marginCol {
+  width: 90px;
+  min-width: 90px;
+}
+
+.buysSellsCol {
+  width: 102px;
+  min-width: 102px;
+}
+
+.centerCell {
+  text-align: center;
+  color: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.imageButton {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.cardImage {
+  width: 38px;
+  height: 50px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.imageFallback {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 50px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.9);
+  color: #94a3b8;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.cardNameLink {
+  color: #f8fafc;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cardNameLink:hover {
+  color: #bfdbfe;
+}
+
+.cardSubline {
+  display: block;
+  margin-top: 2px;
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 0.63rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.positiveText {
+  color: #22c55e;
+}
+
+.negativeText {
+  color: #f87171;
+}
+
+.emptyRow {
+  text-align: center;
+  min-height: 160px;
+  color: #94a3b8;
+  font-size: 0.86rem;
+  font-weight: 600;
+  padding: 28px !important;
+}
+
+.loadingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.28);
+  display: grid;
+  place-items: center;
+  color: #dbeafe;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.tableNote {
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 0.73rem;
+  font-weight: 600;
+}
+
+.pagination {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pageButton {
+  min-width: 86px;
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.22);
+  color: #dbeafe;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pageButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pageText {
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+@media (max-width: 960px) {
+  .content {
+    width: calc(100% - 16px);
+    padding: 14px;
+    margin-top: 14px;
+  }
+
+  .filtersTopRow {
+    align-items: stretch;
+  }
+
+  .searchInputWrap {
+    width: 100%;
+  }
+
+  .searchInputWrap input {
+    width: 100%;
+  }
+
+  .rangeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pagination {
+    justify-content: center;
+  }
+}
