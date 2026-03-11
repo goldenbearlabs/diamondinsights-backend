@@ -257,7 +257,7 @@ export default function GameplayStatsPage() {
       active = false;
       window.removeEventListener(PROFILE_IMAGE_UPDATED_EVENT, onProfileImageUpdated);
     };
-  }, [firebaseUser?.uid]);
+  }, [firebaseUser]);
 
   useEffect(() => {
     if (!authReady || !firebaseUser) {
@@ -319,10 +319,13 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [authReady, firebaseUser?.uid]);
+  }, [authReady, firebaseUser]);
 
   const linkedReady = !baseLoading && !pageError && !notLinked;
-  const pitchTypeMenuOptions = strikeoutMap?.pitch_type_options ?? [];
+  const pitchTypeMenuOptions = useMemo(
+    () => strikeoutMap?.pitch_type_options ?? [],
+    [strikeoutMap?.pitch_type_options]
+  );
   const hasAdvancedFilters =
     filterPitchTypes.length > 0 ||
     advancedMinSpeed !== "" ||
@@ -374,7 +377,7 @@ export default function GameplayStatsPage() {
       return;
     }
     setFilterPitchTypes((prev) => prev.filter((item) => pitchTypeMenuOptions.includes(item)));
-  }, [pitchTypeMenuOptions.join("|")]);
+  }, [pitchTypeMenuOptions]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -532,7 +535,7 @@ export default function GameplayStatsPage() {
     strikeoutMode,
     filterHitterSide,
     filterPitcherHand,
-    filterPitchTypes.join("|"),
+    filterPitchTypes,
     advancedMinSpeed,
     advancedMaxSpeed,
     advancedTiming,
@@ -663,7 +666,7 @@ export default function GameplayStatsPage() {
     };
   }, [
     linkedReady,
-    sprayChartSelections.join("|"),
+    sprayChartSelections,
     sprayChartMode,
     sprayChartStat,
     filterHitterSide,

@@ -1,6 +1,6 @@
 // apps/mobile/src/components/chat/ChatInput.tsx
-import { useState, useEffect } from "react";
-import { StyleSheet, TextInput, TouchableOpacity, View, Text, Keyboard } from "react-native";
+import { useState } from "react";
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { theme } from "../../theme/colors";
 import { ChatMessage } from "../../types/chat";

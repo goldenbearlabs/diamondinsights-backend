@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -8,7 +9,6 @@ import {
 } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -778,6 +778,11 @@ export default function GameplayStatsScreen() {
   const [battingArchetype, setBattingArchetype] = useState<BattingArchetype | null>(null);
   const [pitchingArchetype, setPitchingArchetype] = useState<PitchingArchetype | null>(null);
   const [strikeoutMap, setStrikeoutMap] = useState<StrikeoutMapData | null>(null);
+  const strikeoutPitchTypeOptions = useMemo(
+    () => strikeoutMap?.pitch_type_options ?? [],
+    [strikeoutMap?.pitch_type_options]
+  );
+  const strikeoutPitchTypeOptionsKey = strikeoutPitchTypeOptions.join("|");
   const [pitchTypeRanks, setPitchTypeRanks] = useState<PitchTypeRank[]>([]);
   const [pitchTypeRanksLoading, setPitchTypeRanksLoading] = useState(false);
   const [pitchTypeRanksError, setPitchTypeRanksError] = useState<string | null>(null);
@@ -824,6 +829,10 @@ export default function GameplayStatsScreen() {
     hand: "all",
   });
   const [filterPitchTypes, setFilterPitchTypes] = useState<PitchType[]>([]);
+  const filterPitchTypesParam = useMemo(
+    () => filterPitchTypes.map((pt) => pt.toLowerCase()).join(","),
+    [filterPitchTypes]
+  );
   const [activeFilterMenu, setActiveFilterMenu] = useState<null | "hitter" | "pitcher">(null);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [statHelpOpen, setStatHelpOpen] = useState(false);
@@ -989,13 +998,41 @@ export default function GameplayStatsScreen() {
   ]);
 
   useEffect(() => {
-    const options = strikeoutMap?.pitch_type_options ?? [];
-    if (options.length === 0) {
+    if (strikeoutPitchTypeOptions.length === 0) {
       setFilterPitchTypes([]);
       return;
     }
-    setFilterPitchTypes((prev) => prev.filter((item) => options.includes(item)));
-  }, [strikeoutMap?.pitch_type_options?.join("|")]);
+    setFilterPitchTypes((prev) =>
+      prev.filter((item) => strikeoutPitchTypeOptions.includes(item))
+    );
+  }, [strikeoutPitchTypeOptions, strikeoutPitchTypeOptionsKey]);
+
+  const resolveSearchImages = useCallback(async (users: ShowUserSearchResult[]) => {
+    const entries = await Promise.all(
+      users.map(async (user) => {
+        if (!user.profile_img_url) return null;
+        try {
+          const url = await resolveAvatarUrl(user.profile_img_url ?? "");
+          const key = getSearchKey(user);
+          return key && url ? ([key, url] as const) : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    if (!entries.length) return;
+    setSearchImages((prev) => {
+      const next = { ...prev };
+      entries.forEach((entry) => {
+        if (!entry) return;
+        if (!next[entry[0]]) {
+          next[entry[0]] = entry[1];
+        }
+      });
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!searchOpen) {
@@ -1036,7 +1073,7 @@ export default function GameplayStatsScreen() {
     }, 250);
 
     return () => clearTimeout(handle);
-  }, [searchOpen, searchQuery]);
+  }, [resolveSearchImages, searchOpen, searchQuery]);
 
   useEffect(() => {
     if (activeFilterMenu !== "pitcher") {
@@ -1228,37 +1265,6 @@ export default function GameplayStatsScreen() {
 
     return () => clearTimeout(handle);
   }, [hitHitterSearchQuery, viewUserId, viewUsername, isSelfView]);
-
-  const resolveSearchImages = async (users: ShowUserSearchResult[]) => {
-    const pending = users.filter((user) => {
-      if (!user.profile_img_url) return false;
-      const key = getSearchKey(user);
-      return !!key && !searchImages[key];
-    });
-    if (!pending.length) return;
-
-    const entries = await Promise.all(
-      pending.map(async (user) => {
-        try {
-          const url = await resolveAvatarUrl(user.profile_img_url ?? "");
-          const key = getSearchKey(user);
-          return key && url ? ([key, url] as const) : null;
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    if (!entries.length) return;
-    setSearchImages((prev) => {
-      const next = { ...prev };
-      entries.forEach((entry) => {
-        if (!entry) return;
-        next[entry[0]] = entry[1];
-      });
-      return next;
-    });
-  };
 
   useEffect(() => {
     let active = true;
@@ -1585,11 +1591,8 @@ export default function GameplayStatsScreen() {
         if (selectedHitter?.mlb_id) {
           params.set("hitter_mlb_id", String(selectedHitter.mlb_id));
         }
-        if (filterPitchTypes.length > 0) {
-          params.set(
-            "pitch_types",
-            filterPitchTypes.map((pt) => pt.toLowerCase()).join(",")
-          );
+        if (filterPitchTypesParam) {
+          params.set("pitch_types", filterPitchTypesParam);
         }
         params.set("view", strikeoutMode.toLowerCase());
         if (advancedFilters.minSpeed) {
@@ -1610,13 +1613,9 @@ export default function GameplayStatsScreen() {
           : await apiGet<StrikeoutMapData>(path);
         if (!active) return;
         setStrikeoutMap(hasProAccess ? data : maskStrikeoutMapForNonPro(data));
-      } catch (err: any) {
+      } catch {
         if (!active) return;
-        if (err instanceof ApiError && err.status === 404) {
-          setStrikeoutMap(null);
-        } else {
-          setStrikeoutMap(null);
-        }
+        setStrikeoutMap(null);
       }
     };
 
@@ -1631,7 +1630,8 @@ export default function GameplayStatsScreen() {
     isSelfView,
     filterHitterSide.side,
     filterPitcherHand.hand,
-    filterPitchTypes.join(","),
+    filterPitchTypes,
+    filterPitchTypesParam,
     strikeoutMode,
     advancedFilters.minSpeed,
     advancedFilters.maxSpeed,
@@ -1722,7 +1722,7 @@ export default function GameplayStatsScreen() {
               kPct: row.kPct,
             }))
         );
-      } catch (err: any) {
+      } catch {
         if (!active) return;
         setPitchTypeRanks([]);
         setPitchTypeRanksError("Unable to load pitch rankings.");
@@ -1945,7 +1945,7 @@ export default function GameplayStatsScreen() {
     left: 0,
   };
   const strikeoutStats = strikeoutMap?.stats;
-  const pitchTypeOptions = strikeoutMap?.pitch_type_options ?? [];
+  const pitchTypeOptions = strikeoutPitchTypeOptions;
   const strikeoutCountsByZone = strikeoutMap?.counts_by_zone;
   const strikeoutCountsByOutside = strikeoutMap?.counts_by_outside;
   const strikeoutPa = strikeoutMap?.pa ?? 0;
@@ -2433,7 +2433,7 @@ export default function GameplayStatsScreen() {
           </View>
         </TouchableOpacity>
 
-        <View style={styles.cardsRow}>
+        <View style={styles.profileCardsRow}>
           <View style={[styles.card, { width: cardWidth }]}>
             <Text style={styles.cardTitle}>Details</Text>
             <View style={styles.cardBody}>
@@ -2987,12 +2987,6 @@ export default function GameplayStatsScreen() {
                 ) : (
                   searchResults.map((user) => {
                     const key = getSearchKey(user) ?? user.username;
-                    const imageKey = getSearchKey(user);
-                    const image =
-                      (imageKey && searchImages[imageKey]) ||
-                      (user.profile_img_url && user.profile_img_url.startsWith("http")
-                        ? user.profile_img_url
-                        : null);
                     return (
                     <TouchableOpacity
                       key={key}
@@ -3030,11 +3024,6 @@ export default function GameplayStatsScreen() {
 const SUMMARY_LOCKED_VALUE = "__locked__";
 
 type SummaryStatItem = { label: string; value: string };
-
-type SectionPlaceholderProps = {
-  title: string;
-  description: string;
-};
 
 type ProUpsellCardProps = {
   title: string;
@@ -3439,15 +3428,6 @@ const CoachingSection = ({
   );
 };
 
-const SectionPlaceholder = ({ title, description }: SectionPlaceholderProps) => {
-  return (
-    <View style={styles.analyticsSection}>
-      <Text style={styles.cardTitle}>{title}</Text>
-      <Text style={styles.placeholderText}>{description}</Text>
-    </View>
-  );
-};
-
 const ProUpsellCard = ({ title, description, onGoPro }: ProUpsellCardProps) => {
   return (
     <View style={styles.proUpsellCard}>
@@ -3483,8 +3463,8 @@ type CardsTableSectionProps<
   sortKey: string;
   sortDirection: CardSortDirection;
   onSortChange: (key: any) => void;
-  columns: ReadonlyArray<ColumnT>;
-  frozenKeys: ReadonlyArray<string>;
+  columns: readonly ColumnT[];
+  frozenKeys: readonly string[];
   frozenDivider: number;
 };
 
@@ -3606,8 +3586,8 @@ type CardsStatsTableProps<
   sortKey: string;
   sortDirection: CardSortDirection;
   onSortChange: (key: any) => void;
-  frozenColumns: ReadonlyArray<ColumnT>;
-  scrollColumns: ReadonlyArray<ColumnT>;
+  frozenColumns: readonly ColumnT[];
+  scrollColumns: readonly ColumnT[];
   frozenWidth: number;
   scrollWidth: number;
   frozenDivider: number;
@@ -5048,7 +5028,7 @@ function formatSignedDecimal(value?: number | null, digits = 2) {
 
 function sortCardRows<RowT extends { mlb_id: number }>(
   rows: RowT[],
-  columns: Array<{ key: string; sortValue?: (row: RowT) => string | number }>,
+  columns: { key: string; sortValue?: (row: RowT) => string | number }[],
   sortKey: string,
   sortDirection: CardSortDirection,
   nameGetter: (row: RowT) => string
@@ -5166,7 +5146,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     textTransform: "uppercase",
   },
-  cardsRow: {
+  profileCardsRow: {
     flexDirection: "row",
     paddingTop: 14,
     paddingBottom: 8,

@@ -15,7 +15,6 @@ import { FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
 import { apiGet } from "../lib/api";
-import { resolveAvatarUrl } from "../lib/profileImage";
 import { Avatar } from "./Avatar";
 import { theme } from "../theme/colors";
 
@@ -72,7 +71,6 @@ export const SearchResultsPanel = ({
   const [results, setResults] = useState<SearchResponse>({ users: [], cards: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userImages, setUserImages] = useState<Record<number, string>>({});
   const requestRef = useRef(0);
 
   useEffect(() => {
@@ -107,7 +105,6 @@ export const SearchResultsPanel = ({
         const data = await apiGet<SearchResponse>(`/search?${params.toString()}`);
         if (requestRef.current !== requestId) return;
         setResults(data);
-        await resolveUserImages(data.users);
       } catch (err: any) {
         if (requestRef.current !== requestId) return;
         setError(err?.message ?? "Search failed.");
@@ -117,33 +114,7 @@ export const SearchResultsPanel = ({
     }, 250);
 
     return () => clearTimeout(handle);
-  }, [query, mode, visible]);
-
-  const resolveUserImages = async (users: UserResult[]) => {
-    const pending = users.filter((user) => user.profile_img_url && !userImages[user.id]);
-    if (!pending.length) return;
-
-    const entries = await Promise.all(
-      pending.map(async (user) => {
-        try {
-          const url = await resolveAvatarUrl(user.profile_img_url);
-          return url ? ([user.id, url] as const) : null;
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    if (!entries.length) return;
-    setUserImages((prev) => {
-      const next = { ...prev };
-      entries.forEach((entry) => {
-        if (!entry) return;
-        next[entry[0]] = entry[1];
-      });
-      return next;
-    });
-  };
+  }, [mode, query, visible]);
 
   const showUsers = mode !== "cards";
   const showCards = mode !== "users";

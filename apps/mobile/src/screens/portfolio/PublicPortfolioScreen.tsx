@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,14 +7,13 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
+  TouchableOpacity,
 } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { TouchableOpacity } from 'react-native';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
-import { apiGetAuth } from '../../lib/api';
-import { ApiError } from '../../lib/api';
+import { ApiError, apiGetAuth } from '../../lib/api';
 
 const STUB_ICON = require('../../../assets/images/stub.png');
 
@@ -82,12 +81,10 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPortfolio = async () => {
+  const fetchPortfolio = useCallback(async () => {
     try {
       setError(null);
-      const data = await apiGetAuth<PortfolioData>(
-        `/users/${userId}/portfolio`
-      );
+      const data = await apiGetAuth<PortfolioData>(`/users/${userId}/portfolio`);
       setPortfolio(data);
     } catch (err: any) {
       if (err instanceof ApiError && err.status === 403) {
@@ -99,18 +96,18 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
       setLoading(false);
       setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    fetchPortfolio();
   }, [userId]);
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchPortfolio();
-  };
+  useEffect(() => {
+    void fetchPortfolio();
+  }, [fetchPortfolio]);
 
-  const holdings = portfolio?.holdings ?? [];
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void fetchPortfolio();
+  }, [fetchPortfolio]);
+
+  const holdings = useMemo(() => portfolio?.holdings ?? [], [portfolio?.holdings]);
 
   const totals = useMemo(() => {
     let totalInvested = 0;
@@ -252,7 +249,7 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
         </View>
         <View style={styles.loadingContainer}>
           <Ionicons name="lock-closed" size={48} color="rgba(255,255,255,0.15)" />
-          <Text style={styles.emptyTitle}>{username}'s portfolio is private</Text>
+          <Text style={styles.emptyTitle}>{`${username}'s portfolio is private`}</Text>
         </View>
       </View>
     );
@@ -297,7 +294,7 @@ export default function PublicPortfolioScreen({ userId, username }: Props) {
                 <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
               <Text style={styles.headerTitle} numberOfLines={1}>
-                {username}'s Investments
+                {`${username}'s Investments`}
               </Text>
               <View style={{ width: 24 }} />
             </View>

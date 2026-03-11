@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { 
   View, 
@@ -14,9 +14,8 @@ import {
   DeviceEventEmitter
 } from 'react-native';
 import { Image } from 'expo-image';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
 
@@ -72,25 +71,25 @@ export default function PredictionsScreen() {
   const [limit, setLimit] = useState(25); 
   const [hasMore, setHasMore] = useState(true); 
   const [refreshing, setRefreshing] = useState(false);
+  const [debouncedSearchText, setDebouncedSearchText] = useState('');
 
-  const effectiveSelectedRarities = enforceNonProRarity
-    ? [...NON_PRO_ALLOWED_RARITIES]
-    : selectedRarities;
+  const effectiveSelectedRarities = useMemo(
+    () => (enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : selectedRarities),
+    [enforceNonProRarity, selectedRarities]
+  );
 
-  // DEBOUNCE SEARCH (Reset to Page 1)
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      setPage(1); // Reset to page 1 when search changes
-      loadCards(1, limit, searchText);
+      setDebouncedSearchText(searchText);
+      setPage(1);
     }, 500);
     return () => clearTimeout(delayDebounceFn);
   }, [searchText]);
 
  
-  // Reload cards when page, limit, or filters change
   useEffect(() => {
-    loadCards(page, limit, searchText);
-  }, [page, limit, selectedRarities, selectedPlayerType, selectedPopularity, selectedDelta, enforceNonProRarity]);
+    void loadCards(page, limit, debouncedSearchText);
+  }, [debouncedSearchText, limit, loadCards, page]);
 
   useEffect(() => {
     if (!enforceNonProRarity) return;
@@ -120,7 +119,7 @@ export default function PredictionsScreen() {
   }, []);
 
   
-  const loadCards = async (targetPage: number, targetLimit: number, query: string) => {
+  const loadCards = useCallback(async (targetPage: number, targetLimit: number, query: string) => {
     setLoading(true);
     try {
       const offset = (targetPage - 1) * targetLimit;
@@ -168,12 +167,18 @@ export default function PredictionsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [
+    effectiveSelectedRarities,
+    selectedDelta,
+    selectedPlayerType,
+    selectedPopularity,
+    showMyPredictions,
+  ]);
 
   const handleRefresh = () => {
     setRefreshing(true);
     setPage(1);
-    loadCards(1, limit, searchText);
+    void loadCards(1, limit, debouncedSearchText);
   };
 
   const renderItem = ({ item }: { item: CardData }) => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Animated, Dimensions, StyleSheet } from 'react-native';
 import { theme } from '../theme/colors';
 
@@ -80,7 +80,7 @@ const DiamondParticle = ({
     runCycle();
 
     return () => { isMounted = false; };
-  }, [pos.cellIndex]); 
+  }, [onRequestNewPosition, opacity, pos.cellIndex]); 
 
   return (
     <Animated.Image
@@ -101,7 +101,7 @@ const DiamondParticle = ({
 export const FloatingBackground = () => {
   const occupiedCells = useRef<Set<number>>(new Set()).current;
 
-  const getCoordinatesForCell = (index: number) => {
+  const getCoordinatesForCell = useCallback((index: number) => {
     const col = index % COLS;
     const row = Math.floor(index / COLS);
     
@@ -110,9 +110,9 @@ export const FloatingBackground = () => {
       y: (row * CELL_SIZE) + (Math.random() * (CELL_SIZE - ICON_SIZE)),
       cellIndex: index,
     };
-  };
+  }, []);
 
-  const findFreeCell = (excludeIndex: number | null): Position => {
+  const findFreeCell = useCallback((excludeIndex: number | null): Position => {
     if (excludeIndex !== null) occupiedCells.delete(excludeIndex);
 
     const freeSlots = [];
@@ -128,7 +128,9 @@ export const FloatingBackground = () => {
     
     occupiedCells.add(luckyIndex);
     return getCoordinatesForCell(luckyIndex);
-  };
+  }, [getCoordinatesForCell, occupiedCells]);
+
+  const requestNewPosition = useCallback((oldIndex: number) => findFreeCell(oldIndex), [findFreeCell]);
 
   const initialPositions = useMemo(() => {
     const positions: Position[] = [];
@@ -137,7 +139,7 @@ export const FloatingBackground = () => {
       positions.push(pos);
     }
     return positions;
-  }, []);
+  }, [findFreeCell]);
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
@@ -145,7 +147,7 @@ export const FloatingBackground = () => {
         <DiamondParticle 
           key={i} 
           initialPos={startPos}
-          onRequestNewPosition={(oldIndex) => findFreeCell(oldIndex)}
+          onRequestNewPosition={requestNewPosition}
         />
       ))}
       

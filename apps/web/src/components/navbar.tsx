@@ -68,13 +68,13 @@ function isGroupActive(pathname: string, group: NavGroup): boolean {
 export default function Navbar() {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openDesktopGroup, setOpenDesktopGroup] = useState<string | null>(null);
   const [desktopSearch, setDesktopSearch] = useState("");
   const [mobileSearch, setMobileSearch] = useState("");
   const [accountHref, setAccountHref] = useState("/signin");
   const [avatarSrc, setAvatarSrc] = useState<string | null>(null);
+  const mounted = typeof document !== "undefined";
   const isSignedIn = accountHref === "/account";
 
   const activeGroups = useMemo(
@@ -101,10 +101,6 @@ export default function Navbar() {
     onRunSearch(mobileSearch);
     setMobileMenuOpen(false);
   };
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     let runId = 0;
@@ -161,10 +157,7 @@ export default function Navbar() {
       removeProfileImageListener = () => {
         window.removeEventListener(PROFILE_IMAGE_UPDATED_EVENT, onProfileImageUpdated);
       };
-    } catch {
-      setAccountHref("/signin");
-      setAvatarSrc(null);
-    }
+    } catch {}
 
     return () => {
       runId += 1;

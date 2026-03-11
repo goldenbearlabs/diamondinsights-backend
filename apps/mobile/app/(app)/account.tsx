@@ -4,6 +4,7 @@ import {
   Alert,
   DeviceEventEmitter,
   Image,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -32,10 +33,13 @@ import { invalidateAvatarCache } from "../../src/lib/profileImage";
 import { useBackendProStatus } from "../../src/lib/proStatus";
 import { openRevenueCatManageSubscriptions } from "../../src/lib/revenuecat";
 import { uploadProfileImage } from "../../src/lib/storage";
+import { WEB_BASE_URL } from "../../src/lib/config";
 import { Avatar } from "../../src/components/Avatar";
 import { theme } from "../../src/theme/colors";
 
 const STUB_ICON = require("../../assets/images/stub.png");
+const PRIVACY_POLICY_URL = `${WEB_BASE_URL}/privacy-policy`;
+const TERMS_AND_CONDITIONS_URL = `${WEB_BASE_URL}/terms-and-conditions`;
 
 type UserProfile = {
   id: number;
@@ -413,6 +417,14 @@ export default function AccountScreen() {
     }
   };
 
+  const openLegalDocument = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Unable to open link", "Please try again in a moment.");
+    }
+  };
+
   const sortedOnlineStats = [...(showProfile?.online_stats ?? [])].sort((a, b) => a.year - b.year);
   const summaryStats = sortedOnlineStats.length ? sortedOnlineStats[sortedOnlineStats.length - 1] : null;
   const aggregateRecord = sortedOnlineStats.reduce(
@@ -770,6 +782,28 @@ export default function AccountScreen() {
 
             {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
             {modalError ? <Text style={styles.errorText}>{modalError}</Text> : null}
+
+            <View style={styles.legalSection}>
+              <Text style={styles.legalTitle}>Legal</Text>
+              <TouchableOpacity
+                style={styles.legalButton}
+                onPress={() => {
+                  void openLegalDocument(PRIVACY_POLICY_URL);
+                }}
+              >
+                <Text style={styles.legalButtonText}>Privacy Policy</Text>
+                <Ionicons name="open-outline" size={16} color={theme.colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.legalButton}
+                onPress={() => {
+                  void openLegalDocument(TERMS_AND_CONDITIONS_URL);
+                }}
+              >
+                <Text style={styles.legalButtonText}>Terms & Conditions</Text>
+                <Ionicons name="open-outline" size={16} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.resetButton} onPress={resetPassword} disabled={saving || deletingAccount}>
@@ -1187,6 +1221,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
     fontSize: 15,
+  },
+  legalSection: {
+    gap: 10,
+  },
+  legalTitle: {
+    color: theme.colors.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  legalButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "#111827",
+  },
+  legalButtonText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: "600",
   },
   modalActions: {
     flexDirection: "row",

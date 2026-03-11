@@ -63,6 +63,30 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
     return { sellLineData: sell, buyLineData: buy };
   }, [data]);
 
+  const { yMax, yMin, stepValue, noOfSections } = useMemo(() => {
+    if (sellLineData.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
+
+    const allValues = [
+      ...sellLineData.map((d: any) => d.value),
+      ...buyLineData.map((d: any) => d.value),
+    ].filter((v: number) => v > 0);
+
+    if (allValues.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
+
+    const rawMin = Math.min(...allValues);
+    const rawMax = Math.max(...allValues);
+    const range = rawMax - rawMin || 1;
+    const padding = range * 0.15;
+    const niceMin = Math.max(0, Math.floor((rawMin - padding) / 100) * 100);
+    const niceMax = Math.ceil((rawMax + padding) / 100) * 100;
+    const niceRange = niceMax - niceMin;
+
+    const sections = 5;
+    const step = Math.ceil(niceRange / sections / 50) * 50;
+
+    return { yMax: niceMin + step * sections, yMin: niceMin, stepValue: step, noOfSections: sections };
+  }, [buyLineData, sellLineData]);
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -79,33 +103,6 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
       </View>
     );
   }
-
-  // Compute y-axis bounds from BOTH datasets so no line clips
-  const { yMax, yMin, stepValue, noOfSections } = useMemo(() => {
-    if (sellLineData.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
-
-    const allValues = [
-      ...sellLineData.map((d: any) => d.value),
-      ...buyLineData.map((d: any) => d.value),
-    ].filter((v: number) => v > 0);
-
-    if (allValues.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
-
-    const rawMin = Math.min(...allValues);
-    const rawMax = Math.max(...allValues);
-    const range = rawMax - rawMin || 1;
-    const padding = range * 0.15; // 15% breathing room top & bottom
-
-    // Round min down and max up to nice numbers
-    const niceMin = Math.max(0, Math.floor((rawMin - padding) / 100) * 100);
-    const niceMax = Math.ceil((rawMax + padding) / 100) * 100;
-    const niceRange = niceMax - niceMin;
-
-    const sections = 5;
-    const step = Math.ceil(niceRange / sections / 50) * 50; // round step to nearest 50
-
-    return { yMax: niceMin + step * sections, yMin: niceMin, stepValue: step, noOfSections: sections };
-  }, [sellLineData, buyLineData]);
 
   return (
     <View style={styles.container}>
