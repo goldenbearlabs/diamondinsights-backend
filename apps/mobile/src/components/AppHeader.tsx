@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -49,16 +49,7 @@ export const AppHeader = () => {
     return () => clearTimeout(handle);
   }, [searchOpen]);
 
-  useEffect(() => {
-    if (!searchOpen) return;
-    closeSearch();
-  }, [pathname]);
-
-  useEffect(() => {
-    void refreshProStatus(true);
-  }, [pathname, refreshProStatus]);
-
-  const runSearchAnim = (toValue: number, onDone?: () => void) => {
+  const runSearchAnim = useCallback((toValue: number, onDone?: () => void) => {
     searchAnim.stopAnimation();
     Animated.timing(searchAnim, {
       toValue,
@@ -68,16 +59,16 @@ export const AppHeader = () => {
     }).start(({ finished }) => {
       if (finished && onDone) onDone();
     });
-  };
+  }, [searchAnim]);
 
-  const openSearch = () => {
+  const openSearch = useCallback(() => {
     closingRef.current = false;
     setRenderSearch(true);
     setSearchOpen(true);
     runSearchAnim(1);
-  };
+  }, [runSearchAnim]);
 
-  const closeSearch = () => {
+  const closeSearch = useCallback(() => {
     closingRef.current = true;
     inputRef.current?.blur();
     setSearchOpen(false);
@@ -86,7 +77,16 @@ export const AppHeader = () => {
     runSearchAnim(0, () => {
       if (closingRef.current) setRenderSearch(false);
     });
-  };
+  }, [runSearchAnim]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    closeSearch();
+  }, [closeSearch, pathname, searchOpen]);
+
+  useEffect(() => {
+    void refreshProStatus(true);
+  }, [pathname, refreshProStatus]);
 
   const headerHeight = 56 + insets.top;
   const searchWidth = searchAnim.interpolate({

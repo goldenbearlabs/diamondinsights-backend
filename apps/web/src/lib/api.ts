@@ -72,6 +72,10 @@ export function apiPutAuth<T>(path: string, body?: unknown): Promise<T> {
   return apiRequest<T>("PUT", path, body, { auth: true });
 }
 
+export function apiPatchAuth<T>(path: string, body?: unknown): Promise<T> {
+  return apiRequest<T>("PATCH", path, body, { auth: true });
+}
+
 export function apiDeleteAuth<T>(path: string): Promise<T> {
   return apiRequest<T>("DELETE", path, undefined, { auth: true });
 }
@@ -104,4 +108,26 @@ export interface EntitlementsMeResponse {
 
 export function getMyEntitlements() {
   return apiRequest<EntitlementsMeResponse>("GET", "/entitlements/me", undefined, { auth: true });
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  user_id: number;
+  display_name: string;
+  profile_img_path: string;
+  prediction_count: number;
+  score: number | null;
+}
+
+export interface PredictionLeaderboardResponse {
+  items: LeaderboardEntry[];
+  total_participants: number;
+  my_rank: number | null;
+  my_prediction_count: number | null;
+}
+
+export function getPredictionLeaderboard() {
+  return apiRequest<PredictionLeaderboardResponse>("GET", "/user-predictions/leaderboard", undefined, {
+    auth: true,
+  });
 }

@@ -266,7 +266,7 @@ export default function AccountPage() {
     return () => {
       active = false;
     };
-  }, [profile?.id]);
+  }, [profile]);
 
   useEffect(() => {
     if (!profile || activeTab !== "Investing") {
@@ -307,7 +307,7 @@ export default function AccountPage() {
     return () => {
       active = false;
     };
-  }, [activeTab, profile?.id]);
+  }, [activeTab, profile]);
 
   useEffect(() => {
     if (!profile?.is_me) {

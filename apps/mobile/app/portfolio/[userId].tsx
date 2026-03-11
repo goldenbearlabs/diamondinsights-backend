@@ -2,7 +2,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { apiGetAuth } from '../../src/lib/api';
-import { auth } from '../../src/lib/firebase';
 import PublicPortfolioScreen from '../../src/screens/portfolio/PublicPortfolioScreen';
 import { theme } from '../../src/theme/colors';
 
@@ -17,7 +16,8 @@ export default function PublicPortfolioRoute() {
   const params = useLocalSearchParams<{ userId: string; username?: string }>();
   const router = useRouter();
   const userId = params.userId;
-  const [username, setUsername] = useState(params.username ?? '');
+  const usernameParam = params.username;
+  const [username, setUsername] = useState(usernameParam ?? '');
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export default function PublicPortfolioRoute() {
           return;
         }
 
-        if (!params.username) {
+        if (!usernameParam) {
           setUsername(profile.display_name);
         }
       } catch {
@@ -40,7 +40,7 @@ export default function PublicPortfolioRoute() {
     };
 
     check();
-  }, [userId]);
+  }, [router, userId, usernameParam]);
 
   if (checking) {
     return (

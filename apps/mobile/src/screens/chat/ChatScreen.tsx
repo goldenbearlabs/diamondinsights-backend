@@ -23,7 +23,7 @@ import { theme } from "../../theme/colors";
 import { ChatMessage } from "../../types/chat";
 
 export default function ChatScreen() {
-  const { messages, sendMessage, editMessage, deleteMessage, toggleLike, isConnected } = useChatSocket();
+  const { messages, sendMessage, editMessage, deleteMessage, toggleLike } = useChatSocket();
   
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null);
