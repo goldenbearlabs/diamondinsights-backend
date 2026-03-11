@@ -64,7 +64,6 @@ export default function PredictionsScreen() {
   const [tempSelectedDelta, setTempSelectedDelta] = useState<'none' | 'high' | 'low'>('none');
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [currentFilterGroup, setCurrentFilterGroup] = useState<string | null>(null);
-  const [showMyPredictions, setShowMyPredictions] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -87,9 +86,7 @@ export default function PredictionsScreen() {
   }, [searchText]);
 
  
-  useEffect(() => {
-    void loadCards(page, limit, debouncedSearchText);
-  }, [debouncedSearchText, limit, loadCards, page]);
+  
 
   useEffect(() => {
     if (!enforceNonProRarity) return;
@@ -99,22 +96,65 @@ export default function PredictionsScreen() {
   }, [enforceNonProRarity]);
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('PredictionUpdated', (event) => {
-      const { cardId, newPrediction } = event;
-      
-      // Update the local state silently without calling the API
+    // Listen for Predictions (Updates value AND increments count if new)
+    const predSub = DeviceEventEmitter.addListener('PredictionUpdated', (event) => {
+      const { cardId, newPrediction, isNewPrediction } = event;
       setCards((currentCards) => 
         currentCards.map((card) => {
           if (card.id === cardId) {
-            // Found the card! Inject the new prediction to show the blue badge
-            return { ...card, user_prediction: newPrediction };
+            return { 
+              ...card, 
+              user_prediction: newPrediction,
+              // Only increase the total count if this wasn't an edit!
+              user_prediction_count: isNewPrediction ? (card.user_prediction_count || 0) + 1 : card.user_prediction_count
+            };
           }
           return card;
         })
       );
     });
+
+    // Listen for New Comments (Increments count)
+    const commentAddSub = DeviceEventEmitter.addListener('CommentAdded', (event) => {
+      const { cardId } = event;
+      setCards((currentCards) => 
+        currentCards.map((card) => 
+          card.id === cardId ? { ...card, comment_count: (card.comment_count || 0) + 1 } : card
+        )
+      );
+    });
+
+    // Listen for Deleted Comments (Decrements count)
+    const commentDelSub = DeviceEventEmitter.addListener('CommentDeleted', (event) => {
+      const { cardId } = event;
+      setCards((currentCards) => 
+        currentCards.map((card) => 
+          card.id === cardId ? { ...card, comment_count: Math.max(0, (card.comment_count || 0) - 1) } : card
+        )
+      );
+    });
+    const predDelSub = DeviceEventEmitter.addListener('PredictionDeleted', (event) => {
+      const { cardId } = event;
+      setCards((currentCards) => 
+        currentCards.map((card) => {
+          if (card.id === cardId) {
+            return { 
+              ...card, 
+              user_prediction: null, // Strips the blue badge away
+              user_prediction_count: Math.max(0, (card.user_prediction_count || 0) - 1)
+            };
+          }
+          return card;
+        })
+      );
+    });
+
+    // Cleanup all listeners when screen unmounts
     return () => {
-      subscription.remove();
+      predSub.remove();
+      commentAddSub.remove();
+      commentDelSub.remove();
+      predDelSub.remove();
     };
   }, []);
 
@@ -129,9 +169,7 @@ export default function PredictionsScreen() {
       if (query.trim().length > 0) {
         url += `&name=${encodeURIComponent(query)}`;
       }
-      if (showMyPredictions) {
-        url += '&my_predictions=true';
-      }
+      
       
       // Add rarity filter to URL if any are selected (server-side filtering)
       if (effectiveSelectedRarities.length > 0) {
@@ -152,7 +190,7 @@ export default function PredictionsScreen() {
         url += `&sort_by=predicted_ovr_delta&desc=${selectedDelta === 'high'}`;
       }
 
-      const newCards = (showMyPredictions || auth.currentUser)
+      const newCards = auth.currentUser
         ? await apiGetAuth<CardData[]>(url) 
         : await apiGet<CardData[]>(url);
 
@@ -172,8 +210,10 @@ export default function PredictionsScreen() {
     selectedDelta,
     selectedPlayerType,
     selectedPopularity,
-    showMyPredictions,
   ]);
+  useEffect(() => {
+    void loadCards(page, limit, debouncedSearchText);
+  }, [debouncedSearchText, limit, loadCards, page]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -286,6 +326,7 @@ export default function PredictionsScreen() {
         <View style={styles.content}>
           <Text style={styles.headerTitle}>Market Predictions</Text>
           
+          
           <View style={styles.searchRow}>
             <View style={styles.searchInputContainer}>
               <Ionicons name="search" size={18} color={theme.colors.muted} style={{ marginRight: 8 }} />
@@ -298,6 +339,7 @@ export default function PredictionsScreen() {
                 autoCapitalize="none"
               />
             </View>
+            
             <TouchableOpacity 
               style={styles.filterBtn} 
               onPress={() => {
@@ -320,21 +362,17 @@ export default function PredictionsScreen() {
           {/* Quick Filters Row */}
           <View style={styles.quickFiltersRow}>
             <TouchableOpacity 
-              style={[styles.quickFilterChip, showMyPredictions && styles.quickFilterChipActive]}
+              style={styles.quickFilterChip}
               onPress={() => {
-                setShowMyPredictions(!showMyPredictions);
-                setPage(1); // Reset to page 1 when toggling
+                router.push('/(app)/my-predictions');
               }}
             >
-              <Ionicons 
-                name={showMyPredictions ? "checkbox" : "square-outline"} 
-                size={14} 
-                color={showMyPredictions ? "white" : theme.colors.muted} 
-              />
-              <Text style={[styles.quickFilterText, showMyPredictions && styles.quickFilterTextActive]}>
+              <Ionicons name="list" size={14} color="white" />
+              <Text style={styles.quickFilterText}>
                 My Predictions
               </Text>
             </TouchableOpacity>
+            
           </View>
 
 
@@ -768,11 +806,23 @@ const styles = StyleSheet.create({
   ratingLabel: { fontSize: 8, color: theme.colors.muted, fontWeight: '800', marginBottom: 1 },
   currentRating: { color: 'white', fontWeight: '700', fontSize: 14 },
   arrowContainer: { paddingLeft: 10 },
-  quickFiltersRow: { flexDirection: 'row', marginBottom: 12 },
+  quickFiltersRow: { flexDirection: 'row', marginBottom: 12, paddingRight: 20},
   quickFilterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', alignSelf: 'flex-start' },
   quickFilterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
   quickFilterText: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
   quickFilterTextActive: { color: 'white', fontWeight: 'bold' },
+  proHintContainer: {
+    flex: 1, 
+  },
+  proHintText: {
+    color: theme.colors.muted,
+    fontSize: 8,
+    lineHeight: 16,
+  },
+  proHintLink: {
+    color: '#fbbf24',
+    fontWeight: 'bold',
+  },
 
   footerContainer: {
     marginTop: 20,

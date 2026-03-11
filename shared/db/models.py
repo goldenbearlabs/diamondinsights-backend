@@ -704,6 +704,7 @@ class Users(Base):
     display_name: Mapped[str] = mapped_column()
     search_display_name: Mapped[str] = mapped_column(index=True)
     profile_img_url: Mapped[str] = mapped_column()
+    description: Mapped[Optional[str]] = mapped_column()
     portfolios: Mapped[List["Portfolio"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     card_votes: Mapped[List["CardVote"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     update_scores: Mapped[List["UserUpdateScore"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -713,6 +714,7 @@ class Users(Base):
     messages: Mapped[List["Message"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     comments: Mapped[List["Comment"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     comment_likes: Mapped[List["CommentLike"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    predictions: Mapped[List["UserPrediction"]] = relationship(cascade="all, delete-orphan")
     entitlements: Mapped[List["UserEntitlement"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
@@ -1588,8 +1590,8 @@ class ShowGamePitcherGameScore(Base):
 class UserPrediction(Base):
     __tablename__ = "user_predictions"
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True)
     predicted_ovr: Mapped[int] = mapped_column(Integer) 
 
     def __repr__(self) -> str:

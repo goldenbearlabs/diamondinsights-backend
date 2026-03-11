@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
-  Image,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +15,7 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
@@ -393,7 +393,12 @@ export default function PortfolioScreen() {
         <Text style={styles.summaryLabel}>{label}</Text>
       )}
       <View style={styles.summaryValueRow}>
-        <Image source={STUB_ICON} style={styles.stubIcon} />
+        <Image 
+        source={STUB_ICON}
+        style={styles.stubIcon}
+        contentFit="contain" 
+        
+        />
         <Text
           style={[
             styles.summaryValue,
@@ -436,9 +441,10 @@ export default function PortfolioScreen() {
       >
         <View style={styles.investmentHeader}>
           <Image
-            source={{ uri: item.card.baked_img }}
+            source={ item.card.baked_img }
             style={styles.investmentImg}
-            resizeMode="contain"
+            contentFit="contain"
+            transition={200}
           />
           <View style={styles.investmentInfo}>
             <Text style={styles.investmentName} numberOfLines={1}>
@@ -640,9 +646,10 @@ export default function PortfolioScreen() {
                   {selectedCard ? (
                     <View style={styles.selectedChip}>
                       <Image
-                        source={{ uri: selectedCard.baked_img }}
+                        source={ selectedCard.baked_img }
                         style={styles.chipImg}
-                        resizeMode="contain"
+                        contentFit="contain"
+                        transition={200}
                       />
                       <Text style={styles.chipText}>{selectedCard.name}</Text>
                       <TouchableOpacity
@@ -689,9 +696,11 @@ export default function PortfolioScreen() {
                         }}
                       >
                         <Image
-                          source={{ uri: card.baked_img }}
+                          source={ card.baked_img }
                           style={styles.dropdownImg}
-                          resizeMode="contain"
+                          contentFit="contain"
+                          transition={200}
+                        
                         />
                         <View style={{ flex: 1 }}>
                           <Text style={styles.dropdownName}>{card.name}</Text>
@@ -883,9 +892,10 @@ export default function PortfolioScreen() {
                 {editingHolding && (
                   <View style={styles.modalPlayerInfo}>
                     <Image
-                      source={{ uri: editingHolding.card.baked_img }}
+                      source={ editingHolding.card.baked_img }
                       style={styles.modalPlayerImg}
-                      resizeMode="contain"
+                      contentFit="contain"
+                      transition={200}
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.modalPlayerName} numberOfLines={1}>
@@ -1064,7 +1074,7 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     color: theme.colors.muted,
-    fontSize: 10,
+    fontSize: 8.5,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,

@@ -130,6 +130,10 @@ export function saveUserPrediction(body: UserPredictionCreate) {
   return apiRequest<UserPredictionResponse>("POST", "/user-predictions/", body, { auth: true });
 }
 
+export function deleteUserPrediction(cardId: string) {
+  return apiDeleteAuth<{ detail: string }>(`/user-predictions/${cardId}`);
+}
+
 // ── Prediction Leaderboard ──────────────────────────────────────────
 
 export interface LeaderboardEntry {

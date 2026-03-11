@@ -71,8 +71,8 @@ export default function HomeScreen() {
                 <Text style={styles.btnTextWhite}>Create Investment Portfolio</Text>
                 
               </TouchableOpacity>
-              <TouchableOpacity style={styles.btnSecondary} onPress={() => router.push('/(app)/predictions')}>
-                <Text style={styles.btnTextSecondary}>View Live Series Cards</Text>
+              <TouchableOpacity style={styles.btnSecondary} onPress={() => router.push('/(app)/cards')}>
+                <Text style={styles.btnTextSecondary}>View All Cards</Text>
               </TouchableOpacity>
             </View>
             <PredictionCarousel />

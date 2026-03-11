@@ -80,9 +80,8 @@ export const AppHeader = () => {
   }, [runSearchAnim]);
 
   useEffect(() => {
-    if (!searchOpen) return;
     closeSearch();
-  }, [closeSearch, pathname, searchOpen]);
+  }, [pathname, closeSearch]);
 
   useEffect(() => {
     void refreshProStatus(true);
@@ -108,9 +107,7 @@ export const AppHeader = () => {
         <View style={styles.rightGroup}>
           {!renderSearch ? (
             <>
-              <TouchableOpacity style={styles.iconButton} onPress={() => {}}>
-                <Ionicons name="mail-outline" size={20} color={theme.colors.muted} />
-              </TouchableOpacity>
+              
 
               {isPro === false ? (
                 <TouchableOpacity style={styles.proBadge} onPress={() => router.push("/paywall")}>

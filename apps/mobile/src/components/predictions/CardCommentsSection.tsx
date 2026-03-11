@@ -11,7 +11,8 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
-  Alert
+  Alert,
+  DeviceEventEmitter
 } from "react-native";
 import { FontAwesome5 } from "@expo/vector-icons";
 import { useCardComments } from "../../hooks/useCardComments";
@@ -44,6 +45,7 @@ export const CardCommentsSection = ({ cardId }: CardCommentsSectionProps) => {
   const handleSend = (text: string, replyToId?: number) => {
       postComment(text, replyToId);
       setReplyingTo(null);
+      DeviceEventEmitter.emit('CommentAdded', { cardId }); 
   };
 
   const handleLongPress = (msg: ChatMessage) => {
@@ -74,6 +76,7 @@ export const CardCommentsSection = ({ cardId }: CardCommentsSectionProps) => {
           onPress: () => {
             deleteComment(editingMsg.id);
             setEditingMsg(null);
+            DeviceEventEmitter.emit('CommentDeleted', { cardId });
           }
         }
       ]

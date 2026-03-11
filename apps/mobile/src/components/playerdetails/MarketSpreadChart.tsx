@@ -37,11 +37,14 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
       if (lastBuy !== 0 && lastSell !== 0) break;
     }
 
-    const labelInterval = Math.max(1, Math.floor(data.length / 5));
+    // If we have less than 10 points, show every label. 
+    // Otherwise, calculate a dynamic skip interval so we don't crowd the x-axis.
+    const labelInterval = data.length < 10 ? 1 : Math.ceil(data.length / 5);
 
     const sell: any[] = [];
     const buy: any[] = [];
 
+    // --- FIX: The iteration was accidentally outside the return block! ---
     data.forEach((order, index) => {
       if (order.is_buy === true) lastBuy = order.price;
       else if (order.is_buy === false) lastSell = order.price;
@@ -51,7 +54,7 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
 
       sell.push({
         value: lastSell,
-        label: index % labelInterval === 0 ? dateLabel : '',
+        label: index % labelInterval === 0 ? dateLabel : '', // Only apply label if it hits the interval
         labelTextStyle: { color: theme.colors.muted, width: 60, fontSize: 10 },
       });
 

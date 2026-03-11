@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -29,10 +30,10 @@ function formatOrdinal(value: number): string {
   return `${value}th`;
 }
 
-// 1. Define the available Roster Updates
 const ROSTER_UPDATES = ["Roster Update 1"];
 
 export default function PredictionLeaderboardScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +42,6 @@ export default function PredictionLeaderboardScreen() {
   const [myRank, setMyRank] = useState<number | null>(null);
   const [myPredictionCount, setMyPredictionCount] = useState<number | null>(null);
 
-  // 2. Add state for the dropdown
   const [selectedUpdate, setSelectedUpdate] = useState(ROSTER_UPDATES[0]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -74,14 +74,27 @@ export default function PredictionLeaderboardScreen() {
   }, [fetchLeaderboard]);
 
   const rankColor = (rank: number) => {
-    if (rank === 1) return "#fbbf24"; // gold
-    if (rank === 2) return "#cbd5e1"; // silver
-    if (rank === 3) return "#d97706"; // bronze
+    if (rank === 1) return "#fbbf24"; 
+    if (rank === 2) return "#cbd5e1"; 
+    if (rank === 3) return "#d97706"; 
     return theme.colors.muted;
   };
 
   const renderRow = (entry: LeaderboardEntry) => {
     const isTop3 = entry.rank <= 3;
+    const isMe = entry.rank === myRank; 
+
+    // --- NEW: Profile Navigation Handler ---
+    const handleProfilePress = () => {
+      if (entry.user_id) {
+        router.push({
+          pathname: "/(app)/account",
+          params: { userId: entry.user_id }
+        });
+      }
+    };
+    // ---------------------------------------
+
     return (
       <View
         key={entry.user_id}
@@ -94,20 +107,39 @@ export default function PredictionLeaderboardScreen() {
           </Text>
         </View>
 
-        {/* Avatar */}
-        <Avatar
-          firebasePath={entry.profile_img_path}
-          size={36}
-        />
+        {/* --- WRAPPED AVATAR --- */}
+        <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+          <Avatar
+            firebasePath={entry.profile_img_path}
+            size={36}
+          />
+        </TouchableOpacity>
 
         {/* Name + predictions count */}
         <View style={styles.infoCol}>
-          <Text style={styles.displayName} numberOfLines={1}>
-            {entry.display_name}
-          </Text>
-          <Text style={styles.predCountText}>
-            {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
-          </Text>
+          {/* --- WRAPPED USERNAME --- */}
+          <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+            <Text style={styles.displayName} numberOfLines={1}>
+              {entry.display_name}
+            </Text>
+          </TouchableOpacity>
+          
+          {isMe ? (
+            <TouchableOpacity 
+              style={styles.myPredsButton} 
+              onPress={() => router.push('/my-predictions')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.myPredsText}>
+                {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
+              </Text>
+              <Ionicons name="open-outline" size={12} color="#3b82f6" />
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.predCountText}>
+              {entry.prediction_count} prediction{entry.prediction_count !== 1 ? "s" : ""}
+            </Text>
+          )}
         </View>
 
         {/* Score */}
@@ -433,6 +465,17 @@ const styles = StyleSheet.create({
     color: theme.colors.muted,
     fontSize: 11,
     marginTop: 1,
+  },
+  myPredsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  myPredsText: {
+    color: "#3b82f6", 
+    fontSize: 11,
+    fontWeight: "600",
   },
   scoreCol: {
     alignItems: "center",
