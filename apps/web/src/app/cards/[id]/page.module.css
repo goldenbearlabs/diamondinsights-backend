@@ -1,0 +1,1392 @@
+.page {
+  min-height: 100vh;
+  position: relative;
+  background: radial-gradient(1200px 800px at 15% -10%, rgba(59, 130, 246, 0.22), transparent 60%),
+    radial-gradient(900px 680px at 85% 0%, rgba(99, 102, 241, 0.16), transparent 58%), var(--color-background);
+}
+
+.texture {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 0);
+  background-size: 22px 22px;
+  opacity: 0.3;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  width: min(1180px, calc(100% - 30px));
+  margin: 24px auto 80px;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.backRow {
+  margin-bottom: 14px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #93c5fd;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.loadingState,
+.errorState {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  color: var(--color-muted);
+}
+
+.heroCard {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.heroTop {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cardImageWrap {
+  width: 120px;
+  min-width: 120px;
+  height: 168px;
+  border-radius: 10px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cardImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.bioColumn {
+  min-width: 0;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.bioColumn h1 {
+  font-size: clamp(1.35rem, 2.3vw, 1.8rem);
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+
+.bioColumn p {
+  color: var(--color-muted);
+  font-size: 0.83rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.positionSelectorRow {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.positionSelectorRow label {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.positionSelectWrap {
+  position: relative;
+}
+
+.positionSelectWrap select {
+  appearance: none;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0 28px 0 10px;
+  cursor: pointer;
+}
+
+.positionSelectWrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid rgba(226, 232, 240, 0.95);
+  transform: translateY(-30%);
+  pointer-events: none;
+}
+
+.badgeRow {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.headerSideGrid {
+  margin-right: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 220px));
+  gap: 8px;
+  align-content: start;
+}
+
+.headerPredictionColumn,
+.headerMarketColumn {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.sideColumnHeading {
+  margin: 0;
+  color: #bfdbfe;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.headerMarketRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-content: start;
+}
+
+.headerMarketItem,
+.headerPredictionItem {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  height: 46px;
+  box-sizing: border-box;
+}
+
+.headerPredictionItemEditing {
+  height: auto;
+  min-height: 46px;
+}
+
+.headerMarketLabel {
+  color: var(--color-muted);
+  font-size: 0.61rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.headerMarketValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.headerPredictionLabel {
+  color: var(--color-muted);
+  font-size: 0.61rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.headerPredictionValue {
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.headerPredictionValueButton {
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.inlineEditCaret {
+  opacity: 0.9;
+  transform: translateY(1px);
+}
+
+.inlinePredictionEditor {
+  display: grid;
+  gap: 6px;
+}
+
+.inlinePredictionEditor input {
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0 9px;
+}
+
+.inlinePredictionActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inlinePredictionActions button {
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.inlinePredictionActions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.inlinePredictionError {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.predictionUp {
+  color: #4ade80;
+}
+
+.predictionDown {
+  color: #f87171;
+}
+
+.predictionFlat {
+  color: #f8fafc;
+}
+
+.ratingBadge {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+  min-width: 58px;
+  text-align: center;
+  padding: 5px 10px;
+}
+
+.ratingBadge span {
+  display: block;
+  font-size: 0.58rem;
+  color: var(--color-muted);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.ratingBadge strong {
+  font-size: 0.98rem;
+  line-height: 1.1;
+}
+
+.proLockedBadgeValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #facc15;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.interactionRow {
+  margin-top: 14px;
+  display: block;
+}
+
+.predictionError {
+  margin-top: 8px;
+  color: #fca5a5;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.tabRow {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tab,
+.tabActive,
+.proTab,
+.proTabActive {
+  height: 34px;
+  border-radius: 9px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tabActive {
+  color: #fff;
+  border-color: rgba(59, 130, 246, 0.8);
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.proTab {
+  color: #fcd34d;
+  border-color: rgba(251, 191, 36, 0.48);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.proTabActive {
+  color: #facc15;
+  border-color: rgba(251, 191, 36, 0.75);
+  background: rgba(251, 191, 36, 0.2);
+}
+
+.sectionCard {
+  margin-top: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.56);
+  padding: 14px;
+}
+
+.attributesGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(220px, 0.8fr);
+  gap: 14px;
+}
+
+.attributesColumn {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.attributesFullWidth {
+  margin-top: 14px;
+}
+
+.attributeBlock + .attributeBlock {
+  margin-top: 18px;
+}
+
+.attributesColumn .attributeBlock + .attributeBlock {
+  margin-top: 0;
+}
+
+.attributeBlock h3 {
+  color: #f8fafc;
+  font-size: 0.88rem;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.statBarRow + .statBarRow {
+  margin-top: 8px;
+}
+
+.statBarHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #dbeafe;
+  margin-bottom: 4px;
+}
+
+.statTrack {
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.statFill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.pitchList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pitchCard {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px;
+}
+
+.pitchName {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.pitchGaugeRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pitchGauge {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.pitchGaugeSvg {
+  overflow: visible;
+}
+
+.pitchGaugeLabel {
+  font-size: 0.67rem;
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.pitchGaugeValue {
+  font-size: 0.74rem;
+  color: #fff;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.quirkCompactList {
+  display: grid;
+  gap: 8px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.quirkCompactItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 7px 8px;
+}
+
+.quirkCompactImage {
+  border-radius: 4px;
+}
+
+.quirkCompactName {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  line-height: 1.2;
+}
+
+.marketGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.marketColumn {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px;
+}
+
+.marketLabel {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.marketValueRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.marketIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.marketValue {
+  color: #fff;
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.marketValueText {
+  margin-top: 6px;
+}
+
+.marketChartCard {
+  margin-top: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+}
+
+.marketChartHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.marketChartHeader h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.marketChartSubtitle {
+  margin: 0 0 8px;
+  color: #94a3b8;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.marketChartScroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+.priceHistoryTableWrap {
+  margin-top: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.priceHistoryTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+
+.priceHistoryTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.95);
+  color: #bfdbfe;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.priceHistoryTable td {
+  color: #e2e8f0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.priceHistoryTable tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.marketLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.marketLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.marketLegendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.marketLegendSell {
+  color: #4ade80;
+}
+
+.marketLegendBuy {
+  color: #f87171;
+}
+
+.marketSpreadSvg {
+  display: block;
+}
+
+.marketGridLine {
+  stroke: rgba(148, 163, 184, 0.28);
+  stroke-width: 1;
+}
+
+.marketAxisLabel {
+  fill: #94a3b8;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.marketSellLine {
+  fill: none;
+  stroke: #4ade80;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.marketBuyLine {
+  fill: none;
+  stroke: #f87171;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.marketHistorySplit {
+  stroke: rgba(148, 163, 184, 0.34);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.marketChartLoading {
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0;
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+}
+
+.marketBottomRow {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.marketBottomMain,
+.marketBottomSide {
+  min-width: 0;
+}
+
+.marketVolumeBars {
+  min-height: 180px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+
+.marketVolumeBarWrap {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.marketVolumeValue {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.marketVolumeTrack {
+  width: 56px;
+  height: 110px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.65);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.marketVolumeFill {
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+}
+
+.marketVolumeSell {
+  background: linear-gradient(180deg, rgba(74, 222, 128, 0.9), rgba(22, 163, 74, 0.95));
+}
+
+.marketVolumeBuy {
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.9), rgba(220, 38, 38, 0.95));
+}
+
+.marketVolumeLabel {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.marketVolumeMeta {
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.marketVolumeSummary {
+  margin: 8px 0 10px;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.volumeRangeFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.volumeRangeButton,
+.volumeRangeButtonActive {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.volumeRangeButtonActive {
+  color: #ffffff;
+  border-color: rgba(59, 130, 246, 0.9);
+  background: rgba(59, 130, 246, 0.26);
+}
+
+.statsWindowGrid {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.statsWindowRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.statsWindowPill,
+.statsWindowPillActive {
+  min-height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.statsWindowPillActive {
+  color: #ffffff;
+  border-color: rgba(59, 130, 246, 0.9);
+  background: rgba(59, 130, 246, 0.26);
+}
+
+.statsWindowPillLocked {
+  border-color: rgba(251, 191, 36, 0.56);
+}
+
+.statsWindowPillContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statsStack {
+  display: grid;
+  gap: 14px;
+}
+
+.statsSection {
+  display: grid;
+  gap: 10px;
+}
+
+.statsSectionTitle {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.statsSectionDivider {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.statsBadgeRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.statsBadge {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.55);
+  padding: 8px 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.statsBadgeLabel {
+  color: #94a3b8;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statsBadgeValue {
+  color: #f8fafc;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.statsSubCard {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 10px;
+}
+
+.statsSubCardTitle {
+  margin: 0 0 8px;
+  color: #dbeafe;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.statsGridItem {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 7px 8px;
+  display: grid;
+  gap: 3px;
+}
+
+.statsGridLabel {
+  color: #94a3b8;
+  font-size: 0.63rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.statsGridValue {
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.splitTableWrap {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.splitTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.splitTable th {
+  text-align: center;
+  background: rgba(15, 23, 42, 0.85);
+  color: #bfdbfe;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 7px 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.splitTable td {
+  text-align: center;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 7px 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.splitTable tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.splitNameColumn,
+.splitNameCell {
+  text-align: left !important;
+  width: 150px;
+  min-width: 150px;
+}
+
+.splitNameCell {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
+.statsEmptyState {
+  min-height: 140px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+
+.proCard {
+  position: relative;
+  overflow: hidden;
+}
+
+.proHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.proBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.7);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fbbf24;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+}
+
+.proTitle {
+  margin: 0;
+  color: #fbbf24;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.proSectionSubheader {
+  margin: 0 0 12px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.proContentObscured {
+  opacity: 0.28;
+}
+
+.proPendingOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.42);
+  display: grid;
+  place-items: center;
+}
+
+.proPendingText {
+  color: #fde68a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.proLockOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.76);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 14px;
+  padding: 18px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+}
+
+.proLockTitle {
+  margin: 0 0 8px;
+  color: #fde68a;
+  font-size: 1rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.proLockDescription {
+  margin: 0 0 14px;
+  color: #e5e7eb;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.proLockButton {
+  border: none;
+  border-radius: 999px;
+  background: #fbbf24;
+  color: #111827;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.predictedRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 9px;
+  margin-bottom: 7px;
+}
+
+.predictedRow span {
+  font-size: 0.78rem;
+  color: #dbeafe;
+  font-weight: 700;
+}
+
+.predictedRow strong {
+  font-size: 0.86rem;
+}
+
+.predictedRow em {
+  font-style: normal;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.deltaUp {
+  color: #4ade80;
+}
+
+.deltaDown {
+  color: #f87171;
+}
+
+.emptyText {
+  color: var(--color-muted);
+  font-size: 0.77rem;
+}
+
+.commentsCard {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.56);
+  overflow: hidden;
+}
+
+.commentsHeader {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  cursor: pointer;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.commentsHeaderTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.commentsBody {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 10px 14px 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.commentsList {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.commentRow {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 9px;
+}
+
+.commentMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.commentMeta strong {
+  font-size: 0.77rem;
+  color: #f8fafc;
+}
+
+.commentMeta span {
+  font-size: 0.68rem;
+  color: var(--color-muted);
+}
+
+.commentContent {
+  margin-top: 4px;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.commentComposer {
+  display: grid;
+  gap: 8px;
+}
+
+.commentComposer textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  padding: 9px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.commentComposer button {
+  justify-self: end;
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid rgba(59, 130, 246, 0.8);
+  background: rgba(59, 130, 246, 0.28);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.commentComposer button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 960px) {
+  .content {
+    width: calc(100% - 16px);
+    padding: 14px;
+    margin-top: 14px;
+  }
+
+  .heroTop {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .bioColumn {
+    width: 100%;
+    max-width: none;
+    flex: 1 1 auto;
+  }
+
+  .interactionRow {
+    grid-template-columns: 1fr;
+  }
+
+  .attributesGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .headerSideGrid {
+    width: 100%;
+    margin-right: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .positionSelectorRow {
+    width: 100%;
+  }
+
+  .headerMarketRow {
+    grid-template-columns: 1fr;
+    width: 100%;
+    margin-top: 0;
+  }
+
+  .pitchList {
+    grid-template-columns: 1fr;
+  }
+
+  .pitchGaugeRow {
+    grid-template-columns: 1fr;
+  }
+
+  .cardImageWrap {
+    width: 100px;
+    min-width: 100px;
+    height: 140px;
+  }
+
+  .marketGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .marketBottomRow {
+    grid-template-columns: 1fr;
+  }
+
+  .marketChartHeader {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .marketSpreadSvg {
+    min-height: 220px;
+  }
+
+  .marketVolumeBars {
+    gap: 14px;
+  }
+
+  .marketVolumeTrack {
+    width: 46px;
+    height: 108px;
+  }
+
+  .statsWindowRow {
+    grid-template-columns: 1fr;
+  }
+
+  .statsBadgeRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

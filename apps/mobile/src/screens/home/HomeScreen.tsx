@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Linking} from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router"; // <-- 1. Added router import
-import { apiGet } from "../../lib/api";
+import { useRouter } from "expo-router";
 import { theme } from "../../theme/colors";
 import { FloatingBackground } from "../../homescreencomponents/FloatingBackground";
 import { PredictionCarousel } from "../../homescreencomponents/PredictionCarousel";
@@ -33,7 +32,7 @@ const RosterCountdown = () => {
 };
 
 export default function HomeScreen() {
-  const router = useRouter(); 
+  const router = useRouter();
 
   return (
     <View style={styles.container}>

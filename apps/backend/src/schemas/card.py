@@ -77,6 +77,12 @@ class CardResponse(BaseModel):
     comment_count: Optional[int] = 0
     user_prediction_count: Optional[int] = 0
     predicted_ovr: Optional[int] = None
+    community_predicted_ovr: Optional[int] = None
+    best_buy_price: Optional[int] = None
+    best_sell_price: Optional[int] = None
+    quicksell_value: Optional[int] = None
+    buy_now_uses_quicksell: Optional[bool] = None
+    buy_now_above_quicksell_pct: Optional[float] = None
     predicted_attributes: Optional[Dict[str, Any]] = None
     user_prediction: Optional[int] = None
 

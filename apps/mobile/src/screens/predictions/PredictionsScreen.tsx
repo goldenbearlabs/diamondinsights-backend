@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { 
   View, 
@@ -14,9 +14,8 @@ import {
   DeviceEventEmitter
 } from 'react-native';
 import { Image } from 'expo-image';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { FloatingBackground } from '../../homescreencomponents/FloatingBackground';
 import { theme } from '../../theme/colors';
 
@@ -71,25 +70,23 @@ export default function PredictionsScreen() {
   const [limit, setLimit] = useState(25); 
   const [hasMore, setHasMore] = useState(true); 
   const [refreshing, setRefreshing] = useState(false);
+  const [debouncedSearchText, setDebouncedSearchText] = useState('');
 
-  const effectiveSelectedRarities = enforceNonProRarity
-    ? [...NON_PRO_ALLOWED_RARITIES]
-    : selectedRarities;
+  const effectiveSelectedRarities = useMemo(
+    () => (enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : selectedRarities),
+    [enforceNonProRarity, selectedRarities]
+  );
 
-  // DEBOUNCE SEARCH (Reset to Page 1)
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      setPage(1); // Reset to page 1 when search changes
-      loadCards(1, limit, searchText);
+      setDebouncedSearchText(searchText);
+      setPage(1);
     }, 500);
     return () => clearTimeout(delayDebounceFn);
   }, [searchText]);
 
  
-  // Reload cards when page, limit, or filters change
-  useEffect(() => {
-    loadCards(page, limit, searchText);
-  }, [page, limit, selectedRarities, selectedPlayerType, selectedPopularity, selectedDelta, enforceNonProRarity]);
+  
 
   useEffect(() => {
     if (!enforceNonProRarity) return;
@@ -162,7 +159,7 @@ export default function PredictionsScreen() {
   }, []);
 
   
-  const loadCards = async (targetPage: number, targetLimit: number, query: string) => {
+  const loadCards = useCallback(async (targetPage: number, targetLimit: number, query: string) => {
     setLoading(true);
     try {
       const offset = (targetPage - 1) * targetLimit;
@@ -208,12 +205,20 @@ export default function PredictionsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [
+    effectiveSelectedRarities,
+    selectedDelta,
+    selectedPlayerType,
+    selectedPopularity,
+  ]);
+  useEffect(() => {
+    void loadCards(page, limit, debouncedSearchText);
+  }, [debouncedSearchText, limit, loadCards, page]);
 
   const handleRefresh = () => {
     setRefreshing(true);
     setPage(1);
-    loadCards(1, limit, searchText);
+    void loadCards(1, limit, debouncedSearchText);
   };
 
   const renderItem = ({ item }: { item: CardData }) => {
@@ -321,6 +326,7 @@ export default function PredictionsScreen() {
         <View style={styles.content}>
           <Text style={styles.headerTitle}>Market Predictions</Text>
           
+          
           <View style={styles.searchRow}>
             <View style={styles.searchInputContainer}>
               <Ionicons name="search" size={18} color={theme.colors.muted} style={{ marginRight: 8 }} />
@@ -333,6 +339,7 @@ export default function PredictionsScreen() {
                 autoCapitalize="none"
               />
             </View>
+            
             <TouchableOpacity 
               style={styles.filterBtn} 
               onPress={() => {
@@ -365,6 +372,7 @@ export default function PredictionsScreen() {
                 My Predictions
               </Text>
             </TouchableOpacity>
+            
           </View>
 
 
@@ -798,11 +806,23 @@ const styles = StyleSheet.create({
   ratingLabel: { fontSize: 8, color: theme.colors.muted, fontWeight: '800', marginBottom: 1 },
   currentRating: { color: 'white', fontWeight: '700', fontSize: 14 },
   arrowContainer: { paddingLeft: 10 },
-  quickFiltersRow: { flexDirection: 'row', marginBottom: 12 },
+  quickFiltersRow: { flexDirection: 'row', marginBottom: 12, paddingRight: 20},
   quickFilterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', alignSelf: 'flex-start' },
   quickFilterChipActive: { backgroundColor: '#3b82f6', borderColor: '#3b82f6' },
   quickFilterText: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
   quickFilterTextActive: { color: 'white', fontWeight: 'bold' },
+  proHintContainer: {
+    flex: 1, 
+  },
+  proHintText: {
+    color: theme.colors.muted,
+    fontSize: 8,
+    lineHeight: 16,
+  },
+  proHintLink: {
+    color: '#fbbf24',
+    fontWeight: 'bold',
+  },
 
   footerContainer: {
     marginTop: 20,

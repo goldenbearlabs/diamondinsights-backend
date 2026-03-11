@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, DeviceEventEmitter} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, DeviceEventEmitter, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -9,8 +9,6 @@ import { FloatingBackground } from '../../homescreencomponents/FloatingBackgroun
 import { AttributeBar } from '../../predictionscomponents/AttributeBar';
 import PredictionAttributeBar from '../../predictionscomponents/PredictionAttributeBar';
 import { theme } from '../../theme/colors';
-import { TextInput, Alert, ActivityIndicator } from 'react-native';
-import { useState, useEffect } from 'react';
 import Svg, { Path, G } from 'react-native-svg';
 import { apiGet, getUserPrediction, saveUserPrediction, deleteUserPrediction } from '../../lib/api';
 import { useBackendProStatus } from '../../lib/proStatus';
@@ -47,12 +45,10 @@ export default function PlayerDetailsScreen() {
   const { isPro, loading: proStatusLoading } = useBackendProStatus();
   const card = params.cardData ? JSON.parse(params.cardData as string) : null;
 
-  if (!card) return null;
+  const isTwoWay = TWO_WAY_PLAYERS.includes(card?.name ?? "");
 
-  const isTwoWay = TWO_WAY_PLAYERS.includes(card.name);
-
-  const showPitching = card.is_hitter === false || isTwoWay;
-  const showBatting = card.is_hitter === true || isTwoWay;
+  const showPitching = card?.is_hitter === false || isTwoWay;
+  const showBatting = card?.is_hitter === true || isTwoWay;
 
   const BATTING_COLOR = '#3b82f6';
   const PITCHING_COLOR = '#fbbf24';
@@ -116,6 +112,9 @@ export default function PlayerDetailsScreen() {
   }, [card?.id]);
 
   const handlePredict = async () => {
+    if (!card?.id) {
+      return;
+    }
     const val = parseInt(userPrediction, 10);
     if (isNaN(val) || val < 0 || val > 99) {
       Alert.alert("Invalid Input", "Please enter a valid overall (0-99).");
@@ -184,7 +183,7 @@ export default function PlayerDetailsScreen() {
         setMarketCandles(candlesRes || []);
         setBuyVolume(volumeRes?.[0]?.buy_volume ?? null);
         setSellVolume(volumeRes?.[0]?.sell_volume ?? null);
-      } catch (err) {
+      } catch {
         setBuyPrice(null);
         setSellPrice(null);
         setBuyVolume(null);
@@ -318,6 +317,8 @@ export default function PlayerDetailsScreen() {
     if (ovr >= 65) return 25;
     return 5;
   };
+
+  if (!card) return null;
 
   return (
     <View style={styles.container}>

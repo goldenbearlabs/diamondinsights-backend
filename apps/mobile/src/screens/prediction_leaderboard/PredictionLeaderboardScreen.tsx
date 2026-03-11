@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
-  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,

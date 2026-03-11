@@ -2,8 +2,3 @@ api.diamondinsights.app {
 	encode gzip
 	reverse_proxy backend:8000
 }
-
-:80 {
-	encode gzip
-	reverse_proxy backend:8000
-}

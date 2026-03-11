@@ -337,6 +337,8 @@ export default function Home() {
           <p>&copy; {CURRENT_YEAR} Diamond Insights by Golden Bear Labs</p>
           <div className={styles.footerLinks}>
             <a href="#how-it-works">How It Works</a>
+            <Link href="/privacy-policy">Privacy Policy</Link>
+            <Link href="/terms-and-conditions">Terms & Conditions</Link>
             <a href="mailto:support@goldenbearlabs.com">Contact</a>
             <a href="https://x.com/goldenbearlabs" target="_blank" rel="noreferrer">
               X

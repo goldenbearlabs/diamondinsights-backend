@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { FloatingBackground } from '../../src/homescreencomponents/FloatingBackground';
 import { AttributeBar } from '../../src/predictionscomponents/AttributeBar';
 import { theme } from '../../src/theme/colors';
-import { useState, useEffect } from 'react';
 import Svg, { Path } from 'react-native-svg';
 import { apiGet } from '../../src/lib/api';
 import { MarketSpreadChart } from '../../src/components/playerdetails/MarketSpreadChart';
@@ -32,11 +31,9 @@ export default function CardScreen() {
   const params = useLocalSearchParams();
   const card = params.cardData ? JSON.parse(params.cardData as string) : null;
 
-  if (!card) return null;
-
-  const isTwoWay = TWO_WAY_PLAYERS.includes(card.name);
-  const showPitching = card.is_hitter === false || isTwoWay;
-  const showBatting = card.is_hitter === true || isTwoWay;
+  const isTwoWay = TWO_WAY_PLAYERS.includes(card?.name ?? "");
+  const showPitching = card?.is_hitter === false || isTwoWay;
+  const showBatting = card?.is_hitter === true || isTwoWay;
 
   const BATTING_COLOR = '#3b82f6';
   const PITCHING_COLOR = '#fbbf24';
@@ -163,6 +160,8 @@ export default function CardScreen() {
       </View>
     );
   };
+
+  if (!card) return null;
 
   return (
     <View style={styles.container}>

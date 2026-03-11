@@ -37,11 +37,14 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
       if (lastBuy !== 0 && lastSell !== 0) break;
     }
 
-    const labelInterval = Math.max(1, Math.floor(data.length / 5));
+    // If we have less than 10 points, show every label. 
+    // Otherwise, calculate a dynamic skip interval so we don't crowd the x-axis.
+    const labelInterval = data.length < 10 ? 1 : Math.ceil(data.length / 5);
 
     const sell: any[] = [];
     const buy: any[] = [];
 
+    // --- FIX: The iteration was accidentally outside the return block! ---
     data.forEach((order, index) => {
       if (order.is_buy === true) lastBuy = order.price;
       else if (order.is_buy === false) lastSell = order.price;
@@ -51,7 +54,7 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
 
       sell.push({
         value: lastSell,
-        label: index % labelInterval === 0 ? dateLabel : '',
+        label: index % labelInterval === 0 ? dateLabel : '', // Only apply label if it hits the interval
         labelTextStyle: { color: theme.colors.muted, width: 60, fontSize: 10 },
       });
 
@@ -62,6 +65,30 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
 
     return { sellLineData: sell, buyLineData: buy };
   }, [data]);
+
+  const { yMax, yMin, stepValue, noOfSections } = useMemo(() => {
+    if (sellLineData.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
+
+    const allValues = [
+      ...sellLineData.map((d: any) => d.value),
+      ...buyLineData.map((d: any) => d.value),
+    ].filter((v: number) => v > 0);
+
+    if (allValues.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
+
+    const rawMin = Math.min(...allValues);
+    const rawMax = Math.max(...allValues);
+    const range = rawMax - rawMin || 1;
+    const padding = range * 0.15;
+    const niceMin = Math.max(0, Math.floor((rawMin - padding) / 100) * 100);
+    const niceMax = Math.ceil((rawMax + padding) / 100) * 100;
+    const niceRange = niceMax - niceMin;
+
+    const sections = 5;
+    const step = Math.ceil(niceRange / sections / 50) * 50;
+
+    return { yMax: niceMin + step * sections, yMin: niceMin, stepValue: step, noOfSections: sections };
+  }, [buyLineData, sellLineData]);
 
   if (loading) {
     return (
@@ -79,33 +106,6 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
       </View>
     );
   }
-
-  // Compute y-axis bounds from BOTH datasets so no line clips
-  const { yMax, yMin, stepValue, noOfSections } = useMemo(() => {
-    if (sellLineData.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
-
-    const allValues = [
-      ...sellLineData.map((d: any) => d.value),
-      ...buyLineData.map((d: any) => d.value),
-    ].filter((v: number) => v > 0);
-
-    if (allValues.length === 0) return { yMax: 100, yMin: 0, stepValue: 20, noOfSections: 5 };
-
-    const rawMin = Math.min(...allValues);
-    const rawMax = Math.max(...allValues);
-    const range = rawMax - rawMin || 1;
-    const padding = range * 0.15; // 15% breathing room top & bottom
-
-    // Round min down and max up to nice numbers
-    const niceMin = Math.max(0, Math.floor((rawMin - padding) / 100) * 100);
-    const niceMax = Math.ceil((rawMax + padding) / 100) * 100;
-    const niceRange = niceMax - niceMin;
-
-    const sections = 5;
-    const step = Math.ceil(niceRange / sections / 50) * 50; // round step to nearest 50
-
-    return { yMax: niceMin + step * sections, yMin: niceMin, stepValue: step, noOfSections: sections };
-  }, [sellLineData, buyLineData]);
 
   return (
     <View style={styles.container}>
