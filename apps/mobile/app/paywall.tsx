@@ -58,12 +58,13 @@ const PRO_FEATURES: { title: string; description: string; icon: IoniconName }[] 
       "See a meta overall that adapts to your play style, not just a one-size-fits-all rating.",
     icon: "speedometer-outline",
   },
+  /*
   {
     title: "Full Community Access",
     description:
       "Join the full member layer of the community with deeper discussion and shared strategy.",
     icon: "people-outline",
-  },
+  },*/
 ];
 
 const formatPackageType = (packageType: string): string =>

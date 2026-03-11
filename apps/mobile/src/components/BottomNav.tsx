@@ -54,7 +54,6 @@ const GAMEPLAY_ITEMS: MenuItem[] = [
 
 const COMMUNITY_ITEMS: MenuItem[] = [
   { label: "Chat", route: "/(app)/chat", icon: "comment-dots" },
-  { label: "Trending", route: "/(app)/trending", icon: "fire-alt" },
 ];
 
 const MENU_WIDTH = 220;
