@@ -660,7 +660,7 @@ export default function AccountScreen() {
                   <View style={styles.portfolioPrivateContainer}>
                     <Ionicons name="lock-closed" size={24} color="rgba(255,255,255,0.2)" />
                     <Text style={styles.sectionText}>
-                      {profile?.display_name} portfolio is private
+                      {profile?.display_name}'s portfolio is private
                     </Text>
                   </View>
                 ) : portfolioError === "none" ? (
