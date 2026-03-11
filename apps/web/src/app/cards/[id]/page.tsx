@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { ArrowLeft, ChevronDown, ChevronUp, Crown, Lock, MessageSquare } from "lucide-react";
 
@@ -43,6 +43,34 @@ type PriceHistoryRow = {
   best_sell_price: number | null;
   volume: number | null;
 };
+
+type PriceChartTick = {
+  y: number;
+  label: string;
+};
+
+type PriceChartXAxisTick = {
+  x: number;
+  label: string;
+};
+
+type PriceHistoryChart =
+  | {
+      hasChart: false;
+      tableRows: PriceHistoryRow[];
+    }
+  | {
+      hasChart: true;
+      tableRows: PriceHistoryRow[];
+      width: number;
+      height: number;
+      padLeft: number;
+      padRight: number;
+      buyPath: string;
+      sellPath: string;
+      yTicks: PriceChartTick[];
+      xTicks: PriceChartXAxisTick[];
+    };
 
 type CardDetail = {
   id: string;
@@ -441,7 +469,7 @@ function PriceHistoryChart({
   history: PriceHistoryRow[];
   loading: boolean;
 }) {
-  const chart = useMemo(() => {
+  const chart = useMemo<PriceHistoryChart | null>(() => {
     const orderedRows = [...(history || [])].sort((a, b) => (parseMarketDate(a.date)?.getTime() ?? 0) - (parseMarketDate(b.date)?.getTime() ?? 0));
     if (orderedRows.length === 0) {
       return null;
@@ -573,6 +601,58 @@ function PriceHistoryChart({
     );
   }
 
+  if (!chart.hasChart) {
+    return (
+      <div className={styles.marketChartCard}>
+        <div className={styles.marketChartHeader}>
+          <h3>Daily Price History</h3>
+          <div className={styles.marketLegend}>
+            <span className={styles.marketLegendItem}>
+              <span className={`${styles.marketLegendDot} ${styles.marketLegendSell}`} />
+              Sell
+            </span>
+            <span className={styles.marketLegendItem}>
+              <span className={`${styles.marketLegendDot} ${styles.marketLegendBuy}`} />
+              Buy
+            </span>
+          </div>
+        </div>
+        <p className={styles.marketChartSubtitle}>Best buy and best sell by day (from `price_history`).</p>
+        <p className={styles.marketChartLoading}>No chartable daily values yet.</p>
+        <div className={styles.priceHistoryTableWrap}>
+          <table className={styles.priceHistoryTable}>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Best Sell</th>
+                <th>Best Buy</th>
+                <th>Spread</th>
+                <th>Volume</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chart.tableRows.map((row) => {
+                const spread =
+                  typeof row.best_sell_price === "number" && typeof row.best_buy_price === "number"
+                    ? row.best_sell_price - row.best_buy_price
+                    : null;
+                return (
+                  <tr key={`${row.card_id}-${row.date}`}>
+                    <td>{formatDayTableLabel(row.date)}</td>
+                    <td>{formatStubs(row.best_sell_price)}</td>
+                    <td>{formatStubs(row.best_buy_price)}</td>
+                    <td>{formatStubs(spread)}</td>
+                    <td>{row.volume != null ? formatCompactNumber(row.volume) : "--"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.marketChartCard}>
       <div className={styles.marketChartHeader}>
@@ -589,36 +669,32 @@ function PriceHistoryChart({
         </div>
       </div>
       <p className={styles.marketChartSubtitle}>Best buy and best sell by day (from `price_history`).</p>
-      {chart.hasChart ? (
-        <div className={styles.marketChartScroll}>
-          <svg
-            width={chart.width}
-            height={chart.height}
-            viewBox={`0 0 ${chart.width} ${chart.height}`}
-            className={styles.marketSpreadSvg}
-            role="img"
-            aria-label="Daily price history chart"
-          >
-            {chart.yTicks.map((tick) => (
-              <g key={tick.y}>
-                <line x1={chart.padLeft} y1={tick.y} x2={chart.width - chart.padRight} y2={tick.y} className={styles.marketGridLine} />
-                <text x={chart.padLeft - 8} y={tick.y + 3} textAnchor="end" className={styles.marketAxisLabel}>
-                  {tick.label}
-                </text>
-              </g>
-            ))}
-            <path d={chart.sellPath} className={styles.marketSellLine} />
-            <path d={chart.buyPath} className={styles.marketBuyLine} />
-            {chart.xTicks.map((tick, index) => (
-              <text key={`${tick.x}-${tick.label}-${index}`} x={tick.x} y={chart.height - 8} textAnchor="middle" className={styles.marketAxisLabel}>
+      <div className={styles.marketChartScroll}>
+        <svg
+          width={chart.width}
+          height={chart.height}
+          viewBox={`0 0 ${chart.width} ${chart.height}`}
+          className={styles.marketSpreadSvg}
+          role="img"
+          aria-label="Daily price history chart"
+        >
+          {chart.yTicks.map((tick) => (
+            <g key={tick.y}>
+              <line x1={chart.padLeft} y1={tick.y} x2={chart.width - chart.padRight} y2={tick.y} className={styles.marketGridLine} />
+              <text x={chart.padLeft - 8} y={tick.y + 3} textAnchor="end" className={styles.marketAxisLabel}>
                 {tick.label}
               </text>
-            ))}
-          </svg>
-        </div>
-      ) : (
-        <p className={styles.marketChartLoading}>No chartable daily values yet.</p>
-      )}
+            </g>
+          ))}
+          <path d={chart.sellPath} className={styles.marketSellLine} />
+          <path d={chart.buyPath} className={styles.marketBuyLine} />
+          {chart.xTicks.map((tick, index) => (
+            <text key={`${tick.x}-${tick.label}-${index}`} x={tick.x} y={chart.height - 8} textAnchor="middle" className={styles.marketAxisLabel}>
+              {tick.label}
+            </text>
+          ))}
+        </svg>
+      </div>
       <div className={styles.priceHistoryTableWrap}>
         <table className={styles.priceHistoryTable}>
           <thead>
@@ -1498,10 +1574,10 @@ export default function CardDetailPage() {
     </div>
   );
 
-  const leftColumnBlocks: JSX.Element[] = [];
-  const middleColumnBlocks: JSX.Element[] = [];
-  const rightColumnBlocks: JSX.Element[] = [renderQuirksCompactBlock()];
-  const fullWidthBlocks: JSX.Element[] = [];
+  const leftColumnBlocks: ReactNode[] = [];
+  const middleColumnBlocks: ReactNode[] = [];
+  const rightColumnBlocks: ReactNode[] = [renderQuirksCompactBlock()];
+  const fullWidthBlocks: ReactNode[] = [];
 
   if (showBatting && showPitching) {
     leftColumnBlocks.push(renderBattingBlock(), renderPitchingBlock());
