@@ -19,43 +19,63 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 
 export const MarketSpreadChart = ({ data, loading }: Props) => {
   // Process raw completed orders into paired buy/sell line data
-  const { sellLineData, buyLineData } = useMemo(() => {
+  // Process raw completed orders into paired buy/sell line data
+  const { sellLineData, buyLineData, dynamicSpacing } = useMemo(() => {
     if (!data || data.length === 0) {
-      return { sellLineData: [], buyLineData: [] };
+      return { sellLineData: [], buyLineData: [], dynamicSpacing: 6 };
     }
 
-    // Data arrives sorted oldest→newest from API.
-    // Walk through each order and forward-fill the last known buy/sell price
-    // so both lines have a value at every point.
+    // --- NEW: Dynamic Spacing Math ---
+    const chartWidth = SCREEN_WIDTH - 80;
+    const availableWidth = chartWidth - 20; // Account for initialSpacing and padding
+    
+    // Stretch across the width, but never squish smaller than 6 pixels per point
+    const calculatedSpacing = data.length > 1 
+      ? Math.max(6, availableWidth / (data.length - 1)) 
+      : availableWidth;
+
+    // A timestamp needs ~60 pixels of width. 
+    // We dynamically calculate how many points we must skip to get 60px of space.
+    const minPointsForLabel = Math.ceil(60 / calculatedSpacing);
+    const labelInterval = Math.max(minPointsForLabel, Math.ceil(data.length / 5));
+    // ----------------------------------
+
     let lastBuy = 0;
     let lastSell = 0;
 
-    // First pass: find initial prices so lines don't start at 0
     for (const order of data) {
       if (order.is_buy === true && lastBuy === 0) lastBuy = order.price;
       if (order.is_buy === false && lastSell === 0) lastSell = order.price;
       if (lastBuy !== 0 && lastSell !== 0) break;
     }
 
-    // If we have less than 10 points, show every label. 
-    // Otherwise, calculate a dynamic skip interval so we don't crowd the x-axis.
-    const labelInterval = data.length < 10 ? 1 : Math.ceil(data.length / 5);
-
     const sell: any[] = [];
     const buy: any[] = [];
 
-    // --- FIX: The iteration was accidentally outside the return block! ---
     data.forEach((order, index) => {
       if (order.is_buy === true) lastBuy = order.price;
       else if (order.is_buy === false) lastSell = order.price;
 
       const safeDate = order.date ? order.date.replace(' ', 'T') : new Date().toISOString();
-      const dateLabel = new Date(safeDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const dateObj = new Date(safeDate);
+      
+      const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      
+      const month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+      const day = dateObj.getDate().toString().padStart(2, '0');
+      
+      const showLabel = index % labelInterval === 0;
 
       sell.push({
         value: lastSell,
-        label: index % labelInterval === 0 ? dateLabel : '', // Only apply label if it hits the interval
-        labelTextStyle: { color: theme.colors.muted, width: 60, fontSize: 10 },
+        ...(showLabel ? {
+          labelComponent: () => (
+            <View style={{ width: 60, alignItems: 'center', marginTop: 4 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 10, marginBottom: 2 }}>{timeStr}</Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 9, fontWeight: '600' }}>{month}/{day}</Text>
+            </View>
+          )
+        } : {})
       });
 
       buy.push({
@@ -63,7 +83,7 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
       });
     });
 
-    return { sellLineData: sell, buyLineData: buy };
+    return { sellLineData: sell, buyLineData: buy, dynamicSpacing: calculatedSpacing };
   }, [data]);
 
   const { yMax, yMin, stepValue, noOfSections } = useMemo(() => {
@@ -127,7 +147,7 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
           width={SCREEN_WIDTH - 80}
           
           // Layout
-          spacing={6}
+          spacing={dynamicSpacing}
           initialSpacing={10}
           scrollToEnd={true}
           
@@ -140,6 +160,8 @@ export const MarketSpreadChart = ({ data, loading }: Props) => {
           yAxisLabelWidth={50}
           yAxisTextStyle={{ color: theme.colors.muted, fontSize: 10 }}
           xAxisLabelTextStyle={{ color: theme.colors.muted, fontSize: 10 }}
+          
+          
           
           formatYLabel={(label) => {
             const num = parseInt(label);
