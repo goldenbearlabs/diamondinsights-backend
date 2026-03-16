@@ -2,6 +2,11 @@ export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL || "").trim();
 export const WEB_BASE_URL = (process.env.EXPO_PUBLIC_WEB_BASE_URL || "https://diamondinsights.app")
   .trim()
   .replace(/\/+$/, "");
+export const RC_API_KEY_SOURCE = process.env.EXPO_PUBLIC_RC_TEST_API_KEY?.trim()
+  ? "EXPO_PUBLIC_RC_TEST_API_KEY"
+  : process.env.EXPO_PUBLIC_RC_API_KEY?.trim()
+    ? "EXPO_PUBLIC_RC_API_KEY"
+    : null;
 export const RC_API_KEY = (
   process.env.EXPO_PUBLIC_RC_TEST_API_KEY ||
   process.env.EXPO_PUBLIC_RC_API_KEY ||

@@ -11,16 +11,18 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import type { CustomerInfo, PurchasesOffering, PurchasesPackage } from "react-native-purchases";
+import type { CustomerInfo, PurchasesOffering, PurchasesOfferings, PurchasesPackage } from "react-native-purchases";
 
 import { auth } from "../src/lib/firebase";
 import {
-  getRevenueCatCurrentOffering,
+  getRevenueCatDebugState,
   getRevenueCatCustomerInfo,
+  getRevenueCatOfferings,
   hasRevenueCatProEntitlement,
   isRevenueCatEnabled,
   openRevenueCatManageSubscriptions,
   purchaseRevenueCatPackage,
+  type RevenueCatDebugState,
   restoreRevenueCatPurchases,
   syncRevenueCatUser,
 } from "../src/lib/revenuecat";
@@ -100,8 +102,9 @@ export default function PaywallScreen() {
   const router = useRouter();
 
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo | null>(null);
-  const [offering, setOffering] = useState<PurchasesOffering | null>(null);
+  const [offerings, setOfferings] = useState<PurchasesOfferings | null>(null);
   const [backendEntitlements, setBackendEntitlements] = useState<EntitlementsMeResponse | null>(null);
+  const [revenueCatDebugState, setRevenueCatDebugState] = useState<RevenueCatDebugState | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncingBackend, setSyncingBackend] = useState(false);
@@ -113,7 +116,13 @@ export default function PaywallScreen() {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const availablePackages = useMemo(() => offering?.availablePackages ?? [], [offering]);
+  const currentOffering = offerings?.current ?? null;
+  const fallbackOffering = useMemo<PurchasesOffering | null>(() => {
+    if (currentOffering) return currentOffering;
+    const allOfferings = offerings ? Object.values(offerings.all) : [];
+    return allOfferings.length === 1 ? allOfferings[0] : null;
+  }, [currentOffering, offerings]);
+  const availablePackages = useMemo(() => fallbackOffering?.availablePackages ?? [], [fallbackOffering]);
   const selectedPackage =
     availablePackages.find((candidate) => candidate.identifier === selectedPackageId) ??
     availablePackages[0] ??
@@ -148,32 +157,34 @@ export default function PaywallScreen() {
     try {
       if (!isRevenueCatEnabled()) {
         setCustomerInfo(null);
-        setOffering(null);
+        setOfferings(null);
         setBackendEntitlements(null);
+        setRevenueCatDebugState(null);
         clearBackendProStatus();
         setError(
-          "RevenueCat is not configured. Add EXPO_PUBLIC_RC_TEST_API_KEY in apps/mobile/.env and run a native development build.",
+          "RevenueCat is not configured. Add EXPO_PUBLIC_RC_API_KEY (or EXPO_PUBLIC_RC_TEST_API_KEY) in apps/mobile/.env and run a native development build.",
         );
         return;
       }
 
       await syncRevenueCatUser(auth.currentUser?.uid ?? null);
-      const [nextCustomerInfoResult, nextOfferingResult, nextBackendEntitlementsResult] =
+      const [nextCustomerInfoResult, nextOfferingsResult, nextBackendEntitlementsResult] =
         await Promise.allSettled([
         getRevenueCatCustomerInfo(),
-        getRevenueCatCurrentOffering(),
+        getRevenueCatOfferings(),
         getMyEntitlements(),
         ]);
 
       if (nextCustomerInfoResult.status === "rejected") {
         throw nextCustomerInfoResult.reason;
       }
-      if (nextOfferingResult.status === "rejected") {
-        throw nextOfferingResult.reason;
+      if (nextOfferingsResult.status === "rejected") {
+        throw nextOfferingsResult.reason;
       }
 
       setCustomerInfo(nextCustomerInfoResult.value);
-      setOffering(nextOfferingResult.value);
+      setOfferings(nextOfferingsResult.value);
+      setRevenueCatDebugState(await getRevenueCatDebugState(nextOfferingsResult.value));
 
       if (nextBackendEntitlementsResult.status === "fulfilled") {
         setBackendEntitlements(nextBackendEntitlementsResult.value);
@@ -188,8 +199,17 @@ export default function PaywallScreen() {
         );
       }
 
-      if (nextOfferingResult.value?.availablePackages?.length) {
-        setSelectedPackageId((current) => current ?? nextOfferingResult.value.availablePackages[0].identifier);
+      const nextCurrentOffering = nextOfferingsResult.value?.current ?? null;
+      const nextFallbackOffering = nextCurrentOffering
+        ? nextCurrentOffering
+        : nextOfferingsResult.value
+          ? Object.values(nextOfferingsResult.value.all).length === 1
+            ? Object.values(nextOfferingsResult.value.all)[0]
+            : null
+          : null;
+
+      if (nextFallbackOffering?.availablePackages?.length) {
+        setSelectedPackageId((current) => current ?? nextFallbackOffering.availablePackages[0].identifier);
       }
     } catch (err: unknown) {
       const message = getErrorMessage(err, "Failed to load RevenueCat paywall data.");
@@ -373,7 +393,20 @@ export default function PaywallScreen() {
             </TouchableOpacity>
           </View>
 
-          {offering ? <Text style={styles.offeringMeta}>Offering: {offering.identifier}</Text> : null}
+          {currentOffering ? (
+            <Text style={styles.offeringMeta}>Current offering: {currentOffering.identifier}</Text>
+          ) : null}
+          {!currentOffering && fallbackOffering ? (
+            <Text style={styles.warningText}>
+              RevenueCat returned one offering but no current offering is set. Using {fallbackOffering.identifier} as a
+              fallback.
+            </Text>
+          ) : null}
+          {!currentOffering && revenueCatDebugState && revenueCatDebugState.allOfferingIds.length > 0 && !fallbackOffering ? (
+            <Text style={styles.warningText}>
+              RevenueCat returned offerings, but no current offering is set in the dashboard.
+            </Text>
+          ) : null}
           {loading ? (
             <View style={styles.loadingState}>
               <ActivityIndicator color={theme.colors.text} />
@@ -383,7 +416,11 @@ export default function PaywallScreen() {
           {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
 
           {!loading && !availablePackages.length ? (
-            <Text style={styles.emptyText}>No packages are available in the current offering.</Text>
+            <Text style={styles.emptyText}>
+              {revenueCatDebugState?.allOfferingIds.length
+                ? "No packages are available for the selected offering context."
+                : "RevenueCat returned zero offerings for this app, platform, and API key."}
+            </Text>
           ) : null}
 
           {availablePackages.map((revenueCatPackage) => {
@@ -440,6 +477,35 @@ export default function PaywallScreen() {
               {managingSubscription ? "Opening..." : "Manage or Cancel Membership"}
             </Text>
           </TouchableOpacity>
+
+          {revenueCatDebugState ? (
+            <View style={styles.debugCard}>
+              <Text style={styles.debugTitle}>RevenueCat debug</Text>
+              <Text style={styles.debugLine}>Platform: {revenueCatDebugState.platform}</Text>
+              <Text style={styles.debugLine}>API key present: {revenueCatDebugState.hasApiKey ? "yes" : "no"}</Text>
+              <Text style={styles.debugLine}>
+                API key source: {revenueCatDebugState.apiKeySource ?? "missing"}
+              </Text>
+              <Text style={styles.debugLine}>
+                SDK configured: {revenueCatDebugState.isConfigured ? "yes" : "no"}
+              </Text>
+              <Text style={styles.debugLine}>
+                App user ID: {revenueCatDebugState.appUserId ?? "anonymous or unavailable"}
+              </Text>
+              <Text style={styles.debugLine}>Entitlement ID: {revenueCatDebugState.entitlementId}</Text>
+              <Text style={styles.debugLine}>
+                Current offering: {revenueCatDebugState.currentOfferingId ?? "none"}
+              </Text>
+              <Text style={styles.debugLine}>
+                All offerings: {revenueCatDebugState.allOfferingIds.join(", ") || "none"}
+              </Text>
+              {revenueCatDebugState.allOfferingIds.map((offeringId) => (
+                <Text key={offeringId} style={styles.debugLineMuted}>
+                  {offeringId}: {revenueCatDebugState.packageCountsByOfferingId[offeringId] ?? 0} package(s)
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -650,6 +716,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  warningText: {
+    color: "#fbbf24",
+    fontSize: 13,
+    lineHeight: 18,
+  },
   loadingState: {
     paddingVertical: 16,
     alignItems: "center",
@@ -761,6 +832,29 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     fontSize: 13,
     fontWeight: "700",
+  },
+  debugCard: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.1)",
+    gap: 4,
+  },
+  debugTitle: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  debugLine: {
+    color: theme.colors.text,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  debugLineMuted: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
   },
   disabledButton: {
     opacity: 0.65,
