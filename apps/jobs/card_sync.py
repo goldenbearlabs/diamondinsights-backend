@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 
 class CardSync(Job):
-    def __init__(self, reload_all_years: bool = True, base_url_template: Optional[str] = None):
+    def __init__(self, reload_all_years: bool = False, base_url_template: Optional[str] = None):
         super().__init__()
         self.reload_all_years = reload_all_years
         self.base_url_template = base_url_template or "https://mlb{year}.theshow.com"
@@ -53,8 +53,8 @@ class CardSync(Job):
         self.logger.info("cards prepared count=%s", len(cards_to_process))
 
         self._upsert_cards(db_session, cards_to_process, chunk_size=5000)
-        self._upsert_card_quirks(db_session, cards_to_process, chunk_size=5000)
-        self._upsert_pitches(db_session, cards_to_process, chunk_size=5000)
+        self._upsert_card_quirks(db_session, cards_to_process, chunk_size=1000)
+        self._upsert_pitches(db_session, cards_to_process, chunk_size=250)
         self._log_end(cards_upserted=len(cards_to_process))
 
     def _upsert_cards(self, session: Session, cards: List[Card], chunk_size: int = 5000) -> None:
@@ -310,6 +310,26 @@ class CardAdapter:
             card.reaction_time = self._json_get(item, "reaction_time", 0) or 0
             card.blocking = self._json_get(item, "blocking", 0) or 0
             card.speed = self._json_get(item, "speed", 0) or 0
+
+            # new pitching splits
+            card.hits_per_bf_left = self._json_get(item, "hits_per_bf_left", 0) or 0
+            card.hits_per_bf_right = self._json_get(item, "hits_per_bf_right", 0) or 0
+            card.k_per_bf_left = self._json_get(item, "k_per_bf_left", 0) or 0
+            card.k_per_bf_right = self._json_get(item, "k_per_bf_right", 0) or 0
+            # new fielding directions
+            card.reaction_left = self._json_get(item, "reaction_left", 0) or 0
+            card.reaction_right = self._json_get(item, "reaction_right", 0) or 0
+            card.reaction_forward = self._json_get(item, "reaction_forward", 0) or 0
+            card.reaction_back = self._json_get(item, "reaction_back", 0) or 0
+            # new general stats
+            card.pop_time = self._json_get(item, "pop_time", 0) or 0
+            card.base_stealing = self._json_get(item, "base_stealing", 0) or 0
+            card.contact_rating = self._json_get(item, "contact_rating", 0) or 0
+            card.power_rating = self._json_get(item, "power_rating", 0) or 0
+            card.speed_rating = self._json_get(item, "speed_rating", 0) or 0
+            card.arm_rating = self._json_get(item, "arm_rating", 0) or 0
+            card.fielding_rating = self._json_get(item, "fielding_rating", 0) or 0
+
             card.baserunning_ability = self._json_get(item, "baserunning_ability", 0) or 0
             card.baserunning_aggression = self._json_get(item, "baserunning_aggression", 0) or 0
             card.hit_rank_image = self._json_get(item, "hit_rank_image", "")
@@ -349,8 +369,28 @@ class CardAdapter:
                 if l_name and l_name in self.location_map:
                     card_locs.append(self.location_map[l_name])
             card.locations = card_locs
-
+            """
             item_pitches = self._json_get(item, "pitches", [])
+            pitch_objs = []
+            for p in item_pitches:
+                new_pitch = Pitch(
+                    card_id=card.id,
+                    name=p.get("name"),
+                    speed=p.get("speed", 0),
+                    control=p.get("control", 0),
+                    movement=p.get("movement", 0)
+                )
+                pitch_objs.append(new_pitch)
+            card.pitches = pitch_objs
+            """
+
+            raw_pitches = self._json_get(item, "pitches", [])
+            
+            if isinstance(raw_pitches, dict):
+                item_pitches = raw_pitches.get("pitches", [])
+            else:
+                item_pitches = raw_pitches
+
             pitch_objs = []
             for p in item_pitches:
                 new_pitch = Pitch(
