@@ -1,4 +1,5 @@
 from typing import Any, Optional
+from shared.core.config import CURRENT_MLB_SEASON
 from shared.queue.redis_connector import RedisConnector
 from shared.queue.queue import Queue, Payload
 
@@ -33,7 +34,7 @@ class JobPusher:
     def player_sync(self, reload_all_players: bool = False) -> Payload:
         return self.push("player_sync", {"rerun_all_cards": reload_all_players})
     
-    def game_boxscore_sync(self, reload_all_games: bool = False, season = 2025) -> Payload:
+    def game_boxscore_sync(self, reload_all_games: bool = False, season: int = CURRENT_MLB_SEASON) -> Payload:
         return self.push("game_boxscore_sync", {"reload_all_games": reload_all_games, "season": season})
     
     def prediction_sync(self) -> Payload:

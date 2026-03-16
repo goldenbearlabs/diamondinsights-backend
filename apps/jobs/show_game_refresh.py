@@ -32,8 +32,14 @@ from shared.storage.game_files import (
     BatterBoxscoreRow, PitcherBoxscoreRow, PitcherGameScoreRow,
 )
 
-GAME_HISTORY_URL = os.getenv("GAME_HISTORY_URL", "https://mlb25.theshow.com/apis/game_history.json")
-GAME_LOG_URL = os.getenv("GAME_LOG_URL", "https://mlb25.theshow.com/apis/game_log.json")
+GAME_HISTORY_URL = os.getenv(
+    "GAME_HISTORY_URL",
+    f"https://mlb{CURRENT_SHOW_YEAR}.theshow.com/apis/game_history.json",
+)
+GAME_LOG_URL = os.getenv(
+    "GAME_LOG_URL",
+    f"https://mlb{CURRENT_SHOW_YEAR}.theshow.com/apis/game_log.json",
+)
 MLB_THE_SHOW_YEAR = CURRENT_SHOW_YEAR
 
 _PITCH_TYPES = {

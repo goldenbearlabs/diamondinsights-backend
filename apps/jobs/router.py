@@ -5,6 +5,7 @@ import socket
 import threading
 from datetime import datetime, timezone
 
+from shared.core.config import CURRENT_MLB_SEASON
 from shared.queue.redis_connector import RedisConnector
 from shared.queue.queue import Queue
 from shared.db.database import SessionLocal
@@ -116,7 +117,7 @@ class Router:
                             case "game_boxscore_sync":
                                 from apps.jobs.game_boxscore_sync import GameBoxscoreSync
                                 reload_all = int(payload.args.get("reload_all_games", False))
-                                season = int(payload.args.get("season", 2025))
+                                season = int(payload.args.get("season", CURRENT_MLB_SEASON))
                                 GameBoxscoreSync(season_year=season,rerun_all_boxscores=reload_all).run(session)
 
                             case "market_sync":

@@ -10,10 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from apps.jobs.job import Job
+from shared.core.config import CURRENT_SHOW_YEAR
 from shared.db.models import ShowProfile, ShowProfileOnlineStats
 
 
-SHOW_SEARCH_URL = os.getenv("SHOW_SEARCH_URL", "https://mlb25.theshow.com/apis/player_search.json")
+SHOW_SEARCH_URL = os.getenv(
+    "SHOW_SEARCH_URL",
+    f"https://mlb{CURRENT_SHOW_YEAR}.theshow.com/apis/player_search.json",
+)
 
 
 def _utcnow() -> datetime:

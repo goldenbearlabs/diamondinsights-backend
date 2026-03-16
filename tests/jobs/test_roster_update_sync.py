@@ -159,7 +159,7 @@ def test_sync_update_details_builds_changes_and_handles_commit_failure(monkeypat
 def test_run_respects_reload_all_years(monkeypatch):
     sync = roster_sync.RosterUpdateSync(reload_all_years=False)
 
-    monkeypatch.setattr(roster_sync, "THE_SHOW_YEARS", [25, 24])
+    monkeypatch.setattr(roster_sync, "THE_SHOW_YEARS", [26, 25])
 
     fetched = []
 
@@ -175,7 +175,7 @@ def test_run_respects_reload_all_years(monkeypatch):
 
     sync.run(db_session=object())
 
-    assert fetched == ["https://mlb25.theshow.com/apis/roster_updates.json"]
+    assert fetched == ["https://mlb26.theshow.com/apis/roster_updates.json"]
 
 
 def test_run_calls_sync_update_and_sleep(monkeypatch):
