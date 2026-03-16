@@ -74,6 +74,25 @@ class Card(Base):
     k_per_bf: Mapped[int] = mapped_column()
     bb_per_bf: Mapped[int] = mapped_column()
     hr_per_bf: Mapped[int] = mapped_column()
+
+    hits_per_bf_left: Mapped[int] = mapped_column(server_default="0")
+    hits_per_bf_right: Mapped[int] = mapped_column(server_default="0")
+    k_per_bf_left: Mapped[int] = mapped_column(server_default="0")
+    k_per_bf_right: Mapped[int] = mapped_column(server_default="0")
+
+    reaction_left: Mapped[int] = mapped_column(server_default="0")
+    reaction_right: Mapped[int] = mapped_column(server_default="0")
+    reaction_forward: Mapped[int] = mapped_column(server_default="0")
+    reaction_back: Mapped[int] = mapped_column(server_default="0")
+
+    pop_time: Mapped[int] = mapped_column(server_default="0")
+    base_stealing: Mapped[int] = mapped_column(server_default="0")
+    contact_rating: Mapped[int] = mapped_column(server_default="0")
+    power_rating: Mapped[int] = mapped_column(server_default="0")
+    speed_rating: Mapped[int] = mapped_column(server_default="0")
+    arm_rating: Mapped[int] = mapped_column(server_default="0")
+    fielding_rating: Mapped[int] = mapped_column(server_default="0")
+    
     pitch_velocity: Mapped[int] = mapped_column()
     pitch_control: Mapped[int] = mapped_column()
     pitch_movement: Mapped[int] = mapped_column()
