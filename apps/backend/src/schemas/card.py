@@ -45,7 +45,11 @@ class CardResponse(BaseModel):
     stamina: int
     pitching_clutch: int
     hits_per_bf: int
+    hits_per_bf_left: int
+    hits_per_bf_right: int
     k_per_bf: int
+    k_per_bf_left: int
+    k_per_bf_right: int
     bb_per_bf: int
     hr_per_bf: int
     pitch_velocity: int
@@ -68,6 +72,10 @@ class CardResponse(BaseModel):
     arm_strength: int
     arm_accuracy: int
     reaction_time: int
+    reaction_left: int
+    reaction_right: int
+    reaction_forward: int
+    reaction_back: int
     blocking: int
     speed: int
     baserunning_ability: int

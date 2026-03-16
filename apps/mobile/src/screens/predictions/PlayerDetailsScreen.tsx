@@ -46,6 +46,7 @@ export default function PlayerDetailsScreen() {
   const card = params.cardData ? JSON.parse(params.cardData as string) : null;
 
   const isTwoWay = TWO_WAY_PLAYERS.includes(card?.name ?? "");
+  const isMlb26Card = Number(card?.year) === 26;
 
   const showPitching = card?.is_hitter === false || isTwoWay;
   const showBatting = card?.is_hitter === true || isTwoWay;
@@ -581,8 +582,22 @@ export default function PlayerDetailsScreen() {
                       <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
                       <AttributeBar label="Stamina" value={card.stamina || 0} barColor={PITCHING_COLOR} />
                       <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} barColor={PITCHING_COLOR} />
-                      <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} /> 
-                      <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
+                      {isMlb26Card ? (
+                        <>
+                          <AttributeBar label="H/9 L" value={card.hits_per_bf_left || 0} barColor={PITCHING_COLOR} />
+                          <AttributeBar label="H/9 R" value={card.hits_per_bf_right || 0} barColor={PITCHING_COLOR} />
+                        </>
+                      ) : (
+                        <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} />
+                      )}
+                      {isMlb26Card ? (
+                        <>
+                          <AttributeBar label="K/9 L" value={card.k_per_bf_left || 0} barColor={PITCHING_COLOR} />
+                          <AttributeBar label="K/9 R" value={card.k_per_bf_right || 0} barColor={PITCHING_COLOR} />
+                        </>
+                      ) : (
+                        <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
+                      )}
                       <AttributeBar label="BB/9" value={card.bb_per_bf || 0} barColor={PITCHING_COLOR} />
                       {showBatting && <View style={{ height: 24 }} />}
                     </>
@@ -612,7 +627,16 @@ export default function PlayerDetailsScreen() {
                   <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} maxValue={99} />
                   <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} maxValue={99} />
                   <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} maxValue={99} />
-                  <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  {isMlb26Card ? (
+                    <>
+                      <AttributeBar label="Reaction Left" value={card.reaction_left || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                      <AttributeBar label="Reaction Right" value={card.reaction_right || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                      <AttributeBar label="Reaction Forward" value={card.reaction_forward || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                      <AttributeBar label="Reaction Back" value={card.reaction_back || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                    </>
+                  ) : (
+                    <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  )}
                   <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} maxValue={99} />
 
                   {/* Running (hitters only) */}
@@ -1132,7 +1156,7 @@ const styles = StyleSheet.create({
   marketColumn: { flex: 1 },
   marketLabel: { color: theme.colors.muted, fontSize: 13, fontWeight: '600' },
   marketValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-  marketIcon: { width: 16, height: 16, resizeMode: 'contain' },
+  marketIcon: { width: 16, height: 16 },
   marketValue: { color: 'white', fontSize: 16, fontWeight: '700' },
   marketValueText: { marginTop: 6 },
   quirkRow: {
