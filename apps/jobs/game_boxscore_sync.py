@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from shared.core.batting_aggregator import MLBPlayByPlayBattingAggregator
 from shared.core.baserunning_aggregator import MLBPlayByPlayBaserunningAggregator
+from shared.core.config import CURRENT_MLB_SEASON
 from shared.core.pitching_aggregator import MLBPlayByPlayPitchingAggregator
 from shared.core.http_client import APIClient
 from shared.db.models import (
@@ -37,7 +38,7 @@ IGNORED_GAME_TYPES = {"S", "A", "I", "E"}
 class GameBoxscoreSync(Job):
     def __init__(
         self,
-        season_year: Optional[int] = 2025,
+        season_year: Optional[int] = CURRENT_MLB_SEASON,
         window_start_month: int = 2,
         window_start_day: int = 1,
         window_end_month: int = 12,

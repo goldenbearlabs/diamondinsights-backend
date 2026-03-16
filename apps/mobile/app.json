@@ -17,10 +17,10 @@
       }
     },
     "android": {
+      "package": "com.goldenbearlabs.diamondinsights",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/logo.png",
-        "package": "com.goldenbearlabs.diamondinsights"
+        "foregroundImage": "./assets/images/logo.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false

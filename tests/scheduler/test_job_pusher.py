@@ -26,7 +26,7 @@ class FakeQueue:
         ("market_candle_sync", {}, {}),
         ("player_sync", {}, {"reload_all_players": False}),
         ("player_sync", {"reload_all_players": True}, {"reload_all_players": True}),
-        ("game_boxscore_sync", {}, {"reload_all_games": False, "season": 2025}),
+        ("game_boxscore_sync", {}, {"reload_all_games": False, "season": 2026}),
         ("game_boxscore_sync", {"reload_all_games": True, "season": 2024}, {"reload_all_games": True, "season": 2024}),
         ("prediction_sync", {}, {}),
         ("card_position_overall_sync", {}, {}),

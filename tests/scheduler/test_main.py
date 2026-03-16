@@ -36,7 +36,7 @@ class StubPusher:
     def player_sync(self, reload_all_players=False):
         return reload_all_players
 
-    def game_boxscore_sync(self, reload_all_games=False, season=2025):
+    def game_boxscore_sync(self, reload_all_games=False, season=2026):
         return (reload_all_games, season)
 
     def prediction_sync(self):
@@ -205,7 +205,7 @@ def test_module_entrypoint_runs_main(monkeypatch):
         def player_sync(self, reload_all_players=False):
             return reload_all_players
 
-        def game_boxscore_sync(self, reload_all_games=False, season=2025):
+        def game_boxscore_sync(self, reload_all_games=False, season=2026):
             return (reload_all_games, season)
 
         def prediction_sync(self):

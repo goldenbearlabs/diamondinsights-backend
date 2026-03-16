@@ -1,12 +1,14 @@
 import { Linking, Platform } from "react-native";
 import Purchases, {
+  LOG_LEVEL,
   type CustomerInfo,
   type PurchasesOffering,
+  type PurchasesOfferings,
   type PurchasesPackage,
 } from "react-native-purchases";
 import RevenueCatUI, { PAYWALL_RESULT } from "react-native-purchases-ui";
 
-import { RC_API_KEY, RC_PRO_ENTITLEMENT_ID } from "./config";
+import { RC_API_KEY, RC_API_KEY_SOURCE, RC_PRO_ENTITLEMENT_ID } from "./config";
 
 export type ProPaywallResult = {
   result: PAYWALL_RESULT;
@@ -14,25 +16,52 @@ export type ProPaywallResult = {
 };
 
 const isNativeRevenueCatPlatform = Platform.OS === "ios" || Platform.OS === "android";
+let revenueCatDebugLoggingConfigured = false;
+
+export type RevenueCatDebugState = {
+  platform: string;
+  hasApiKey: boolean;
+  apiKeySource: string | null;
+  entitlementId: string;
+  isConfigured: boolean;
+  appUserId: string | null;
+  currentOfferingId: string | null;
+  allOfferingIds: string[];
+  packageCountsByOfferingId: Record<string, number>;
+};
 
 const requireRevenueCatKey = () => {
   if (!RC_API_KEY) {
-    throw new Error("Missing EXPO_PUBLIC_RC_TEST_API_KEY");
+    throw new Error("Missing EXPO_PUBLIC_RC_API_KEY or EXPO_PUBLIC_RC_TEST_API_KEY");
   }
 };
 
 export const isRevenueCatEnabled = (): boolean => isNativeRevenueCatPlatform && Boolean(RC_API_KEY);
 
+async function configureRevenueCatDebugLogging(): Promise<void> {
+  if (!__DEV__ || revenueCatDebugLoggingConfigured) return;
+  await Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+  Purchases.setLogHandler((level, message) => {
+    console.log(`[revenuecat:${String(level).toLowerCase()}] ${message}`);
+  });
+  revenueCatDebugLoggingConfigured = true;
+}
+
 export async function initializeRevenueCat(appUserId: string | null = null): Promise<void> {
   if (!isNativeRevenueCatPlatform) return;
   requireRevenueCatKey();
 
-  if (await Purchases.isConfigured()) return;
+  if (await Purchases.isConfigured()) {
+    await configureRevenueCatDebugLogging();
+    return;
+  }
 
   Purchases.configure({
     apiKey: RC_API_KEY,
     appUserID: appUserId || undefined,
+    diagnosticsEnabled: __DEV__,
   });
+  await configureRevenueCatDebugLogging();
 }
 
 export async function identifyRevenueCatUser(firebaseUid: string | null): Promise<void> {
@@ -67,11 +96,15 @@ export async function getRevenueCatCustomerInfo(): Promise<CustomerInfo | null> 
   return Purchases.getCustomerInfo();
 }
 
-export async function getRevenueCatCurrentOffering(): Promise<PurchasesOffering | null> {
+export async function getRevenueCatOfferings(): Promise<PurchasesOfferings | null> {
   if (!isNativeRevenueCatPlatform || !RC_API_KEY) return null;
   await initializeRevenueCat();
-  const offerings = await Purchases.getOfferings();
-  return offerings.current;
+  return Purchases.getOfferings();
+}
+
+export async function getRevenueCatCurrentOffering(): Promise<PurchasesOffering | null> {
+  const offerings = await getRevenueCatOfferings();
+  return offerings?.current ?? null;
 }
 
 export async function purchaseRevenueCatPackage(
@@ -112,6 +145,29 @@ export const hasRevenueCatProEntitlement = (customerInfo: CustomerInfo | null): 
 
 export async function getRevenueCatProStatus(): Promise<boolean> {
   return hasRevenueCatProEntitlement(await getRevenueCatCustomerInfo());
+}
+
+export async function getRevenueCatDebugState(
+  offeringsOverride: PurchasesOfferings | null = null,
+): Promise<RevenueCatDebugState> {
+  const isConfigured = isNativeRevenueCatPlatform && RC_API_KEY ? await Purchases.isConfigured() : false;
+  const offerings = offeringsOverride ?? (isConfigured ? await Purchases.getOfferings() : null);
+  const appUserId = isConfigured ? await Purchases.getAppUserID() : null;
+  const allOfferings = offerings ? Object.values(offerings.all) : [];
+
+  return {
+    platform: Platform.OS,
+    hasApiKey: Boolean(RC_API_KEY),
+    apiKeySource: RC_API_KEY_SOURCE,
+    entitlementId: RC_PRO_ENTITLEMENT_ID,
+    isConfigured,
+    appUserId,
+    currentOfferingId: offerings?.current?.identifier ?? null,
+    allOfferingIds: allOfferings.map((offering) => offering.identifier),
+    packageCountsByOfferingId: Object.fromEntries(
+      allOfferings.map((offering) => [offering.identifier, offering.availablePackages.length]),
+    ),
+  };
 }
 
 export async function presentProPaywall(): Promise<ProPaywallResult> {

@@ -10,6 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from shared.core.config import CURRENT_SHOW_YEAR
 from shared.db.database import get_db
 from shared.db.models import Users, ShowProfile, ShowProfileOnlineStats
 from src.api.routes.users import firebase_claims
@@ -22,7 +23,10 @@ from .models import LinkShowBody, ShowProfileOut
 router = APIRouter()
 public_router = APIRouter()
 
-SHOW_SEARCH_URL = os.getenv("SHOW_SEARCH_URL", "https://mlb25.theshow.com/apis/player_search.json")
+SHOW_SEARCH_URL = os.getenv(
+    "SHOW_SEARCH_URL",
+    f"https://mlb{CURRENT_SHOW_YEAR}.theshow.com/apis/player_search.json",
+)
 
 
 def _read_positive_int_env(name: str, default: int) -> int:
