@@ -98,8 +98,8 @@ export const SearchResultsPanel = ({
       setError(null);
 
       try {
-        // Enforce the Year 25 search here
-        const params = new URLSearchParams({ q: trimmed, limit: "12", year: "25" });
+        // Enforce the Year 26 search here
+        const params = new URLSearchParams({ q: trimmed, limit: "12", year: "26" });
         if (mode === "users") params.set("users_only", "true");
         if (mode === "cards") params.set("cards_only", "true");
         const data = await apiGet<SearchResponse>(`/search?${params.toString()}`);

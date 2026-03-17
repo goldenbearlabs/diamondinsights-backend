@@ -26,7 +26,7 @@ export const PredictionCarousel = () => {
 
   useEffect(() => {
     // API Call: Live Series, Diamond, 2025, Limit 6
-    apiGet<CardData[]>('/cards?series=live&rarity=diamond&year=25&limit=6')
+    apiGet<CardData[]>('/cards?series=live&rarity=diamond&year=26&limit=6')
       .then((data) => setCards(data))
       .catch((err) => console.error(err));
   }, []);

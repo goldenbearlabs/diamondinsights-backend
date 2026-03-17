@@ -26,6 +26,11 @@ from src.core.cache import build_cache_key, get_cache_client, get_cached_json, s
 router = APIRouter(prefix="/portfolios", tags=["portfolios"])
 
 PORTFOLIO_CACHE_TTL_SEC = 3600
+PORTFOLIO_CACHE_VERSION = "v2"
+
+
+def get_portfolio_cache_key(user_id: int) -> str:
+    return build_cache_key("portfolio", PORTFOLIO_CACHE_VERSION, user_id)
 
 
 # ── Auth dependency ─────────────────────────────────────────────────────────────
@@ -88,7 +93,7 @@ def get_my_portfolio(
 ):
     """Return the authenticated user's portfolio with all holdings and card data."""
     
-    cache_key = build_cache_key("portfolio", user.id)
+    cache_key = get_portfolio_cache_key(user.id)
     cached = get_cached_json(cache, cache_key)
     if cached is not None:
         return PortfolioResponse.model_validate(cached)
@@ -191,7 +196,7 @@ def add_holding(
         holding.card.predicted_ovr = pred
 
     if cache:
-        cache.delete(build_cache_key("portfolio", user.id))
+        cache.delete(get_portfolio_cache_key(user.id))
 
     return holding
 
@@ -246,7 +251,7 @@ def update_holding(
         holding.card.predicted_ovr = pred
 
     if cache:
-        cache.delete(build_cache_key("portfolio", user.id))
+        cache.delete(get_portfolio_cache_key(user.id))
 
     return holding
 
@@ -289,7 +294,7 @@ def delete_holding(
     db.commit()
 
     if cache:
-        cache.delete(build_cache_key("portfolio", user.id))
+        cache.delete(get_portfolio_cache_key(user.id))
 
 
 # ── PATCH /portfolios/me ────────────────────────────────────────────────────────
@@ -321,7 +326,7 @@ def update_portfolio_privacy(
     
     # 4. Invalidate Cache since the portfolio changed
     if cache:
-        cache.delete(build_cache_key("portfolio", user.id))
+        cache.delete(get_portfolio_cache_key(user.id))
 
     return portfolio
 
@@ -337,7 +342,7 @@ def get_user_portfolio(
 ):
     """Get a user's portfolio. Only visible if portfolio is public or if requesting user is the owner."""
     
-    cache_key = build_cache_key("portfolio", user_id)
+    cache_key = get_portfolio_cache_key(user_id)
     cached = get_cached_json(cache, cache_key)
     
     if cached is not None:

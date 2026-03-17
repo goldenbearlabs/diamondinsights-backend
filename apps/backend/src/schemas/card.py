@@ -78,6 +78,8 @@ class CardResponse(BaseModel):
     reaction_back: int
     blocking: int
     speed: int
+    pop_time: int
+    base_stealing: int
     baserunning_ability: int
     baserunning_aggression: int
     quirks: Optional[list[QuirkResponse]] = None

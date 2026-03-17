@@ -64,12 +64,18 @@ type CardRanking = {
   stamina?: number | null;
   pitching_clutch?: number | null;
   hits_per_bf?: number | null;
+  hits_per_bf_left?: number | null;
+  hits_per_bf_right?: number | null;
   k_per_bf?: number | null;
+  k_per_bf_left?: number | null;
+  k_per_bf_right?: number | null;
   bb_per_bf?: number | null;
   hr_per_bf?: number | null;
   pitch_velocity?: number | null;
   pitch_control?: number | null;
   pitch_movement?: number | null;
+  pop_time?: number | null;
+  base_stealing?: number | null;
   quirks?: { name: string }[];
   year?: number | null;
 };
@@ -98,12 +104,18 @@ type AttributeKey =
   | "stamina"
   | "pitching_clutch"
   | "hits_per_bf"
+  | "hits_per_bf_left"
+  | "hits_per_bf_right"
   | "k_per_bf"
+  | "k_per_bf_left"
+  | "k_per_bf_right"
   | "bb_per_bf"
   | "hr_per_bf"
   | "pitch_velocity"
   | "pitch_control"
-  | "pitch_movement";
+  | "pitch_movement"
+  | "pop_time"
+  | "base_stealing";
 type SortKey = "name" | "hands" | "position" | "your" | "meta" | "true" | "ovr" | AttributeKey;
 
 type AttributeColumn = {
@@ -116,7 +128,7 @@ type MultiSelectOption = {
   label: string;
 };
 
-const ATTRIBUTE_COLUMNS: AttributeColumn[] = [
+const LEGACY_ATTRIBUTE_COLUMNS: AttributeColumn[] = [
   { key: "contact_left", label: "CON L" },
   { key: "contact_right", label: "CON R" },
   { key: "power_left", label: "POW L" },
@@ -146,8 +158,42 @@ const ATTRIBUTE_COLUMNS: AttributeColumn[] = [
   { key: "pitch_movement", label: "BRK" },
 ];
 
+const YEAR_26_ATTRIBUTE_COLUMNS: AttributeColumn[] = [
+  { key: "contact_left", label: "CON L" },
+  { key: "contact_right", label: "CON R" },
+  { key: "power_left", label: "POW L" },
+  { key: "power_right", label: "POW R" },
+  { key: "plate_vision", label: "VIS" },
+  { key: "plate_discipline", label: "DISC" },
+  { key: "batting_clutch", label: "CLT" },
+  { key: "bunting_ability", label: "BNT" },
+  { key: "drag_bunting_ability", label: "DRG BNT" },
+  { key: "hitting_durability", label: "H DUR" },
+  { key: "fielding_ability", label: "FLD" },
+  { key: "arm_strength", label: "ARM" },
+  { key: "arm_accuracy", label: "ACC" },
+  { key: "reaction_time", label: "REAC" },
+  { key: "blocking", label: "BLK" },
+  { key: "speed", label: "SPD" },
+  { key: "base_stealing", label: "STEAL" },
+  { key: "baserunning_ability", label: "BR ABIL" },
+  { key: "baserunning_aggression", label: "BR AGG" },
+  { key: "stamina", label: "STA" },
+  { key: "pitching_clutch", label: "P CLT" },
+  { key: "hits_per_bf_left", label: "H/9 L" },
+  { key: "hits_per_bf_right", label: "H/9 R" },
+  { key: "k_per_bf_left", label: "K/9 L" },
+  { key: "k_per_bf_right", label: "K/9 R" },
+  { key: "bb_per_bf", label: "BB/9" },
+  { key: "hr_per_bf", label: "HR/9" },
+  { key: "pitch_velocity", label: "VEL" },
+  { key: "pitch_control", label: "CTRL" },
+  { key: "pitch_movement", label: "BRK" },
+  { key: "pop_time", label: "POP" },
+];
+
 const PAGE_SIZE = 30;
-const YEAR_OPTIONS: number[] = [25, 24, 23, 22];
+const YEAR_OPTIONS: number[] = [26, 25, 24, 23, 22];
 const POSITION_OPTIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "SP", "RP", "CP"];
 const HAND_OPTIONS = ["L", "R", "S"];
 const TEXT_SORT_KEYS: SortKey[] = ["name", "hands", "position"];
@@ -163,7 +209,7 @@ export default function CardsRankingsScreen() {
 
   const router = useRouter();
 
-  const [selectedYear, setSelectedYear] = useState<number>(25);
+  const [selectedYear, setSelectedYear] = useState<number>(26);
   const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
   const [includeSecondary, setIncludeSecondary] = useState(false);
   const [selectedBatHands, setSelectedBatHands] = useState<string[]>([]);
@@ -186,6 +232,10 @@ export default function CardsRankingsScreen() {
     [tableScrollY]
   );
   const requestSequenceRef = useRef(0);
+  const attributeColumns = useMemo(
+    () => (selectedYear === 26 ? YEAR_26_ATTRIBUTE_COLUMNS : LEGACY_ATTRIBUTE_COLUMNS),
+    [selectedYear]
+  );
 
   const offset = useMemo(() => (page - 1) * PAGE_SIZE, [page]);
 
@@ -313,7 +363,7 @@ export default function CardsRankingsScreen() {
 
   const clearMenuSelections = () => {
     if (openFilterMenu === "year") {
-      setSelectedYear(25);
+      setSelectedYear(26);
       setPage(1);
       return;
     }
@@ -617,7 +667,7 @@ export default function CardsRankingsScreen() {
                   center
                 />
 
-                {ATTRIBUTE_COLUMNS.map((column) => (
+                {attributeColumns.map((column) => (
                   <SortHeader
                     key={column.key}
                     label={column.label}
@@ -764,7 +814,7 @@ export default function CardsRankingsScreen() {
                         <Text style={styles.centerCellText}>{formatOverall(card.ovr)}</Text>
                       </View>
 
-                      {ATTRIBUTE_COLUMNS.map((column) => (
+                      {attributeColumns.map((column) => (
                         <View
                           key={`${card.id}-${column.key}`}
                           style={[

@@ -32,12 +32,14 @@ export default function CardScreen() {
   const card = params.cardData ? JSON.parse(params.cardData as string) : null;
 
   const isTwoWay = TWO_WAY_PLAYERS.includes(card?.name ?? "");
+  const isMlb26Card = Number(card?.year) === 26;
   const showPitching = card?.is_hitter === false || isTwoWay;
   const showBatting = card?.is_hitter === true || isTwoWay;
 
   const BATTING_COLOR = '#3b82f6';
   const PITCHING_COLOR = '#fbbf24';
   const FIELDING_COLOR = '#22c55e';
+  const ARM_COLOR = '#2431eb';
   const RUNNING_COLOR = '#A78BFA';
 
   type CardQuirk = { card_id: string; name: string; description: string; img: string };
@@ -251,9 +253,22 @@ export default function CardScreen() {
                     <View style={[styles.subHeaderDivider, { backgroundColor: PITCHING_COLOR }]} />
                     <AttributeBar label="Stamina" value={card.stamina || 0} barColor={PITCHING_COLOR} />
                     <AttributeBar label="Pitching Clutch" value={card.pitching_clutch || 0} barColor={PITCHING_COLOR} />
-                    <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} />
-                    <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
-                    <AttributeBar label="BB/9" value={card.bb_per_bf || 0} barColor={PITCHING_COLOR} />
+                    {isMlb26Card ? (
+                      <>
+                        <AttributeBar label="H/9 L" value={card.hits_per_bf_left || 0} barColor={PITCHING_COLOR} />
+                        <AttributeBar label="H/9 R" value={card.hits_per_bf_right || 0} barColor={PITCHING_COLOR} />
+                      </>
+                    ) : (
+                      <AttributeBar label="H/9" value={card.hits_per_bf || 0} barColor={PITCHING_COLOR} />
+                    )}
+                    {isMlb26Card ? (
+                      <>
+                        <AttributeBar label="K/9 L" value={card.k_per_bf_left || 0} barColor={PITCHING_COLOR} />
+                        <AttributeBar label="K/9 R" value={card.k_per_bf_right || 0} barColor={PITCHING_COLOR} />
+                      </>
+                    ) : (
+                      <AttributeBar label="K/9" value={card.k_per_bf || 0} barColor={PITCHING_COLOR} />
+                    )}
                     {showBatting && <View style={{ height: 24 }} />}
                   </>
                 )}
@@ -278,10 +293,28 @@ export default function CardScreen() {
                 <Text style={[styles.subHeader, { color: FIELDING_COLOR }]}>Fielding</Text>
                 <View style={[styles.subHeaderDivider, { backgroundColor: FIELDING_COLOR }]} />
                 <AttributeBar label="Fielding" value={card.fielding_ability || 0} barColor={FIELDING_COLOR} maxValue={99} />
-                <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={FIELDING_COLOR} maxValue={99} />
-                <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={FIELDING_COLOR} maxValue={99} />
-                <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                {isMlb26Card ? (
+                  <>
+                    <AttributeBar label="Reaction Left" value={card.reaction_left || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                    <AttributeBar label="Reaction Right" value={card.reaction_right || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                    <AttributeBar label="Reaction Forward" value={card.reaction_forward || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                    <AttributeBar label="Reaction Back" value={card.reaction_back || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                  </>
+                ) : (
+                  <AttributeBar label="Reaction Time" value={card.reaction_time || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                )}
                 <AttributeBar label="Blocking" value={card.blocking || 0} barColor={FIELDING_COLOR} maxValue={99} />
+                <AttributeBar label="Pop Time" value={card.pop_time || 0} barColor={FIELDING_COLOR} maxValue={99} />
+
+                {card.is_hitter && (
+                  <>
+                    <View style={{ height: 16 }} />
+                    <Text style={[styles.subHeader, { color: ARM_COLOR }]}>Arm</Text>
+                    <View style={[styles.subHeaderDivider, { backgroundColor: ARM_COLOR }]} />
+                    <AttributeBar label="Arm Strength" value={card.arm_strength || 0} barColor={ARM_COLOR} maxValue={99} />
+                    <AttributeBar label="Arm Accuracy" value={card.arm_accuracy || 0} barColor={ARM_COLOR} maxValue={99} />
+                  </>
+                )}
 
                 {card.is_hitter && (
                   <>
@@ -289,8 +322,14 @@ export default function CardScreen() {
                     <Text style={[styles.subHeader, { color: RUNNING_COLOR }]}>Running</Text>
                     <View style={[styles.subHeaderDivider, { backgroundColor: RUNNING_COLOR }]} />
                     <AttributeBar label="Speed" value={card.speed || 0} barColor={RUNNING_COLOR} maxValue={99} />
-                    <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} maxValue={99} />
-                    <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} maxValue={99} />
+                    {isMlb26Card ? (
+                      <AttributeBar label="Stealing" value={card.base_stealing || 0} barColor={RUNNING_COLOR} maxValue={99} />
+                    ) : (
+                      <>
+                        <AttributeBar label="Baserunning Ability" value={card.baserunning_ability || 0} barColor={RUNNING_COLOR} maxValue={99} />
+                        <AttributeBar label="Baserunning Aggression" value={card.baserunning_aggression || 0} barColor={RUNNING_COLOR} maxValue={99} />
+                      </>
+                    )}
                   </>
                 )}
               </View>
