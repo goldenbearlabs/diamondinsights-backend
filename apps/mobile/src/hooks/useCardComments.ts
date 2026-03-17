@@ -1,10 +1,9 @@
 import { useState, useCallback, useEffect } from "react";
 import { Alert } from "react-native";
 import { apiGetAuth, apiPostAuth, apiDeleteAuth, apiPutAuth } from "../lib/api";
-import { ChatMessage } from "../types/chat"; // We reuse ChatMessage type for consistency
+import { ChatMessage } from "../types/chat"; 
 import { auth } from "../lib/firebase";
 
-// Helper interface for the actual API response structure
 interface CommentOut {
   id: number;
   created_at: string; // ISO date
@@ -25,12 +24,10 @@ export const useCardComments = (cardId: string) => {
   const [comments, setComments] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Convert API Response -> UI Model (ChatMessage)
   const mapCommentToMessage = useCallback((c: CommentOut, allComments: CommentOut[]): ChatMessage => {
     const currentUserUid = auth.currentUser?.uid || "unknown";
     
-    // We construct a fake array of UIDs for likes because ChatRow logic expects it
-    // If I liked it, add my UID. Fills the rest with dummies.
+    
     const likes: string[] = [];
     if (c.is_liked_by_me) {
       likes.push(currentUserUid);
@@ -40,7 +37,6 @@ export const useCardComments = (cardId: string) => {
         likes.push(`dummy_${c.id}_${i}`);
     }
 
-    // Resolve parent info for the UI reply preview
     let replyTo = undefined;
     if (c.parent_id) {
         const parent = allComments.find(p => p.id === c.parent_id);

@@ -48,7 +48,11 @@ type CardModel = {
   stamina: number;
   pitching_clutch: number;
   hits_per_bf: number;
+  hits_per_bf_left?: number | null;
+  hits_per_bf_right?: number | null;
   k_per_bf: number;
+  k_per_bf_left?: number | null;
+  k_per_bf_right?: number | null;
   bb_per_bf: number;
   hr_per_bf: number;
   pitch_velocity: number;
@@ -69,10 +73,16 @@ type CardModel = {
   arm_strength: number;
   arm_accuracy: number;
   reaction_time: number;
+  reaction_left?: number | null;
+  reaction_right?: number | null;
+  reaction_forward?: number | null;
+  reaction_back?: number | null;
   blocking: number;
+  pop_time?: number | null;
   speed: number;
   baserunning_ability: number;
   baserunning_aggression: number;
+  base_stealing?: number | null;
   quirks?: CardQuirk[];
 };
 
@@ -87,6 +97,7 @@ type ComparisonSortKey = "meta_overall" | "ovr" | "true_overall" | "your_overall
 const MAX_CARDS = 5;
 const MIN_SEARCH_LENGTH = 2;
 const SEARCH_RESULT_LIMIT = 30;
+const TWO_WAY_PLAYERS = ["Shohei Ohtani"];
 const COMPARISON_SORT_OPTIONS: { key: ComparisonSortKey; label: string }[] = [
   { key: "meta_overall", label: "Meta Overall" },
   { key: "ovr", label: "OVR" },
@@ -94,7 +105,7 @@ const COMPARISON_SORT_OPTIONS: { key: ComparisonSortKey; label: string }[] = [
   { key: "your_overall", label: "Your Overall" },
 ];
 
-const FIELD_ROWS: FieldRow[] = [
+const BASE_ROWS: FieldRow[] = [
   { key: "team_short_name", label: "Team" },
   { key: "year", label: "Year" },
   { key: "series_name", label: "Series" },
@@ -113,7 +124,9 @@ const FIELD_ROWS: FieldRow[] = [
   { key: "throw_hand", label: "Throw Hand" },
   { key: "height", label: "Height" },
   { key: "weight", label: "Weight" },
-  { key: "is_hitter", label: "Is Hitter" },
+];
+
+const BATTING_ROWS: FieldRow[] = [
   { key: "contact_left", label: "CON L" },
   { key: "contact_right", label: "CON R" },
   { key: "power_left", label: "POW L" },
@@ -124,15 +137,43 @@ const FIELD_ROWS: FieldRow[] = [
   { key: "bunting_ability", label: "BUNT" },
   { key: "drag_bunting_ability", label: "DRAG BUNT" },
   { key: "hitting_durability", label: "HIT DUR" },
+];
+
+const FIELDING_ROWS_LEGACY: FieldRow[] = [
   { key: "fielding_durability", label: "FLD DUR" },
   { key: "fielding_ability", label: "FLD" },
-  { key: "arm_strength", label: "ARM STR" },
-  { key: "arm_accuracy", label: "ARM ACC" },
   { key: "reaction_time", label: "REAC" },
   { key: "blocking", label: "BLK" },
+];
+
+const FIELDING_ROWS_MLB26: FieldRow[] = [
+  { key: "fielding_durability", label: "FLD DUR" },
+  { key: "fielding_ability", label: "FLD" },
+  { key: "reaction_left", label: "REAC L" },
+  { key: "reaction_right", label: "REAC R" },
+  { key: "reaction_forward", label: "REAC FWD" },
+  { key: "reaction_back", label: "REAC BACK" },
+  { key: "blocking", label: "BLK" },
+  { key: "pop_time", label: "POP" },
+];
+
+const ARM_ROWS: FieldRow[] = [
+  { key: "arm_strength", label: "ARM STR" },
+  { key: "arm_accuracy", label: "ARM ACC" },
+];
+
+const RUNNING_ROWS_LEGACY: FieldRow[] = [
   { key: "speed", label: "SPD" },
   { key: "baserunning_ability", label: "BR ABIL" },
   { key: "baserunning_aggression", label: "BR AGG" },
+];
+
+const RUNNING_ROWS_MLB26: FieldRow[] = [
+  { key: "speed", label: "SPD" },
+  { key: "base_stealing", label: "STEAL" },
+];
+
+const PITCHING_ROWS_LEGACY: FieldRow[] = [
   { key: "stamina", label: "STA" },
   { key: "pitching_clutch", label: "P CLT" },
   { key: "hits_per_bf", label: "H/9" },
@@ -142,6 +183,23 @@ const FIELD_ROWS: FieldRow[] = [
   { key: "pitch_velocity", label: "VEL" },
   { key: "pitch_control", label: "CTRL" },
   { key: "pitch_movement", label: "BRK" },
+];
+
+const PITCHING_ROWS_MLB26: FieldRow[] = [
+  { key: "stamina", label: "STA" },
+  { key: "pitching_clutch", label: "P CLT" },
+  { key: "hits_per_bf_left", label: "H/9 L" },
+  { key: "hits_per_bf_right", label: "H/9 R" },
+  { key: "k_per_bf_left", label: "K/9 L" },
+  { key: "k_per_bf_right", label: "K/9 R" },
+  { key: "bb_per_bf", label: "BB/9" },
+  { key: "hr_per_bf", label: "HR/9" },
+  { key: "pitch_velocity", label: "VEL" },
+  { key: "pitch_control", label: "CTRL" },
+  { key: "pitch_movement", label: "BRK" },
+];
+
+const TRAILING_ROWS: FieldRow[] = [
   { key: "quirks", label: "Quirks" },
 ];
 
@@ -169,7 +227,7 @@ export default function CardComparisonScreen() {
       setSearchError(null);
       try {
         const params = new URLSearchParams();
-        params.set("year", "25");
+        params.set("year", "26");
         params.set("limit", String(SEARCH_RESULT_LIMIT));
         if (trimmed.length >= MIN_SEARCH_LENGTH) {
           params.set("name", trimmed);
@@ -228,8 +286,15 @@ export default function CardComparisonScreen() {
   }, [searchResults, slots, activeSlotIndex, searchSortKey]);
 
   const rowMaxValue = useMemo(() => {
+    const rowMap = new Map<string, FieldRow>();
+    selectedCards.forEach((card) => {
+      getRowsForCard(card).forEach((row) => {
+        rowMap.set(String(row.key), row);
+      });
+    });
+
     const out = new Map<string, number>();
-    FIELD_ROWS.forEach((row) => {
+    rowMap.forEach((row) => {
       const numericValues = selectedCards
         .map((card) => numericFromValue(getRowRawValue(card, row.key)))
         .filter((value): value is number => value !== null);
@@ -284,7 +349,7 @@ export default function CardComparisonScreen() {
     <View style={styles.screen}>
       <View style={styles.headerBar}>
         <Text style={styles.title}>Card Comparison</Text>
-        <Text style={styles.subtitle}>Tap a card panel to search year 25 cards and compare side-by-side</Text>
+        <Text style={styles.subtitle}>Tap a card panel to search cards and compare side-by-side</Text>
       </View>
 
       <View style={styles.compareShell}>
@@ -347,7 +412,7 @@ export default function CardComparisonScreen() {
                 {slots.map((card, index) => (
                   <View key={`slot-values-${index}`} style={styles.column}>
                     {card ? (
-                      FIELD_ROWS.map((row) => {
+                      getRowsForCard(card).map((row) => {
                         const rawValue = getRowRawValue(card, row.key);
                         const displayValue = formatCompareValue(rawValue, String(row.key));
                         const numericValue = numericFromValue(rawValue);
@@ -534,6 +599,42 @@ function getRowRawValue(card: CardModel, key: FieldKey): unknown {
     return getYourOverallValue(card);
   }
   return card[key];
+}
+
+function normalizeCardYear(cardYear: number | null | undefined): number | null {
+  if (typeof cardYear !== "number" || !Number.isFinite(cardYear)) return null;
+  return cardYear >= 100 ? cardYear % 100 : cardYear;
+}
+
+function isMlb26Card(card: CardModel): boolean {
+  return normalizeCardYear(card.year) === 26;
+}
+
+function isTwoWayCard(card: CardModel): boolean {
+  return TWO_WAY_PLAYERS.includes(card.name ?? "");
+}
+
+function getRowsForCard(card: CardModel): FieldRow[] {
+  const mlb26 = isMlb26Card(card);
+  const twoWay = isTwoWayCard(card);
+  const showPitching = card.is_hitter === false || twoWay;
+  const showBatting = card.is_hitter === true || twoWay;
+
+  const rows: FieldRow[] = [...BASE_ROWS];
+
+  if (showPitching) {
+    rows.push(...(mlb26 ? PITCHING_ROWS_MLB26 : PITCHING_ROWS_LEGACY));
+  }
+
+  if (showBatting) {
+    rows.push(...BATTING_ROWS);
+    rows.push(...(mlb26 ? FIELDING_ROWS_MLB26 : FIELDING_ROWS_LEGACY));
+    rows.push(...ARM_ROWS);
+    rows.push(...(mlb26 ? RUNNING_ROWS_MLB26 : RUNNING_ROWS_LEGACY));
+  }
+
+  rows.push(...TRAILING_ROWS);
+  return rows;
 }
 
 function numericFromValue(value: unknown): number | null {

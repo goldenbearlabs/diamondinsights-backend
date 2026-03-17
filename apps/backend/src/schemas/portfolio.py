@@ -30,6 +30,7 @@ class HoldingCardInfo(BaseModel):
     name: str
     team_short_name: str
     ovr: int
+    year: Optional[int] = None
     baked_img: str
     display_position: str
     rarity: str
@@ -40,7 +41,11 @@ class HoldingCardInfo(BaseModel):
     stamina: Optional[int] = None
     pitching_clutch: Optional[int] = None
     hits_per_bf: Optional[int] = None
+    hits_per_bf_left: Optional[int] = None
+    hits_per_bf_right: Optional[int] = None
     k_per_bf: Optional[int] = None
+    k_per_bf_left: Optional[int] = None
+    k_per_bf_right: Optional[int] = None
     bb_per_bf: Optional[int] = None
     hr_per_bf: Optional[int] = None
     
@@ -53,16 +58,24 @@ class HoldingCardInfo(BaseModel):
     plate_discipline: Optional[int] = None
     batting_clutch: Optional[int] = None
     bunting_ability: Optional[int] = None
+    drag_bunting_ability: Optional[int] = None
     
     # Baserunning attributes
     baserunning_ability: Optional[int] = None
+    baserunning_aggression: Optional[int] = None
+    base_stealing: Optional[int] = None
     speed: Optional[int] = None
     
     # Fielding attributes
     arm_strength: Optional[int] = None
     arm_accuracy: Optional[int] = None
     reaction_time: Optional[int] = None
+    reaction_left: Optional[int] = None
+    reaction_right: Optional[int] = None
+    reaction_forward: Optional[int] = None
+    reaction_back: Optional[int] = None
     blocking: Optional[int] = None
+    pop_time: Optional[int] = None
     fielding_ability: Optional[int] = None
     
     # Predicted attributes

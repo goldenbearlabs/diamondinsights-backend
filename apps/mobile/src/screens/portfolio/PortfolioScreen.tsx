@@ -154,7 +154,7 @@ export default function PortfolioScreen() {
       setSearching(true);
       try {
         const results = await apiGet<CardSearchResult[]>(
-          `/cards?series=live&year=25&name=${encodeURIComponent(searchText)}&limit=8`
+          `/cards?series=live&year=26&name=${encodeURIComponent(searchText)}&limit=8`
         );
         setSearchResults(results);
       } catch {

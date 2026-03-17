@@ -27,6 +27,7 @@ type CardData = {
   id: string;
   name: string;
   team_short_name: string;
+  year: number;
   ovr: number;
   baked_img: string;
   series: string;
@@ -34,6 +35,14 @@ type CardData = {
   age: number;
   is_hitter: boolean;
   rarity: string;
+  hits_per_bf_left: number;
+  hits_per_bf_right: number;
+  k_per_bf_left: number;
+  k_per_bf_right: number;
+  reaction_left: number;
+  reaction_right: number;
+  reaction_forward: number;
+  reaction_back: number;
   comment_count: number;
   user_prediction_count: number;
   predicted_ovr: number | null;
@@ -164,7 +173,7 @@ export default function PredictionsScreen() {
     try {
       const offset = (targetPage - 1) * targetLimit;
       
-      let url = `/cards?series=live&year=25&offset=${offset}&limit=${targetLimit}`;
+      let url = `/cards?series=live&year=26&offset=${offset}&limit=${targetLimit}`;
       
       if (query.trim().length > 0) {
         url += `&name=${encodeURIComponent(query)}`;

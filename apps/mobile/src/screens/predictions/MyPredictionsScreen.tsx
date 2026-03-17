@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -10,6 +10,7 @@ import {
   DeviceEventEmitter
 } from 'react-native';
 import { Image } from 'expo-image';
+import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useRouter, Stack} from 'expo-router';
@@ -38,6 +39,7 @@ type CardData = {
 
 export default function MyPredictionsScreen() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const { isPro, loading: proStatusLoading } = useBackendProStatus();
   const showProLock = isPro === false || (isPro === null && !proStatusLoading);
   const [cards, setCards] = useState<CardData[]>([]);
@@ -46,8 +48,19 @@ export default function MyPredictionsScreen() {
   const limit = 15; // Hardcoded limit
   const [hasMore, setHasMore] = useState(true); 
   const [refreshing, setRefreshing] = useState(false);
+  const latestRequestIdRef = useRef(0);
 
   useEffect(() => {
+    if (!isFocused) return;
+    if (page !== 1) {
+      setPage(1);
+      return;
+    }
+    loadCards(1);
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (!isFocused) return;
     loadCards(page);
   }, [page]);
 
@@ -100,18 +113,22 @@ export default function MyPredictionsScreen() {
   }, []);
 
   const loadCards = async (targetPage: number) => {
+    const requestId = ++latestRequestIdRef.current;
     setLoading(true);
     try {
       const offset = (targetPage - 1) * limit;
       // Hardcoded my_predictions flag and auth requirement
-      const url = `/cards?series=live&year=25&offset=${offset}&limit=${limit}&my_predictions=true`;
+      const url = `/cards?series=live&year=26&offset=${offset}&limit=${limit}&my_predictions=true`;
       
       const newCards = await apiGetAuth<CardData[]>(url);
+      if (requestId !== latestRequestIdRef.current) return;
       setCards(newCards);
       setHasMore(newCards.length === limit);
     } catch (error) {
+      if (requestId !== latestRequestIdRef.current) return;
       console.error("Failed to fetch my predictions:", error);
     } finally {
+      if (requestId !== latestRequestIdRef.current) return;
       setLoading(false);
       setRefreshing(false);
     }
@@ -119,8 +136,19 @@ export default function MyPredictionsScreen() {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    setPage(1);
+    if (page !== 1) {
+      setPage(1);
+      return;
+    }
     loadCards(1);
+  };
+
+  const goToPage = (nextPage: number) => {
+    if (nextPage === page) {
+      loadCards(nextPage);
+      return;
+    }
+    setPage(nextPage);
   };
 
   const renderItem = ({ item }: { item: CardData }) => {
@@ -197,7 +225,7 @@ export default function MyPredictionsScreen() {
           <TouchableOpacity 
             style={[styles.navBtn, page === 1 && styles.navBtnDisabled]}
             disabled={page === 1}
-            onPress={() => setPage(p => Math.max(1, p - 1))}
+            onPress={() => goToPage(Math.max(1, page - 1))}
           >
             <Ionicons name="chevron-back" size={20} color={page === 1 ? '#555' : 'white'} />
             <Text style={[styles.navBtnText, page === 1 && { color: '#555' }]}>Prev</Text>
@@ -208,7 +236,7 @@ export default function MyPredictionsScreen() {
           <TouchableOpacity 
             style={[styles.navBtn, !hasMore && styles.navBtnDisabled]}
             disabled={!hasMore}
-            onPress={() => setPage(p => p + 1)}
+            onPress={() => goToPage(page + 1)}
           >
             <Text style={[styles.navBtnText, !hasMore && { color: '#555' }]}>Next</Text>
             <Ionicons name="chevron-forward" size={20} color={!hasMore ? '#555' : 'white'} />
