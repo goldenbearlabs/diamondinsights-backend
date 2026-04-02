@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from shared.core.config import CURRENT_MLB_SEASON
 from shared.db.database import get_db
 from shared.db.models import Card, MLBGame, MLBGameBattingStats, MLBGamePitchingStats, RosterUpdate
 from src.schemas.mlb_season_stats import (
@@ -87,7 +88,7 @@ def _get_last_major_update_cutoff(db: Session) -> Optional[datetime.datetime]:
 @router.get("/season/{card_id}", response_model=SeasonStatsResponse)
 def get_season_stats(
     card_id: str,
-    season: int = Query(2025),
+    season: int = Query(CURRENT_MLB_SEASON),
     window: Optional[str] = Query(None, description="Time window filter: '7d', '14d', or 'last_update'. Omit for full season."),
     db: Session = Depends(get_db),
 ):

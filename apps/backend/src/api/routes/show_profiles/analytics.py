@@ -18,6 +18,7 @@ from redis import Redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from shared.core.config import CURRENT_SHOW_YEAR
 from shared.db.database import get_db
 from shared.db.models import Card, Pitch, ShowBallParks
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
@@ -57,7 +58,7 @@ from .profile import _get_authed_user, _get_profile_for_user, _get_profile_by_us
 router = APIRouter()
 public_router = APIRouter()
 
-SHOW_CARD_YEAR = 25
+SHOW_CARD_YEAR = CURRENT_SHOW_YEAR
 
 _DIFFICULTY_ORDER = [
     "rookie",
