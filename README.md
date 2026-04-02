@@ -105,3 +105,5 @@ Steps to add new machine as a runner
 ## Design Dependencies
 
 ** We rely on the firebase_service_key.json file being located in a secrets folder at runtime to init our firebase instance **
+
+ssh -N -L 55432:127.0.0.1:5432 luke@142.93.158.215
