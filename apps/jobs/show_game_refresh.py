@@ -2286,7 +2286,7 @@ class ShowGameRefresh(Job):
             if len(pos_filtered) > 0:
                 cand_ids = pos_filtered
 
-        # From here on, we score candidates using their 2025 cards
+        # From here on, we score candidates using current-year cards.
         # 4) most matches on Card.display_position == pos_code
         # 5) then matches in Card.display_secondary_positions
         # 6) then most cards

@@ -16,6 +16,7 @@ from src.core.cache import (
     get_cached_json,
     set_cached_json,
 )
+from shared.core.config import CURRENT_SHOW_YEAR
 from shared.db.database import get_db
 from shared.db.models import Card, CardPositionOverall, Users
 
@@ -81,7 +82,7 @@ def search(
     q: str = Query(min_length=1, max_length=80),
     users_only: bool = Query(default=False),
     cards_only: bool = Query(default=False),
-    year: int | None = Query(default=25), # Added default year filter
+    year: int | None = Query(default=CURRENT_SHOW_YEAR),
     limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     cache: Redis | None = Depends(get_cache_client),
