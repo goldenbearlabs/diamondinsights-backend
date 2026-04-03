@@ -191,19 +191,17 @@ def test_append_and_write_records_merges_and_ranks():
 
     hr_rows = written[RECORDS_HOME_RUNS_KEY]
     assert len(hr_rows) == 2
-    assert hr_rows[0]["rank"] == 1
-    assert hr_rows[0]["distance_ft"] == 430.0
-    assert hr_rows[1]["rank"] == 2
-    assert hr_rows[1]["distance_ft"] == 410.0
+    hr_rank_by_distance = {row["distance_ft"]: row["rank"] for row in hr_rows}
+    assert hr_rank_by_distance[430.0] == 1
+    assert hr_rank_by_distance[410.0] == 2
     assert all("distance_plus_ft" in r for r in hr_rows)
     assert all("rank_plus" in r for r in hr_rows)
 
     hh_rows = written[RECORDS_HARDEST_HITS_KEY]
     assert len(hh_rows) == 2
-    assert hh_rows[0]["rank"] == 1
-    assert hh_rows[0]["exit_vel_mph"] == 112.0
-    assert hh_rows[1]["rank"] == 2
-    assert hh_rows[1]["exit_vel_mph"] == 108.0
+    hh_rank_by_ev = {row["exit_vel_mph"]: row["rank"] for row in hh_rows}
+    assert hh_rank_by_ev[112.0] == 1
+    assert hh_rank_by_ev[108.0] == 2
 
 
 def test_merge_record_rows_dedupes_when_existing_is_empty():
@@ -318,42 +316,37 @@ def test_append_and_write_records_dedupes_home_runs_by_business_key():
     assert hr_rows[0]["batter_mlb_id"] == 77
 
 
-def test_run_processes_only_games_missing_from_checkpoint():
+def test_run_processes_only_globally_unprocessed_games_and_fans_out_to_both_users():
     agg = _agg()
 
     class FakeSession:
-        def scalars(self, _stmt):
-            return ["u1", "u2", "u3"]
+        pass
 
     games = [
+        SimpleNamespace(id="g2", home_profile_username="u2", away_profile_username="u3", ball_park_id=None),
         SimpleNamespace(id="g1", home_profile_username="u1", away_profile_username="u2", ball_park_id=None),
         SimpleNamespace(id="g2", home_profile_username="u2", away_profile_username="u3", ball_park_id=None),
-        SimpleNamespace(id="g3", home_profile_username="u1", away_profile_username="u3", ball_park_id=None),
-        SimpleNamespace(id="g3", home_profile_username="u1", away_profile_username="u3", ball_park_id=None),
     ]
     bundles = {
-        "g3": {
-            "plate_appearances": [{"game_id": "g3", "event_seq": 3, "result": "single"}],
+        "g2": {
+            "plate_appearances": [{"game_id": "g2", "event_seq": 3, "result": "single"}],
             "events": [],
             "batting_boxscores": [{"mlb_id": 11, "ab": 2}],
             "pitching_boxscores": [{"mlb_id": 21, "outs_pitched": 6}],
         }
     }
 
-    checkpoints = {
-        "u1": {"g1"},
-        "u2": {"g1", "g2"},
-        "u3": {"g2", "g3"},
-    }
-
     load_calls = []
     written_parquet = {}
     written_checkpoints = {}
+    written_global_checkpoints = []
     record_calls = []
 
-    agg._fetch_all_games = lambda _db_session, _usernames: games
+    agg._fetch_all_games = lambda _db_session, _usernames=None: games
     agg._fetch_ballpark_elevations = lambda _db_session: {}
-    agg._read_checkpoint_game_ids = lambda username: set(checkpoints.get(username, set()))
+    agg._read_global_checkpoint_game_ids = lambda: {"g1"}
+    agg._write_global_checkpoint_game_ids = lambda game_ids: written_global_checkpoints.append(set(game_ids))
+    agg._read_checkpoint_game_ids = lambda username: set()
     agg._load_user_state = lambda _username: {
         "pas_existing": [],
         "pas_new": [],
@@ -413,10 +406,71 @@ def test_run_processes_only_games_missing_from_checkpoint():
 
     agg.run(FakeSession())
 
-    assert load_calls == ["g3"]
-    assert "facts/u1/pas.parquet" in written_parquet
-    assert "facts/u1/batting_boxscores.parquet" in written_parquet
-    assert "facts/u1/pitching_boxscores.parquet" in written_parquet
-    assert "u1" in written_checkpoints
-    assert written_checkpoints["u1"] == {"g1", "g3"}
+    assert load_calls == ["g2"]
+    assert "facts/u2/pas.parquet" in written_parquet
+    assert "facts/u2/batting_boxscores.parquet" in written_parquet
+    assert "facts/u2/pitching_boxscores.parquet" in written_parquet
+    assert "facts/u3/pas.parquet" in written_parquet
+    assert "facts/u3/batting_boxscores.parquet" in written_parquet
+    assert "facts/u3/pitching_boxscores.parquet" in written_parquet
+    assert written_checkpoints["u2"] == {"g2"}
+    assert written_checkpoints["u3"] == {"g2"}
+    assert written_global_checkpoints == [{"g1", "g2"}]
     assert len(record_calls) == 1
+    assert len(record_calls[0][0]) == 1
+    assert len(record_calls[0][1]) == 1
+
+
+def test_run_skips_user_that_already_has_game_in_pas_when_global_checkpoint_is_stale():
+    agg = _agg()
+
+    class FakeSession:
+        pass
+
+    games = [
+        SimpleNamespace(id="g7", home_profile_username="u1", away_profile_username="u2", ball_park_id=None),
+    ]
+    bundles = {
+        "g7": {
+            "plate_appearances": [{"game_id": "g7", "event_seq": 7, "result": "single"}],
+            "events": [],
+            "batting_boxscores": [{"mlb_id": 12, "ab": 4}],
+            "pitching_boxscores": [{"mlb_id": 22, "outs_pitched": 9}],
+        }
+    }
+
+    written_parquet = {}
+    written_checkpoints = {}
+    written_global_checkpoints = []
+
+    agg._fetch_all_games = lambda _db_session, _usernames=None: games
+    agg._fetch_ballpark_elevations = lambda _db_session: {}
+    agg._read_global_checkpoint_game_ids = lambda: set()
+    agg._write_global_checkpoint_game_ids = lambda game_ids: written_global_checkpoints.append(set(game_ids))
+    agg._read_checkpoint_game_ids = lambda _username: set()
+
+    def fake_load_user_state(username):
+        pas_existing = [{"game_id": "g7", "event_seq": 1, "result": "single"}] if username == "u1" else []
+        return {
+            "pas_existing": pas_existing,
+            "pas_new": [],
+            "batting_box_agg": {},
+            "pitching_box_agg": {},
+        }
+
+    agg._load_user_state = fake_load_user_state
+    agg._build_facts_for_games = lambda _game, _bundle: None
+    agg._collect_record_candidates = lambda **kwargs: None
+    agg._append_and_write_records = lambda _hr, _hh: None
+    agg._load_game_bundle = lambda game_id: bundles[game_id]
+    agg._put_parquet = lambda key, rows: written_parquet.setdefault(key, list(rows))
+    agg._write_checkpoint_game_ids = lambda username, game_ids: written_checkpoints.setdefault(
+        username, set(game_ids)
+    )
+
+    agg.run(FakeSession())
+
+    assert "facts/u1/pas.parquet" not in written_parquet
+    assert "facts/u2/pas.parquet" in written_parquet
+    assert written_checkpoints["u2"] == {"g7"}
+    assert written_global_checkpoints == [{"g7"}]

@@ -5,7 +5,6 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_c
 import json
 import math
 import os
-import random
 from datetime import datetime, timezone
 from io import BytesIO
 from time import perf_counter
@@ -19,13 +18,14 @@ from sqlalchemy.orm import Session
 
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
 from apps.jobs.job import Job
-from shared.db.models import ShowBallParks, ShowProfile, ShowGameSummary
+from shared.db.models import ShowBallParks, ShowGameSummary
 
 
 RECORDS_KEY = "records/records.parquet"
 RECORDS_HOME_RUNS_KEY = "records/home_runs.parquet"
 RECORDS_HARDEST_HITS_KEY = "records/hardest_hits.parquet"
 CHECKPOINT_FILENAME = "checkpoint.json"
+GLOBAL_CHECKPOINT_KEY = "facts/show_game_agg/checkpoint.json"
 BUNDLE_FETCH_WORKERS_DEFAULT = 4
 BUNDLE_FETCH_MAX_IN_FLIGHT_DEFAULT = 8
 
@@ -74,18 +74,13 @@ class ShowGameAgg(Job):
         )
 
         t0 = perf_counter()
-        usernames = [u.strip() for u in db_session.scalars(select(ShowProfile.username)) if u and u.strip()]
-        random.shuffle(usernames)
-        load_usernames_s = perf_counter() - t0
+        processed_game_ids = self._read_global_checkpoint_game_ids()
+        load_global_checkpoint_s = perf_counter() - t0
         self.logger.info(
-            "show game agg timing phase=load_usernames elapsed_s=%.3f usernames=%s",
-            load_usernames_s,
-            len(usernames),
+            "show game agg timing phase=load_global_checkpoint elapsed_s=%.3f processed_games=%s",
+            load_global_checkpoint_s,
+            len(processed_game_ids),
         )
-        if not usernames:
-            return
-
-        load_checkpoints_s = 0.0
 
         t0 = perf_counter()
         ballpark_elevation_by_id = self._fetch_ballpark_elevations(db_session)
@@ -96,9 +91,10 @@ class ShowGameAgg(Job):
             len(ballpark_elevation_by_id),
         )
         users_changed_count = 0
-        records_written = False
-        total_hr_candidates = 0
-        total_hard_candidates = 0
+        user_contexts: dict[str, dict[str, Any]] = {}
+        processed_this_run: set[str] = set()
+        run_hr_candidates: list[dict[str, Any]] = []
+        run_hard_candidates: list[dict[str, Any]] = []
         timings: dict[str, float] = {
             "iterate_games_s": 0.0,
             "load_bundle_s": 0.0,
@@ -108,185 +104,163 @@ class ShowGameAgg(Job):
             "update_user_state_s": 0.0,
             "write_users_s": 0.0,
             "write_records_s": 0.0,
+            "write_global_checkpoint_s": 0.0,
         }
         counters: dict[str, int] = {
             "games_scanned": 0,
             "games_targeted": 0,
-            "target_user_assignments": 0,
+            "users_touched": 0,
             "pas_rows_total": 0,
             "batting_rows_total": 0,
             "pitching_rows_total": 0,
+            "games_already_in_user_state": 0,
         }
 
-        for user_idx, username in enumerate(usernames, start=1):
-            user_started = perf_counter()
+        iter_started = perf_counter()
+        with ThreadPoolExecutor(max_workers=bundle_fetch_workers) as pool:
+            in_flight: dict[Future[tuple[dict[str, Any], float]], tuple[Mapping[str, Any] | ShowGameSummary, str]] = {}
 
-            t0 = perf_counter()
-            checkpoint = self._read_checkpoint_game_ids(username)
-            load_checkpoints_s += perf_counter() - t0
+            def process_completed_future(
+                fut: Future[tuple[dict[str, Any], float]],
+                game: Mapping[str, Any] | ShowGameSummary,
+                game_id: str,
+            ) -> None:
+                bundle, load_elapsed_s = fut.result()
+                timings["load_bundle_s"] += load_elapsed_s
 
-            user_state: Optional[dict[str, Any]] = None
-            existing_pas_game_ids: Optional[set[str]] = None
-            user_changed = False
-            user_hr_candidates: list[dict[str, Any]] = []
-            user_hard_candidates: list[dict[str, Any]] = []
-            user_games_scanned = 0
-            user_games_targeted = 0
+                t0 = perf_counter()
+                self._build_facts_for_games(game, bundle)
+                timings["build_facts_s"] += perf_counter() - t0
 
-            iter_started = perf_counter()
-            with ThreadPoolExecutor(max_workers=bundle_fetch_workers) as pool:
-                in_flight: dict[Future[tuple[dict[str, Any], float]], tuple[Mapping[str, Any] | ShowGameSummary, str]] = {}
+                pas = bundle.get("plate_appearances", []) or []
+                batting_box = bundle.get("batting_boxscores", []) or []
+                pitching_box = bundle.get("pitching_boxscores", []) or []
+                counters["pas_rows_total"] += len(pas)
+                counters["batting_rows_total"] += len(batting_box)
+                counters["pitching_rows_total"] += len(pitching_box)
 
-                def process_completed_future(
-                    fut: Future[tuple[dict[str, Any], float]],
-                    game: Mapping[str, Any] | ShowGameSummary,
-                    game_id: str,
-                ) -> None:
-                    nonlocal user_state, existing_pas_game_ids, user_changed
+                elevation = ballpark_elevation_by_id.get(self._coerce_int(self._game_val(game, "ball_park_id")))
+                t0 = perf_counter()
+                self._collect_record_candidates(
+                    game=game,
+                    pas=pas,
+                    elevation=elevation,
+                    homerun_candidates=run_hr_candidates,
+                    hard_hit_candidates=run_hard_candidates,
+                )
+                timings["collect_records_s"] += perf_counter() - t0
 
-                    bundle, load_elapsed_s = fut.result()
-                    timings["load_bundle_s"] += load_elapsed_s
-
-                    t_user = perf_counter()
-                    if user_state is None:
+                t_user = perf_counter()
+                for username in self._game_usernames(game):
+                    ctx = user_contexts.get(username)
+                    if ctx is None:
                         t0 = perf_counter()
-                        user_state = self._load_user_state(username)
-                        existing_pas_game_ids = self._extract_pas_game_ids(user_state["pas_existing"])
-                        checkpoint.update(existing_pas_game_ids)
+                        ctx = self._load_user_context(username)
                         timings["load_user_state_s"] += perf_counter() - t0
+                        user_contexts[username] = ctx
+                        counters["users_touched"] += 1
 
-                    if existing_pas_game_ids is not None and game_id in existing_pas_game_ids:
-                        checkpoint.add(game_id)
-                        timings["update_user_state_s"] += perf_counter() - t_user
-                        return
-
-                    t0 = perf_counter()
-                    self._build_facts_for_games(game, bundle)
-                    timings["build_facts_s"] += perf_counter() - t0
-
-                    pas = bundle.get("plate_appearances", []) or []
-                    batting_box = bundle.get("batting_boxscores", []) or []
-                    pitching_box = bundle.get("pitching_boxscores", []) or []
-                    counters["pas_rows_total"] += len(pas)
-                    counters["batting_rows_total"] += len(batting_box)
-                    counters["pitching_rows_total"] += len(pitching_box)
-
-                    elevation = ballpark_elevation_by_id.get(self._coerce_int(self._game_val(game, "ball_park_id")))
-                    t0 = perf_counter()
-                    self._collect_record_candidates(
-                        game=game,
-                        pas=pas,
-                        elevation=elevation,
-                        homerun_candidates=user_hr_candidates,
-                        hard_hit_candidates=user_hard_candidates,
-                    )
-                    timings["collect_records_s"] += perf_counter() - t0
-
-                    user_state["pas_new"].extend(pas)
-                    self._agg_batting(user_state["batting_box_agg"], batting_box)
-                    self._agg_pitching(user_state["pitching_box_agg"], pitching_box)
-
+                    existing_pas_game_ids = ctx["existing_pas_game_ids"]
+                    checkpoint = ctx["checkpoint"]
                     checkpoint.add(game_id)
-                    assert existing_pas_game_ids is not None
-                    existing_pas_game_ids.add(game_id)
-                    user_changed = True
-                    timings["update_user_state_s"] += perf_counter() - t_user
-
-                scheduled_game_ids: set[str] = set()
-                for game in self._fetch_all_games(db_session, [username]):
-                    counters["games_scanned"] += 1
-                    user_games_scanned += 1
-                    if user_games_scanned % 10 == 0:
-                        self.logger.info(
-                            "show game agg progress username=%s user_index=%s/%s user_games_scanned=%s user_games_targeted=%s total_games_scanned=%s in_flight=%s",
-                            username,
-                            user_idx,
-                            len(usernames),
-                            user_games_scanned,
-                            user_games_targeted,
-                            counters["games_scanned"],
-                            len(in_flight),
-                        )
-                    game_id = str(self._game_val(game, "id") or "")
-                    if not game_id or game_id in checkpoint or game_id in scheduled_game_ids:
+                    if game_id in existing_pas_game_ids:
+                        counters["games_already_in_user_state"] += 1
+                        ctx["games_skipped"] += 1
                         continue
 
-                    counters["games_targeted"] += 1
-                    counters["target_user_assignments"] += 1
-                    user_games_targeted += 1
+                    self._apply_bundle_to_user_state(ctx["state"], pas, batting_box, pitching_box)
+                    existing_pas_game_ids.add(game_id)
+                    ctx["changed"] = True
+                    ctx["games_applied"] += 1
 
-                    fut = pool.submit(self._load_game_bundle_timed, game_id)
-                    in_flight[fut] = (game, game_id)
-                    scheduled_game_ids.add(game_id)
+                processed_this_run.add(game_id)
+                timings["update_user_state_s"] += perf_counter() - t_user
 
-                    while len(in_flight) >= bundle_fetch_max_in_flight:
-                        done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
-                        for completed in done:
-                            done_game, done_game_id = in_flight.pop(completed)
-                            process_completed_future(completed, done_game, done_game_id)
+            scheduled_game_ids: set[str] = set()
+            for game in self._fetch_all_games(db_session):
+                counters["games_scanned"] += 1
+                if counters["games_scanned"] % 1000 == 0:
+                    self.logger.info(
+                        "show game agg progress games_scanned=%s games_targeted=%s users_touched=%s in_flight=%s",
+                        counters["games_scanned"],
+                        counters["games_targeted"],
+                        counters["users_touched"],
+                        len(in_flight),
+                    )
 
-                for completed in as_completed(list(in_flight.keys())):
-                    done_game, done_game_id = in_flight.pop(completed)
-                    process_completed_future(completed, done_game, done_game_id)
-            timings["iterate_games_s"] += perf_counter() - iter_started
+                game_id = str(self._game_val(game, "id") or "")
+                if not game_id or game_id in processed_game_ids or game_id in scheduled_game_ids:
+                    continue
 
-            if user_changed and user_state is not None:
-                write_started = perf_counter()
-                base_prefix = f"facts/{username}"
-                merged_pas = self._merge_pas_rows(user_state["pas_existing"], user_state["pas_new"])
-                self._put_parquet(f"{base_prefix}/pas.parquet", merged_pas)
-                self._put_parquet(
-                    f"{base_prefix}/batting_boxscores.parquet",
-                    list(user_state["batting_box_agg"].values()),
-                )
-                self._put_parquet(
-                    f"{base_prefix}/pitching_boxscores.parquet",
-                    list(user_state["pitching_box_agg"].values()),
-                )
-                self._write_checkpoint_game_ids(username, checkpoint)
-                timings["write_users_s"] += perf_counter() - write_started
-                users_changed_count += 1
+                counters["games_targeted"] += 1
+                fut = pool.submit(self._load_game_bundle_timed, game_id)
+                in_flight[fut] = (game, game_id)
+                scheduled_game_ids.add(game_id)
 
-            if user_hr_candidates or user_hard_candidates:
-                t0 = perf_counter()
-                self._append_and_write_records(user_hr_candidates, user_hard_candidates)
-                timings["write_records_s"] += perf_counter() - t0
-                records_written = True
+                while len(in_flight) >= bundle_fetch_max_in_flight:
+                    done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
+                    for completed in done:
+                        done_game, done_game_id = in_flight.pop(completed)
+                        process_completed_future(completed, done_game, done_game_id)
 
-            total_hr_candidates += len(user_hr_candidates)
-            total_hard_candidates += len(user_hard_candidates)
+            for completed in as_completed(list(in_flight.keys())):
+                done_game, done_game_id = in_flight.pop(completed)
+                process_completed_future(completed, done_game, done_game_id)
+        timings["iterate_games_s"] += perf_counter() - iter_started
+
+        for username, ctx in user_contexts.items():
+            if not ctx["changed"]:
+                continue
+
+            write_started = perf_counter()
+            base_prefix = f"facts/{username}"
+            user_state = ctx["state"]
+            merged_pas = self._merge_pas_rows(user_state["pas_existing"], user_state["pas_new"])
+            self._put_parquet(f"{base_prefix}/pas.parquet", merged_pas)
+            self._put_parquet(
+                f"{base_prefix}/batting_boxscores.parquet",
+                list(user_state["batting_box_agg"].values()),
+            )
+            self._put_parquet(
+                f"{base_prefix}/pitching_boxscores.parquet",
+                list(user_state["pitching_box_agg"].values()),
+            )
+            self._write_checkpoint_game_ids(username, ctx["checkpoint"])
+            timings["write_users_s"] += perf_counter() - write_started
+            users_changed_count += 1
             self.logger.info(
-                "show game agg user summary username=%s user_index=%s/%s user_changed=%s games_scanned=%s games_targeted=%s hr_candidates=%s hard_candidates=%s elapsed_s=%.3f",
+                "show game agg user summary username=%s user_changed=%s games_applied=%s games_skipped=%s pas_new=%s elapsed_write_s=%.3f",
                 username,
-                user_idx,
-                len(usernames),
-                user_changed,
-                user_games_scanned,
-                user_games_targeted,
-                len(user_hr_candidates),
-                len(user_hard_candidates),
-                perf_counter() - user_started,
+                ctx["changed"],
+                ctx["games_applied"],
+                ctx["games_skipped"],
+                len(user_state["pas_new"]),
+                perf_counter() - write_started,
             )
 
-        if not records_written:
+        t0 = perf_counter()
+        self._append_and_write_records(run_hr_candidates, run_hard_candidates)
+        timings["write_records_s"] += perf_counter() - t0
+
+        if processed_this_run:
             t0 = perf_counter()
-            self._append_and_write_records([], [])
-            timings["write_records_s"] += perf_counter() - t0
+            processed_game_ids.update(processed_this_run)
+            self._write_global_checkpoint_game_ids(processed_game_ids)
+            timings["write_global_checkpoint_s"] += perf_counter() - t0
 
         total_elapsed_s = perf_counter() - run_started
         self.logger.info(
             (
-                "show game agg timing summary total_s=%.3f load_usernames_s=%.3f "
-                "load_checkpoints_s=%.3f load_ballparks_s=%.3f iterate_games_s=%.3f "
+                "show game agg timing summary total_s=%.3f load_global_checkpoint_s=%.3f "
+                "load_ballparks_s=%.3f iterate_games_s=%.3f "
                 "load_bundle_s=%.3f build_facts_s=%.3f collect_records_s=%.3f "
                 "load_user_state_s=%.3f update_user_state_s=%.3f write_users_s=%.3f "
-                "write_records_s=%.3f users=%s users_changed=%s games_scanned=%s "
-                "games_targeted=%s target_user_assignments=%s pas_rows_total=%s "
-                "batting_rows_total=%s pitching_rows_total=%s hr_candidates=%s hard_candidates=%s"
+                "write_records_s=%.3f write_global_checkpoint_s=%.3f users_touched=%s users_changed=%s "
+                "games_scanned=%s games_targeted=%s games_processed=%s games_already_in_user_state=%s "
+                "pas_rows_total=%s batting_rows_total=%s pitching_rows_total=%s hr_candidates=%s hard_candidates=%s"
             ),
             total_elapsed_s,
-            load_usernames_s,
-            load_checkpoints_s,
+            load_global_checkpoint_s,
             load_ballparks_s,
             timings["iterate_games_s"],
             timings["load_bundle_s"],
@@ -296,16 +270,18 @@ class ShowGameAgg(Job):
             timings["update_user_state_s"],
             timings["write_users_s"],
             timings["write_records_s"],
-            len(usernames),
+            timings["write_global_checkpoint_s"],
+            counters["users_touched"],
             users_changed_count,
             counters["games_scanned"],
             counters["games_targeted"],
-            counters["target_user_assignments"],
+            len(processed_this_run),
+            counters["games_already_in_user_state"],
             counters["pas_rows_total"],
             counters["batting_rows_total"],
             counters["pitching_rows_total"],
-            total_hr_candidates,
-            total_hard_candidates,
+            len(run_hr_candidates),
+            len(run_hard_candidates),
         )
 
     def _append_and_write_records(
@@ -585,6 +561,42 @@ class ShowGameAgg(Job):
         df = df.drop(columns=["_value", "_difficulty"], errors="ignore")
         rows[:] = df.to_dict(orient="records")
 
+    def _game_usernames(self, game: Mapping[str, Any] | ShowGameSummary) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for key in ("home_profile_username", "away_profile_username"):
+            username = str(self._game_val(game, key) or "").strip()
+            if not username or username in seen:
+                continue
+            seen.add(username)
+            out.append(username)
+        return out
+
+    def _load_user_context(self, username: str) -> dict[str, Any]:
+        checkpoint = self._read_checkpoint_game_ids(username)
+        state = self._load_user_state(username)
+        existing_pas_game_ids = self._extract_pas_game_ids(state["pas_existing"])
+        checkpoint.update(existing_pas_game_ids)
+        return {
+            "state": state,
+            "checkpoint": checkpoint,
+            "existing_pas_game_ids": existing_pas_game_ids,
+            "changed": False,
+            "games_applied": 0,
+            "games_skipped": 0,
+        }
+
+    def _apply_bundle_to_user_state(
+        self,
+        state: dict[str, Any],
+        pas: list[dict[str, Any]],
+        batting_box: list[dict[str, Any]],
+        pitching_box: list[dict[str, Any]],
+    ) -> None:
+        state["pas_new"].extend(pas)
+        self._agg_batting(state["batting_box_agg"], batting_box)
+        self._agg_pitching(state["pitching_box_agg"], pitching_box)
+
     def _load_user_state(self, username: str) -> dict[str, Any]:
         base_prefix = f"facts/{username}"
         existing_pas = self._read_parquet_optional(f"{base_prefix}/pas.parquet")
@@ -658,6 +670,30 @@ class ShowGameAgg(Job):
 
     def _checkpoint_key(self, username: str) -> str:
         return f"facts/{username}/{CHECKPOINT_FILENAME}"
+
+    def _read_global_checkpoint_game_ids(self) -> set[str]:
+        try:
+            payload = self.spaces.get_json(GLOBAL_CHECKPOINT_KEY)
+        except Exception:
+            return set()
+        if not isinstance(payload, dict):
+            return set()
+        game_ids = payload.get("aggregated_game_ids")
+        if not isinstance(game_ids, list):
+            return set()
+        return {str(gid).strip() for gid in game_ids if str(gid).strip()}
+
+    def _write_global_checkpoint_game_ids(self, game_ids: set[str]) -> None:
+        payload = {
+            "version": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "aggregated_game_ids": sorted(game_ids),
+        }
+        self.spaces.put_json(
+            key=GLOBAL_CHECKPOINT_KEY,
+            obj=payload,
+            cache_control="no-cache",
+        )
 
     def _read_checkpoint_game_ids(self, username: str) -> set[str]:
         key = self._checkpoint_key(username)
@@ -1138,11 +1174,7 @@ class ShowGameAgg(Job):
                 out.append(json.loads(line))
         return out
 
-    def _fetch_all_games(self, db_session: Session, usernames: list[str]):
-        username_filter = or_(
-            ShowGameSummary.home_profile_username.in_(usernames),
-            ShowGameSummary.away_profile_username.in_(usernames),
-        )
+    def _fetch_all_games(self, db_session: Session, usernames: Optional[list[str]] = None):
         stmt = (
             select(
                 ShowGameSummary.id,
@@ -1156,7 +1188,12 @@ class ShowGameAgg(Job):
                 ShowGameSummary.home_name,
                 ShowGameSummary.away_name,
             )
-            .where(username_filter)
             .execution_options(yield_per=1000, stream_results=True)
         )
+        if usernames:
+            username_filter = or_(
+                ShowGameSummary.home_profile_username.in_(usernames),
+                ShowGameSummary.away_profile_username.in_(usernames),
+            )
+            stmt = stmt.where(username_filter)
         return db_session.execute(stmt).mappings()
