@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 
 import { FloatingShieldsBackground } from "@/components/FloatingShieldsBackground";
@@ -127,7 +127,7 @@ function aggregateHitMaps(maps: HitDataMap[], stat: HitDataStat): HitDataMap | n
   };
 }
 
-export default function GameplayStatsPage() {
+function GameplayStatsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const profileSearchRef = useRef<HTMLElement | null>(null);
@@ -1354,5 +1354,13 @@ export default function GameplayStatsPage() {
         ) : null}
       </div>
     </main>
+  );
+}
+
+export default function GameplayStatsPage() {
+  return (
+    <Suspense fallback={null}>
+      <GameplayStatsPageContent />
+    </Suspense>
   );
 }
