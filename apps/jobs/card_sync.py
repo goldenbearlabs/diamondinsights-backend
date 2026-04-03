@@ -286,8 +286,8 @@ class CardAdapter:
             card.is_hitter = self._json_get(item, "is_hitter", False)
             card.stamina = self._json_get(item, "stamina", 0) or 0
             card.pitching_clutch = self._json_get(item, "pitching_clutch", 0) or 0
-            card.hits_per_bf = self._json_get(item, "hits_per_bf", 0) or 0
-            card.k_per_bf = self._json_get(item, "k_per_bf", 0) or 0
+            card.hits_per_bf = (self._json_get(item, "hits_per_bf_left", 0) + self._json_get(item, "hits_per_bf_right", 0)) / 2
+            card.k_per_bf = (self._json_get(item, "k_per_bf_left", 0) + self._json_get(item, "k_per_bf_right", 0)) / 2
             card.bb_per_bf = self._json_get(item, "bb_per_bf", 0) or 0
             card.hr_per_bf = self._json_get(item, "hr_per_bf", 0) or 0
             card.pitch_velocity = self._json_get(item, "pitch_velocity", 0) or 0
@@ -307,7 +307,7 @@ class CardAdapter:
             card.fielding_ability = self._json_get(item, "fielding_ability", 0) or 0
             card.arm_strength = self._json_get(item, "arm_strength", 0) or 0
             card.arm_accuracy = self._json_get(item, "arm_accuracy", 0) or 0
-            card.reaction_time = self._json_get(item, "reaction_time", 0) or 0
+            card.reaction_time = (self._json_get(item, "reaction_left", 0) + self._json_get(item, "reaction_right", 0) + self._json_get(item, "reaction_forward", 0) + self._json_get(item, "reaction_back", 0)) / 4
             card.blocking = self._json_get(item, "blocking", 0) or 0
             card.speed = self._json_get(item, "speed", 0) or 0
 

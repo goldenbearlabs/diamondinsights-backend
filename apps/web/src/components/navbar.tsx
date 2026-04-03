@@ -52,7 +52,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Chat", href: "/chat" },
       { label: "Trending", href: "/trending" },
-      { label: "Blogs", href: "/blogs" },
     ],
   },
 ];

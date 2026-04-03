@@ -51,6 +51,9 @@ services:
       REVENUECAT_PRO_ENTITLEMENT_ID: ${REVENUECAT_PRO_ENTITLEMENT_ID:-pro}
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      SHOW_SEARCH_PROXY_URL: ${SHOW_SEARCH_PROXY_URL}
+      SHOW_PROXY_SHARED_SECRET: ${SHOW_PROXY_SHARED_SECRET}
+      SHOW_SEARCH_URL: ${SHOW_SEARCH_URL}
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +76,9 @@ services:
       TZ: America/Vancouver
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       PYTHONPATH: /app/shared:/app/apps/scheduler
+      SHOW_SEARCH_PROXY_URL: ${SHOW_SEARCH_PROXY_URL}
+      SHOW_PROXY_SHARED_SECRET: ${SHOW_PROXY_SHARED_SECRET}
+      SHOW_SEARCH_URL: ${SHOW_SEARCH_URL}
     depends_on:
       redis:
         condition: service_started
