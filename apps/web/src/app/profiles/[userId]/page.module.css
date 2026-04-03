@@ -1,0 +1,361 @@
+.page {
+  min-height: 100vh;
+  position: relative;
+  background:
+    radial-gradient(1100px 760px at 10% -8%, rgba(37, 99, 235, 0.18), transparent 58%),
+    radial-gradient(920px 620px at 86% 0%, rgba(14, 165, 233, 0.14), transparent 56%),
+    var(--color-background);
+}
+
+.texture {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  width: min(1240px, calc(100% - 28px));
+  margin: 24px auto 72px;
+  display: grid;
+  gap: 16px;
+}
+
+.hero,
+.panel,
+.errorCard {
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.74);
+  backdrop-filter: blur(8px);
+}
+
+.hero,
+.panel {
+  padding: 22px;
+}
+
+.heroHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.identity {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+}
+
+.identityCopy {
+  display: grid;
+  gap: 8px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.identityCopy h1 {
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  line-height: 1;
+}
+
+.description {
+  margin: 0;
+  max-width: 700px;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
+.badges {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.82);
+  color: #dbeafe;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.primaryLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.56);
+  background: rgba(37, 99, 235, 0.24);
+  color: #dbeafe;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.tabRow {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tabButton,
+.tabButtonActive {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.8);
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tabButtonActive {
+  border-color: rgba(59, 130, 246, 0.64);
+  background: rgba(37, 99, 235, 0.24);
+  color: #dbeafe;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.sectionHeader h2 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.sectionHeader p {
+  margin: 6px 0 0;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.yearPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.36);
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.statGrid,
+.summaryGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.statGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summaryGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.statCard,
+.summaryCard {
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.72);
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.statCard span,
+.summaryCard span {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.statCard strong,
+.summaryCard strong {
+  font-size: 1rem;
+}
+
+.tableWrap {
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+}
+
+.table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+.table th {
+  padding: 12px 10px;
+  text-align: left;
+  background: rgba(30, 41, 59, 0.96);
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.66rem;
+}
+
+.table td {
+  padding: 11px 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 0.82rem;
+  color: #e2e8f0;
+}
+
+.cardLink {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.cardImage {
+  width: 42px;
+  height: 58px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.cardLink span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.cardLink strong,
+.cardLink small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardLink strong {
+  font-size: 0.84rem;
+}
+
+.cardLink small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.muted,
+.errorText {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.errorText {
+  color: #fecaca;
+}
+
+.errorCard {
+  padding: 18px 20px;
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.errorCard p {
+  margin: 0;
+  color: #fecaca;
+}
+
+.lockedState {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.8);
+  color: #cbd5e1;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.positiveValue {
+  color: #4ade80;
+}
+
+.negativeValue {
+  color: #f87171;
+}
+
+@media (max-width: 920px) {
+  .content {
+    width: min(100%, calc(100% - 20px));
+    margin: 18px auto 56px;
+  }
+
+  .hero,
+  .panel,
+  .errorCard {
+    border-radius: 16px;
+    padding: 18px;
+  }
+
+  .heroHeader,
+  .identity,
+  .sectionHeader {
+    flex-direction: column;
+  }
+
+  .statGrid,
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
