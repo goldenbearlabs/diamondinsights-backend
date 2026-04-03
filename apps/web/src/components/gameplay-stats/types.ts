@@ -2,6 +2,13 @@ export type ShowProfile = {
   username: string;
 };
 
+export type ShowUserSearchResult = {
+  user_id?: number | null;
+  username: string;
+  display_name?: string | null;
+  profile_img_url?: string | null;
+};
+
 export type ShowGameSummary = {
   games_played: number;
   record: string;

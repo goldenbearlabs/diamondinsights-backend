@@ -13,12 +13,14 @@ import type {
   ShowPlateAppearance,
 } from "./types";
 import styles from "./styles.module.css";
-import { ApiError, apiGetAuth } from "@/lib/api";
+import { ApiError, apiGet, apiGetAuth } from "@/lib/api";
 import { toReadableAuthError } from "@/lib/auth-errors";
 
 type Props = {
   game: ShowGameLogItem;
   username: string | null;
+  isSelfView: boolean;
+  viewUsername: string | null;
   onBack: () => void;
 };
 
@@ -138,7 +140,7 @@ function computeBattingStats(row: ShowBatterBoxscore) {
   return { avg, obp, slg, ops, sbPct };
 }
 
-export function GameDetailSection({ game, username, onBack }: Props) {
+export function GameDetailSection({ game, username, isSelfView, viewUsername, onBack }: Props) {
   const [events, setEvents] = useState<ShowGameEvent[]>([]);
   const [halfInnings, setHalfInnings] = useState<ShowHalfInningSummary[]>([]);
   const [plateAppearances, setPlateAppearances] = useState<ShowPlateAppearance[]>([]);
@@ -163,7 +165,10 @@ export function GameDetailSection({ game, username, onBack }: Props) {
       setError(null);
 
       try {
-        const data = await apiGetAuth<ShowGameBundle>(`/users/me/show/game-bundle/${encodeURIComponent(game.game_id)}`);
+        const path = isSelfView
+          ? `/users/me/show/game-bundle/${encodeURIComponent(game.game_id)}`
+          : `/users/show/${encodeURIComponent(viewUsername || username || "")}/game-bundle/${encodeURIComponent(game.game_id)}`;
+        const data = isSelfView ? await apiGetAuth<ShowGameBundle>(path) : await apiGet<ShowGameBundle>(path);
         if (!active) {
           return;
         }
@@ -203,7 +208,7 @@ export function GameDetailSection({ game, username, onBack }: Props) {
     return () => {
       active = false;
     };
-  }, [game.game_id]);
+  }, [game.game_id, isSelfView, username, viewUsername]);
 
   const view = useMemo(() => perspective(game, username), [game, username]);
   const matchup = `${view.location} ${view.opponentName}`;

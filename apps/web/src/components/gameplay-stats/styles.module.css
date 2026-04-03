@@ -48,9 +48,10 @@
 }
 
 .profileTab {
-  width: fit-content;
+  position: relative;
+  width: min(100%, 520px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 6px 10px;
   border-radius: 12px;
@@ -84,6 +85,104 @@
   margin-top: 2px;
   font-size: 14px;
   font-weight: 700;
+}
+
+.profileSearchBody {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.profileSearchHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profileSearchInput {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.62);
+  color: #f8fafc;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profileSearchInput::placeholder {
+  color: rgba(226, 232, 240, 0.42);
+}
+
+.profileSearchInput:focus {
+  outline: none;
+  border-color: rgba(251, 191, 36, 0.8);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.45);
+}
+
+.profileResetButton {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.68);
+  color: #f8fafc;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profileSearchResults {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 280px;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.98);
+  box-shadow: 0 18px 34px rgba(2, 6, 23, 0.55);
+  padding: 8px;
+}
+
+.profileSearchResult {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.76);
+  color: #e2e8f0;
+  padding: 10px 12px;
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.profileSearchResult strong {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.profileSearchResult span {
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.profileSearchStatus {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 4px;
+  text-align: center;
 }
 
 .statusCard,
@@ -1721,6 +1820,15 @@
   .sectionTabs {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .profileSearchHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .profileResetButton {
+    width: fit-content;
   }
 
   .sectionTab,

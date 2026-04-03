@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 
@@ -33,11 +33,12 @@ import type {
   ShowPitcherSearchResult,
   ShowProfile,
   ShowSkills,
+  ShowUserSearchResult,
   StrikeoutMapData,
   TimingType,
 } from "@/components/gameplay-stats/types";
 import Navbar from "@/components/navbar";
-import { ApiError, apiGetAuth } from "@/lib/api";
+import { ApiError, apiGet, apiGetAuth } from "@/lib/api";
 import { toReadableAuthError } from "@/lib/auth-errors";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { PROFILE_IMAGE_UPDATED_EVENT, resolveAvatarUrl } from "@/lib/profile-image";
@@ -128,8 +129,13 @@ function aggregateHitMaps(maps: HitDataMap[], stat: HitDataStat): HitDataMap | n
 
 export default function GameplayStatsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const profileSearchRef = useRef<HTMLElement | null>(null);
+  const userSearchRequestRef = useRef(0);
   const pitcherRequestRef = useRef(0);
   const hitterRequestRef = useRef(0);
+  const viewUsername = searchParams.get("user")?.trim() || null;
+  const isSelfView = !viewUsername;
 
   const [authReady, setAuthReady] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -145,6 +151,13 @@ export default function GameplayStatsPage() {
   const [pitchingArchetype, setPitchingArchetype] = useState<CombinedArchetype["pitching"] | null>(null);
 
   const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
+  const [selectedProfileAvatarPath, setSelectedProfileAvatarPath] = useState<string | null>(null);
+  const [selectedProfileAvatar, setSelectedProfileAvatar] = useState<string | null>(null);
+  const [profileSearchQuery, setProfileSearchQuery] = useState("");
+  const [profileSearchOpen, setProfileSearchOpen] = useState(false);
+  const [profileSearchResults, setProfileSearchResults] = useState<ShowUserSearchResult[]>([]);
+  const [profileSearchLoading, setProfileSearchLoading] = useState(false);
+  const [profileSearchError, setProfileSearchError] = useState<string | null>(null);
   const [skillMode, setSkillMode] = useState<"Hitting" | "Pitching">("Hitting");
   const [activeTab, setActiveTab] = useState<SectionTab>("Analytics");
 
@@ -260,6 +273,140 @@ export default function GameplayStatsPage() {
   }, [firebaseUser]);
 
   useEffect(() => {
+    if (!profileSearchOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!profileSearchRef.current?.contains(event.target as Node)) {
+        setProfileSearchOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [profileSearchOpen]);
+
+  useEffect(() => {
+    if (!profileSearchOpen) {
+      setProfileSearchLoading(false);
+      setProfileSearchError(null);
+      if (!profileSearchQuery.trim()) {
+        setProfileSearchResults([]);
+      }
+      return;
+    }
+
+    const trimmed = profileSearchQuery.trim();
+    if (!trimmed) {
+      setProfileSearchResults([]);
+      setProfileSearchLoading(false);
+      setProfileSearchError(null);
+      return;
+    }
+
+    const handle = setTimeout(async () => {
+      const requestId = userSearchRequestRef.current + 1;
+      userSearchRequestRef.current = requestId;
+      setProfileSearchLoading(true);
+      setProfileSearchError(null);
+
+      try {
+        const params = new URLSearchParams({ q: trimmed, limit: "12" });
+        const data = await apiGet<ShowUserSearchResult[]>(`/users/show/search?${params.toString()}`);
+        if (userSearchRequestRef.current !== requestId) {
+          return;
+        }
+        setProfileSearchResults(Array.isArray(data) ? data : []);
+      } catch (error: unknown) {
+        if (userSearchRequestRef.current !== requestId) {
+          return;
+        }
+        setProfileSearchError(toReadableAuthError(error, "User search failed"));
+        setProfileSearchResults([]);
+      } finally {
+        if (userSearchRequestRef.current === requestId) {
+          setProfileSearchLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [profileSearchOpen, profileSearchQuery]);
+
+  useEffect(() => {
+    if (isSelfView || !viewUsername) {
+      setSelectedProfileAvatarPath(null);
+      return;
+    }
+
+    const exactMatch = profileSearchResults.find(
+      (item) => item.username.toLowerCase() === viewUsername.toLowerCase(),
+    );
+    if (exactMatch) {
+      setSelectedProfileAvatarPath(exactMatch.profile_img_url ?? null);
+      return;
+    }
+
+    let active = true;
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ q: viewUsername, limit: "10" });
+        const data = await apiGet<ShowUserSearchResult[]>(`/users/show/search?${params.toString()}`);
+        if (!active) {
+          return;
+        }
+        const match = Array.isArray(data)
+          ? data.find((item) => item.username.toLowerCase() === viewUsername.toLowerCase())
+          : null;
+        setSelectedProfileAvatarPath(match?.profile_img_url ?? null);
+      } catch {
+        if (active) {
+          setSelectedProfileAvatarPath(null);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [isSelfView, profileSearchResults, viewUsername]);
+
+  useEffect(() => {
+    if (isSelfView || !selectedProfileAvatarPath) {
+      setSelectedProfileAvatar(null);
+      return;
+    }
+
+    let active = true;
+
+    void resolveAvatarUrl(selectedProfileAvatarPath).then((url) => {
+      if (active) {
+        setSelectedProfileAvatar(url);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isSelfView, selectedProfileAvatarPath]);
+
+  useEffect(() => {
+    setSelectedPitcher(null);
+    setSelectedHitter(null);
+    setPitcherSearchQuery("");
+    setHitterSearchQuery("");
+    setPitcherSearchResults([]);
+    setHitterSearchResults([]);
+    setPitcherSearchError(null);
+    setHitterSearchError(null);
+    setSprayChartSelections([]);
+  }, [viewUsername]);
+
+  useEffect(() => {
     if (!authReady || !firebaseUser) {
       if (authReady) {
         setBaseLoading(false);
@@ -274,21 +421,31 @@ export default function GameplayStatsPage() {
 
     void (async () => {
       try {
-        const profileData = await apiGetAuth<ShowProfile>("/users/me/show");
+        const profilePath = isSelfView ? "/users/me/show" : `/users/show/${encodeURIComponent(viewUsername)}`;
+        const profileData = isSelfView
+          ? await apiGetAuth<ShowProfile>(profilePath)
+          : await apiGet<ShowProfile>(profilePath);
         if (!active) {
           return;
         }
 
         const [summaryResult, skillsResult, archetypeResult] = await Promise.allSettled([
-          apiGetAuth<ShowGameSummary>("/users/me/show/summary"),
-          apiGetAuth<ShowSkills>("/users/me/show/skills"),
-          apiGetAuth<CombinedArchetype>("/users/me/show/archetype/combined"),
+          isSelfView
+            ? apiGetAuth<ShowGameSummary>("/users/me/show/summary")
+            : apiGet<ShowGameSummary>(`/users/show/${encodeURIComponent(viewUsername)}/summary`),
+          isSelfView
+            ? apiGetAuth<ShowSkills>("/users/me/show/skills")
+            : apiGet<ShowSkills>(`/users/show/${encodeURIComponent(viewUsername)}/skills`),
+          isSelfView
+            ? apiGetAuth<CombinedArchetype>("/users/me/show/archetype/combined")
+            : apiGet<CombinedArchetype>(`/users/show/${encodeURIComponent(viewUsername)}/archetype/combined`),
         ]);
 
         const summaryData = summaryResult.status === "fulfilled" ? summaryResult.value : null;
         const skillsData = skillsResult.status === "fulfilled" ? skillsResult.value : null;
         const archetypeData = archetypeResult.status === "fulfilled" ? archetypeResult.value : null;
 
+        setNotLinked(false);
         setShowProfile(profileData);
         setGameSummary(summaryData);
         setSkills(skillsData);
@@ -300,12 +457,15 @@ export default function GameplayStatsPage() {
         }
 
         if (error instanceof ApiError && error.status === 404) {
-          setNotLinked(true);
+          setNotLinked(isSelfView);
           setShowProfile(null);
           setGameSummary(null);
           setSkills(null);
           setBattingArchetype(null);
           setPitchingArchetype(null);
+          if (!isSelfView) {
+            setPageError(`Gameplay profile for @${viewUsername} was not found`);
+          }
         } else {
           setPageError(toReadableAuthError(error, "Unable to load gameplay stats"));
         }
@@ -319,7 +479,7 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [authReady, firebaseUser]);
+  }, [authReady, firebaseUser, isSelfView, viewUsername]);
 
   const linkedReady = !baseLoading && !pageError && !notLinked;
   const pitchTypeMenuOptions = useMemo(
@@ -372,11 +532,15 @@ export default function GameplayStatsPage() {
   };
 
   useEffect(() => {
-    if (pitchTypeMenuOptions.length === 0) {
-      setFilterPitchTypes([]);
-      return;
-    }
-    setFilterPitchTypes((prev) => prev.filter((item) => pitchTypeMenuOptions.includes(item)));
+    setFilterPitchTypes((prev) => {
+      if (pitchTypeMenuOptions.length === 0) {
+        return prev.length === 0 ? prev : [];
+      }
+
+      const next = prev.filter((item) => pitchTypeMenuOptions.includes(item));
+      const unchanged = next.length === prev.length && next.every((item, index) => item === prev[index]);
+      return unchanged ? prev : next;
+    });
   }, [pitchTypeMenuOptions]);
 
   useEffect(() => {
@@ -399,7 +563,12 @@ export default function GameplayStatsPage() {
 
       try {
         const params = new URLSearchParams({ q: trimmed, limit: "12" });
-        const data = await apiGetAuth<ShowPitcherSearchResult[]>(`/users/me/show/pitchers?${params.toString()}`);
+        const path = isSelfView
+          ? `/users/me/show/pitchers?${params.toString()}`
+          : `/users/show/${encodeURIComponent(viewUsername)}/pitchers?${params.toString()}`;
+        const data = isSelfView
+          ? await apiGetAuth<ShowPitcherSearchResult[]>(path)
+          : await apiGet<ShowPitcherSearchResult[]>(path);
         if (pitcherRequestRef.current !== requestId) {
           return;
         }
@@ -418,7 +587,7 @@ export default function GameplayStatsPage() {
     }, 250);
 
     return () => clearTimeout(handle);
-  }, [linkedReady, pitcherSearchQuery]);
+  }, [isSelfView, linkedReady, pitcherSearchQuery, viewUsername]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -440,7 +609,12 @@ export default function GameplayStatsPage() {
 
       try {
         const params = new URLSearchParams({ q: trimmed, limit: "12", view: strikeoutMode.toLowerCase() });
-        const data = await apiGetAuth<ShowHitterSearchResult[]>(`/users/me/show/hitters?${params.toString()}`);
+        const path = isSelfView
+          ? `/users/me/show/hitters?${params.toString()}`
+          : `/users/show/${encodeURIComponent(viewUsername)}/hitters?${params.toString()}`;
+        const data = isSelfView
+          ? await apiGetAuth<ShowHitterSearchResult[]>(path)
+          : await apiGet<ShowHitterSearchResult[]>(path);
         if (hitterRequestRef.current !== requestId) {
           return;
         }
@@ -459,7 +633,7 @@ export default function GameplayStatsPage() {
     }, 250);
 
     return () => clearTimeout(handle);
-  }, [linkedReady, hitterSearchQuery, strikeoutMode]);
+  }, [isSelfView, linkedReady, hitterSearchQuery, strikeoutMode, viewUsername]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -506,8 +680,10 @@ export default function GameplayStatsPage() {
           params.set("out_type", advancedOutType);
         }
 
-        const path = `/users/me/show/strikeout-map?${params.toString()}`;
-        const data = await apiGetAuth<StrikeoutMapData>(path);
+        const path = isSelfView
+          ? `/users/me/show/strikeout-map?${params.toString()}`
+          : `/users/show/${encodeURIComponent(viewUsername)}/strikeout-map?${params.toString()}`;
+        const data = isSelfView ? await apiGetAuth<StrikeoutMapData>(path) : await apiGet<StrikeoutMapData>(path);
         if (active) {
           setStrikeoutMap(data);
         }
@@ -542,6 +718,8 @@ export default function GameplayStatsPage() {
     advancedOutType,
     selectedPitcher?.mlb_id,
     selectedHitter?.mlb_id,
+    isSelfView,
+    viewUsername,
   ]);
 
   useEffect(() => {
@@ -572,7 +750,10 @@ export default function GameplayStatsPage() {
           params.set("hitter_mlb_id", String(selectedHitter.mlb_id));
         }
 
-        const data = await apiGetAuth<HitDataMap>(`/users/me/show/hit-map?${params.toString()}`);
+        const path = isSelfView
+          ? `/users/me/show/hit-map?${params.toString()}`
+          : `/users/show/${encodeURIComponent(viewUsername)}/hit-map?${params.toString()}`;
+        const data = isSelfView ? await apiGetAuth<HitDataMap>(path) : await apiGet<HitDataMap>(path);
         if (active) {
           setSprayChartData(data);
         }
@@ -603,6 +784,8 @@ export default function GameplayStatsPage() {
     filterPitcherHand,
     selectedPitcher?.mlb_id,
     selectedHitter?.mlb_id,
+    isSelfView,
+    viewUsername,
   ]);
 
   useEffect(() => {
@@ -640,7 +823,10 @@ export default function GameplayStatsPage() {
               params.set("hitter_mlb_id", String(selectedHitter.mlb_id));
             }
             params.set("focus_zone", zone);
-            return apiGetAuth<HitDataMap>(`/users/me/show/hit-map?${params.toString()}`);
+            const path = isSelfView
+              ? `/users/me/show/hit-map?${params.toString()}`
+              : `/users/show/${encodeURIComponent(viewUsername)}/hit-map?${params.toString()}`;
+            return isSelfView ? apiGetAuth<HitDataMap>(path) : apiGet<HitDataMap>(path);
           }),
         );
 
@@ -673,6 +859,8 @@ export default function GameplayStatsPage() {
     filterPitcherHand,
     selectedPitcher?.mlb_id,
     selectedHitter?.mlb_id,
+    isSelfView,
+    viewUsername,
   ]);
 
   useEffect(() => {
@@ -686,8 +874,12 @@ export default function GameplayStatsPage() {
 
     void (async () => {
       try {
-        const path = `/users/me/show/stats?view=${statsMode.toLowerCase()}`;
-        const data = await apiGetAuth<ShowAggregateStats>(path);
+        const path = isSelfView
+          ? `/users/me/show/stats?view=${statsMode.toLowerCase()}`
+          : `/users/show/${encodeURIComponent(viewUsername)}/stats?view=${statsMode.toLowerCase()}`;
+        const data = isSelfView
+          ? await apiGetAuth<ShowAggregateStats>(path)
+          : await apiGet<ShowAggregateStats>(path);
         if (active) {
           setAggregateStats(data);
         }
@@ -710,7 +902,7 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [linkedReady, statsMode]);
+  }, [isSelfView, linkedReady, statsMode, viewUsername]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -723,7 +915,10 @@ export default function GameplayStatsPage() {
 
     void (async () => {
       try {
-        const data = await apiGetAuth<ShowGameLogItem[]>("/users/me/show/game-log?limit=200");
+        const path = isSelfView
+          ? "/users/me/show/game-log?limit=200"
+          : `/users/show/${encodeURIComponent(viewUsername)}/game-log?limit=200`;
+        const data = isSelfView ? await apiGetAuth<ShowGameLogItem[]>(path) : await apiGet<ShowGameLogItem[]>(path);
         if (active) {
           setGameLog(Array.isArray(data) ? data : []);
         }
@@ -746,7 +941,7 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [linkedReady]);
+  }, [isSelfView, linkedReady, viewUsername]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -759,7 +954,8 @@ export default function GameplayStatsPage() {
 
     void (async () => {
       try {
-        const data = await apiGetAuth<ShowCardStats[]>("/users/me/show/cards");
+        const path = isSelfView ? "/users/me/show/cards" : `/users/show/${encodeURIComponent(viewUsername)}/cards`;
+        const data = isSelfView ? await apiGetAuth<ShowCardStats[]>(path) : await apiGet<ShowCardStats[]>(path);
         if (active) {
           setHittingCards(Array.isArray(data) ? data : []);
         }
@@ -782,7 +978,7 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [linkedReady]);
+  }, [isSelfView, linkedReady, viewUsername]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -795,7 +991,12 @@ export default function GameplayStatsPage() {
 
     void (async () => {
       try {
-        const data = await apiGetAuth<ShowCardPitchingStats[]>("/users/me/show/cards/pitching");
+        const path = isSelfView
+          ? "/users/me/show/cards/pitching"
+          : `/users/show/${encodeURIComponent(viewUsername)}/cards/pitching`;
+        const data = isSelfView
+          ? await apiGetAuth<ShowCardPitchingStats[]>(path)
+          : await apiGet<ShowCardPitchingStats[]>(path);
         if (active) {
           setPitchingCards(Array.isArray(data) ? data : []);
         }
@@ -818,7 +1019,7 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [linkedReady]);
+  }, [isSelfView, linkedReady, viewUsername]);
 
   useEffect(() => {
     if (!linkedReady) {
@@ -834,8 +1035,12 @@ export default function GameplayStatsPage() {
     void (async () => {
       try {
         const [hitDataResult, baseStrikeoutResult] = await Promise.allSettled([
-          apiGetAuth<HitDataMap>("/users/me/show/hit-map?view=hitting&stat=count"),
-          apiGetAuth<StrikeoutMapData>("/users/me/show/strikeout-map?view=hitting"),
+          isSelfView
+            ? apiGetAuth<HitDataMap>("/users/me/show/hit-map?view=hitting&stat=count")
+            : apiGet<HitDataMap>(`/users/show/${encodeURIComponent(viewUsername)}/hit-map?view=hitting&stat=count`),
+          isSelfView
+            ? apiGetAuth<StrikeoutMapData>("/users/me/show/strikeout-map?view=hitting")
+            : apiGet<StrikeoutMapData>(`/users/show/${encodeURIComponent(viewUsername)}/strikeout-map?view=hitting`),
         ]);
 
         if (!active) {
@@ -866,7 +1071,10 @@ export default function GameplayStatsPage() {
             const params = new URLSearchParams();
             params.set("view", "hitting");
             params.set("pitch_types", pitchType.toLowerCase());
-            const data = await apiGetAuth<StrikeoutMapData>(`/users/me/show/strikeout-map?${params.toString()}`);
+            const path = isSelfView
+              ? `/users/me/show/strikeout-map?${params.toString()}`
+              : `/users/show/${encodeURIComponent(viewUsername)}/strikeout-map?${params.toString()}`;
+            const data = isSelfView ? await apiGetAuth<StrikeoutMapData>(path) : await apiGet<StrikeoutMapData>(path);
             return {
               pitchType,
               kPct: data?.stats?.k_pct ?? null,
@@ -894,7 +1102,28 @@ export default function GameplayStatsPage() {
     return () => {
       active = false;
     };
-  }, [linkedReady]);
+  }, [isSelfView, linkedReady, viewUsername]);
+
+  const currentProfileUsername = showProfile?.username ?? viewUsername ?? (baseLoading ? "Loading..." : "Not linked");
+  const gameplayUsername = showProfile?.username ?? viewUsername ?? null;
+  const activeProfileAvatar = isSelfView ? profileAvatar : selectedProfileAvatar;
+
+  const handleSelectSelf = () => {
+    setProfileSearchQuery("");
+    setProfileSearchResults([]);
+    setProfileSearchError(null);
+    setProfileSearchOpen(false);
+    router.replace("/gameplay-stats", { scroll: false });
+  };
+
+  const handleSelectProfile = (profile: ShowUserSearchResult) => {
+    setProfileSearchQuery("");
+    setProfileSearchResults([]);
+    setProfileSearchError(null);
+    setProfileSearchOpen(false);
+    setSelectedProfileAvatarPath(profile.profile_img_url ?? null);
+    router.replace(`/gameplay-stats?user=${encodeURIComponent(profile.username)}`, { scroll: false });
+  };
 
   return (
     <main className={styles.page}>
@@ -908,18 +1137,68 @@ export default function GameplayStatsPage() {
           <p>Data may be up to 12 hours behind</p>
         </header>
 
-        <section className={styles.profileTab}>
+        <section className={styles.profileTab} ref={profileSearchRef}>
           <Image
-            src={profileAvatar || "/images/default_profile.png"}
+            src={activeProfileAvatar || "/images/default_profile.png"}
             alt="Profile"
             width={32}
             height={32}
             className={styles.profileAvatar}
-            unoptimized={Boolean(profileAvatar)}
+            unoptimized={Boolean(activeProfileAvatar)}
           />
-          <div className={styles.profileText}>
-            <span>MLB The Show</span>
-            <strong>{showProfile?.username ?? (baseLoading ? "Loading..." : "Not linked")}</strong>
+          <div className={styles.profileSearchBody}>
+            <div className={styles.profileSearchHeader}>
+              <div className={styles.profileText}>
+                <span>MLB The Show</span>
+                <strong>{currentProfileUsername}</strong>
+              </div>
+              {!isSelfView ? (
+                <button type="button" className={styles.profileResetButton} onClick={handleSelectSelf}>
+                  My Stats
+                </button>
+              ) : null}
+            </div>
+            <input
+              className={styles.profileSearchInput}
+              value={profileSearchQuery}
+              onChange={(event) => {
+                setProfileSearchQuery(event.target.value);
+                setProfileSearchOpen(true);
+              }}
+              onFocus={() => setProfileSearchOpen(true)}
+              placeholder="Search show username..."
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              aria-label="Search MLB The Show users"
+            />
+            {profileSearchOpen ? (
+              <div className={styles.profileSearchResults}>
+                <button type="button" className={styles.profileSearchResult} onClick={handleSelectSelf}>
+                  <strong>My Stats</strong>
+                  <span>View your linked gameplay profile</span>
+                </button>
+
+                {profileSearchLoading ? <p className={styles.profileSearchStatus}>Searching...</p> : null}
+                {profileSearchError ? <p className={styles.profileSearchStatus}>{profileSearchError}</p> : null}
+                {!profileSearchLoading && !profileSearchError && profileSearchQuery.trim() && profileSearchResults.length === 0 ? (
+                  <p className={styles.profileSearchStatus}>No matches.</p>
+                ) : null}
+                {!profileSearchLoading && !profileSearchError
+                  ? profileSearchResults.map((profile) => (
+                      <button
+                        key={`${profile.user_id ?? "show"}-${profile.username}`}
+                        type="button"
+                        className={styles.profileSearchResult}
+                        onClick={() => handleSelectProfile(profile)}
+                      >
+                        <strong>@{profile.username}</strong>
+                        <span>{profile.display_name || "Show user"}</span>
+                      </button>
+                    ))
+                  : null}
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -1041,7 +1320,9 @@ export default function GameplayStatsPage() {
             {activeTab === "Game Log" ? (
               <GameLogSection
                 games={gameLog}
-                username={showProfile?.username ?? null}
+                username={gameplayUsername}
+                isSelfView={isSelfView}
+                viewUsername={viewUsername}
                 loading={gameLogLoading}
                 error={gameLogError}
               />
