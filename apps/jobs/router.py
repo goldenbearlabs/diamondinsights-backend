@@ -161,6 +161,14 @@ class Router:
                                 from apps.jobs.show_profile_refresh import ShowProfileStatsUpdater
                                 ShowProfileStatsUpdater().run(session)
 
+                            case "show_game_refresh":
+                                from apps.jobs.show_game_refresh import ShowGameRefresh
+                                ShowGameRefresh().run(session)
+
+                            case "show_game_agg":
+                                from apps.jobs.show_game_agg import ShowGameAgg
+                                ShowGameAgg().run(session)
+
                             case "your_ovr_sync":
                                 from apps.jobs.your_ovr_sync import YourOvrSync
                                 YourOvrSync().run(session)

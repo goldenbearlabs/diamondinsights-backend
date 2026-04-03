@@ -55,6 +55,12 @@ class JobPusher:
     def show_profile_stats_updater(self) -> Payload:
         return self.push("show_profile_stats_updater")
 
+    def show_game_refresh(self) -> Payload:
+        return self.push("show_game_refresh")
+
+    def show_game_agg(self) -> Payload:
+        return self.push("show_game_agg")
+
     def your_ovr_sync(self) -> Payload:
         return self.push("your_ovr_sync")
 

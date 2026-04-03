@@ -10,6 +10,7 @@ import { ChevronDown, Lock } from "lucide-react";
 import { FloatingShieldsBackground } from "@/components/FloatingShieldsBackground";
 import Navbar from "@/components/navbar";
 import { ApiError, apiGet, apiGetAuth, getMyEntitlements } from "@/lib/api";
+import { CURRENT_CARD_YEAR } from "@/lib/config";
 import { getFirebaseAuth } from "@/lib/firebase";
 
 import styles from "./page.module.css";
@@ -39,8 +40,8 @@ type CardData = {
 };
 
 type PlayerTypeFilter = "all" | "hitter" | "pitcher";
-type PopularityFilter = "none" | "most" | "least";
-type DeltaFilter = "none" | "high" | "low";
+type PredictionsSortKey = "popularity" | "predicted_ovr_delta" | "profit";
+type SortDirection = "asc" | "desc";
 type FilterDropdownOption = {
   value: string;
   label: string;
@@ -53,15 +54,10 @@ const PLAYER_TYPE_OPTIONS: FilterDropdownOption[] = [
   { value: "hitter", label: "Hitters" },
   { value: "pitcher", label: "Pitchers" },
 ];
-const POPULARITY_OPTIONS: FilterDropdownOption[] = [
-  { value: "none", label: "None" },
-  { value: "most", label: "Most" },
-  { value: "least", label: "Least" },
-];
-const DELTA_OPTIONS: FilterDropdownOption[] = [
-  { value: "none", label: "None" },
-  { value: "high", label: "Highest Increase" },
-  { value: "low", label: "Highest Decrease" },
+const SORT_OPTIONS: FilterDropdownOption[] = [
+  { value: "popularity", label: "Popularity" },
+  { value: "predicted_ovr_delta", label: "Predicted OVR" },
+  { value: "profit", label: "Profitable" },
 ];
 
 function toTitle(value: string): string {
@@ -87,6 +83,60 @@ function formatPercent(value: number | null | undefined): string {
     return `${rounded}%`;
   }
   return `${rounded.toFixed(1)}%`;
+}
+
+function getQuicksellValue(ovr: number | null | undefined): number | null {
+  if (ovr == null || Number.isNaN(ovr)) {
+    return null;
+  }
+  if (ovr < 65) {
+    return 5;
+  }
+  if (ovr <= 74) {
+    return 25;
+  }
+  if (ovr <= 79) {
+    return 50 + ((ovr - 75) * 25);
+  }
+
+  const quicksellByOvr: Record<number, number> = {
+    80: 400,
+    81: 600,
+    82: 900,
+    83: 1200,
+    84: 1500,
+    85: 3000,
+    86: 3750,
+    87: 4500,
+    88: 5500,
+    89: 7000,
+    90: 8000,
+    91: 9000,
+  };
+  if (ovr >= 92) {
+    return 10000;
+  }
+  return quicksellByOvr[ovr] ?? null;
+}
+
+function getPredictedProfit(card: CardData): number | null {
+  const predictedQuicksell = getQuicksellValue(card.predicted_ovr);
+  if (predictedQuicksell == null || card.best_buy_price == null) {
+    return null;
+  }
+  return predictedQuicksell - card.best_buy_price;
+}
+
+function formatSignedStubs(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatStubs(value)}`;
+}
+
+function normalizeNumericInput(value: string): string {
+  return value.replace(/[^\d]/g, "");
 }
 
 function FilterDropdown({
@@ -167,9 +217,12 @@ export default function PredictionsPage() {
 
   const [selectedRarities, setSelectedRarities] = useState<string[]>([]);
   const [selectedPlayerType, setSelectedPlayerType] = useState<PlayerTypeFilter>("all");
-  const [selectedPopularity, setSelectedPopularity] = useState<PopularityFilter>("none");
-  const [selectedDelta, setSelectedDelta] = useState<DeltaFilter>("none");
+  const [selectedSort, setSelectedSort] = useState<PredictionsSortKey>("predicted_ovr_delta");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [atQuicksellOnly, setAtQuicksellOnly] = useState(false);
   const [showMyPredictions, setShowMyPredictions] = useState(false);
+  const [minBuyPrice, setMinBuyPrice] = useState("");
+  const [maxBuyPrice, setMaxBuyPrice] = useState("");
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
@@ -177,8 +230,8 @@ export default function PredictionsPage() {
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPro, setIsPro] = useState<boolean | null>(null);
-  const [nonProRarityOpen, setNonProRarityOpen] = useState(false);
-  const nonProRarityRef = useRef<HTMLDivElement | null>(null);
+  const [rarityMenuOpen, setRarityMenuOpen] = useState(false);
+  const rarityMenuRef = useRef<HTMLDivElement | null>(null);
 
   const enforceNonProRarity = isPro === false;
   const restrictRarityUntilProResolved = isPro !== true;
@@ -195,28 +248,60 @@ export default function PredictionsPage() {
     return [...NON_PRO_ALLOWED_RARITIES];
   }, [restrictRarityUntilProResolved, selectedRarities]);
 
-  const selectedRarityValue = useMemo(() => {
-    if (enforceNonProRarity) {
-      return "non-pro";
+  const raritySummary = useMemo(() => {
+    if (!enforceNonProRarity && effectiveSelectedRarities.length === 0) {
+      return "All";
     }
-    if (selectedRarities.length === 1) {
-      return selectedRarities[0];
+    if (effectiveSelectedRarities.length === 1) {
+      return toTitle(effectiveSelectedRarities[0]);
     }
-    return "all";
-  }, [enforceNonProRarity, selectedRarities]);
+    if (effectiveSelectedRarities.length === 0) {
+      return "None";
+    }
+    return `${effectiveSelectedRarities.length} Selected`;
+  }, [effectiveSelectedRarities, enforceNonProRarity]);
 
-  const nonProRaritySummary = useMemo(() => {
-    const count = effectiveSelectedRarities.length;
-    if (count === 1) {
-      return "1 Filter Applied";
+  const parsedMinBuyPrice = useMemo(() => {
+    if (!minBuyPrice.trim()) {
+      return null;
     }
-    return `${count} Filters Applied`;
-  }, [effectiveSelectedRarities]);
+    const parsed = Number.parseInt(minBuyPrice, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [minBuyPrice]);
+
+  const parsedMaxBuyPrice = useMemo(() => {
+    if (!maxBuyPrice.trim()) {
+      return null;
+    }
+    const parsed = Number.parseInt(maxBuyPrice, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [maxBuyPrice]);
 
   const activeFilterCount = useMemo(() => {
-    const rarityCount = !enforceNonProRarity && selectedRarities.length > 0 ? 1 : 0;
-    return rarityCount + (selectedPlayerType !== "all" ? 1 : 0) + (selectedPopularity !== "none" ? 1 : 0) + (selectedDelta !== "none" ? 1 : 0);
-  }, [enforceNonProRarity, selectedRarities.length, selectedPlayerType, selectedPopularity, selectedDelta]);
+    const freeRarityFiltered =
+      enforceNonProRarity &&
+      effectiveSelectedRarities.length > 0 &&
+      effectiveSelectedRarities.length < NON_PRO_ALLOWED_RARITIES.length;
+    const rarityCount = (!enforceNonProRarity && effectiveSelectedRarities.length > 0) || freeRarityFiltered ? 1 : 0;
+    return (
+      rarityCount +
+      (selectedPlayerType !== "all" ? 1 : 0) +
+      (selectedSort !== "predicted_ovr_delta" ? 1 : 0) +
+      (sortDirection !== "desc" ? 1 : 0) +
+      (atQuicksellOnly ? 1 : 0) +
+      (parsedMinBuyPrice != null ? 1 : 0) +
+      (parsedMaxBuyPrice != null ? 1 : 0)
+    );
+  }, [
+    atQuicksellOnly,
+    effectiveSelectedRarities.length,
+    enforceNonProRarity,
+    selectedPlayerType,
+    parsedMaxBuyPrice,
+    parsedMinBuyPrice,
+    selectedSort,
+    sortDirection,
+  ]);
 
   const hasFiltering = activeFilterCount > 0 || showMyPredictions;
 
@@ -279,17 +364,16 @@ export default function PredictionsPage() {
   }, [enforceNonProRarity]);
 
   useEffect(() => {
-    if (!enforceNonProRarity) {
-      setNonProRarityOpen(false);
+    if (!rarityMenuOpen) {
       return;
     }
 
     const onMouseDown = (event: MouseEvent) => {
-      if (!nonProRarityRef.current) {
+      if (!rarityMenuRef.current) {
         return;
       }
-      if (!nonProRarityRef.current.contains(event.target as Node)) {
-        setNonProRarityOpen(false);
+      if (!rarityMenuRef.current.contains(event.target as Node)) {
+        setRarityMenuOpen(false);
       }
     };
 
@@ -297,7 +381,24 @@ export default function PredictionsPage() {
     return () => {
       document.removeEventListener("mousedown", onMouseDown);
     };
-  }, [enforceNonProRarity]);
+  }, [rarityMenuOpen]);
+
+  const toggleRarity = useCallback(
+    (rarity: string) => {
+      setSelectedRarities((current) => {
+        const hasValue = current.includes(rarity);
+        if (enforceNonProRarity) {
+          if (hasValue && current.length === 1) {
+            return current;
+          }
+          return hasValue ? current.filter((entry) => entry !== rarity) : [...current, rarity];
+        }
+        return hasValue ? current.filter((entry) => entry !== rarity) : [...current, rarity];
+      });
+      setPage(1);
+    },
+    [enforceNonProRarity],
+  );
 
   const loadCards = useCallback(
     async (targetPage: number, targetLimit: number, query: string) => {
@@ -308,7 +409,7 @@ export default function PredictionsPage() {
         const offset = (targetPage - 1) * targetLimit;
         const params = new URLSearchParams({
           series: "live",
-          year: "25",
+          year: CURRENT_CARD_YEAR,
           offset: String(offset),
           limit: String(targetLimit),
         });
@@ -318,6 +419,15 @@ export default function PredictionsPage() {
         }
         if (showMyPredictions) {
           params.set("my_predictions", "true");
+        }
+        if (atQuicksellOnly) {
+          params.set("at_quicksell", "true");
+        }
+        if (parsedMinBuyPrice != null) {
+          params.set("min_buy_price", String(parsedMinBuyPrice));
+        }
+        if (parsedMaxBuyPrice != null) {
+          params.set("max_buy_price", String(parsedMaxBuyPrice));
         }
         if (effectiveSelectedRarities.length > 0) {
           params.set("rarity", effectiveSelectedRarities.join(","));
@@ -329,13 +439,8 @@ export default function PredictionsPage() {
           params.set("is_hitter", "false");
         }
 
-        if (selectedPopularity !== "none") {
-          params.set("sort_by", "popularity");
-          params.set("desc", selectedPopularity === "most" ? "true" : "false");
-        } else if (selectedDelta !== "none") {
-          params.set("sort_by", "predicted_ovr_delta");
-          params.set("desc", selectedDelta === "high" ? "true" : "false");
-        }
+        params.set("sort_by", selectedSort);
+        params.set("sort_dir", sortDirection);
 
         const path = `/cards?${params.toString()}`;
         const useAuthedRequest = showMyPredictions || isAuthenticated;
@@ -357,11 +462,14 @@ export default function PredictionsPage() {
       }
     },
     [
+      atQuicksellOnly,
       effectiveSelectedRarities,
       isAuthenticated,
-      selectedDelta,
+      parsedMaxBuyPrice,
+      parsedMinBuyPrice,
       selectedPlayerType,
-      selectedPopularity,
+      selectedSort,
+      sortDirection,
       showMyPredictions,
     ],
   );
@@ -373,8 +481,11 @@ export default function PredictionsPage() {
   const clearAllFilters = () => {
     setSelectedRarities(enforceNonProRarity ? [...NON_PRO_ALLOWED_RARITIES] : []);
     setSelectedPlayerType("all");
-    setSelectedPopularity("none");
-    setSelectedDelta("none");
+    setSelectedSort("predicted_ovr_delta");
+    setSortDirection("desc");
+    setAtQuicksellOnly(false);
+    setMinBuyPrice("");
+    setMaxBuyPrice("");
     setShowMyPredictions(false);
     setPage(1);
   };
@@ -462,118 +573,127 @@ export default function PredictionsPage() {
           />
 
           <FilterDropdown
-            label="Popularity"
-            value={selectedPopularity}
-            options={POPULARITY_OPTIONS}
+            label="Sort By"
+            value={selectedSort}
+            options={SORT_OPTIONS}
             onSelect={(value) => {
-              const nextValue = value as PopularityFilter;
-              setSelectedPopularity(nextValue);
-              if (nextValue !== "none") {
-                setSelectedDelta("none");
-              }
+              setSelectedSort(value as PredictionsSortKey);
               setPage(1);
             }}
           />
 
-          <FilterDropdown
-            label="Predicted OVR"
-            value={selectedDelta}
-            options={DELTA_OPTIONS}
-            onSelect={(value) => {
-              const nextValue = value as DeltaFilter;
-              setSelectedDelta(nextValue);
-              if (nextValue !== "none") {
-                setSelectedPopularity("none");
-              }
+          <button
+            type="button"
+            className={styles.sortDirectionButton}
+            onClick={() => {
+              setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
               setPage(1);
             }}
-          />
+          >
+            <span>{sortDirection === "desc" ? "Desc" : "Asc"}</span>
+          </button>
 
-          {enforceNonProRarity ? (
-            <div className={styles.filterControl} ref={nonProRarityRef}>
-              <span className={styles.filterTitleWithTag}>
-                Rarity
+          <div className={styles.filterControl} ref={rarityMenuRef}>
+            <span className={styles.filterTitleWithTag}>
+              Rarity
+              {enforceNonProRarity ? (
                 <span className={styles.proTag}>
                   <Lock size={11} strokeWidth={2.2} />
                   Pro
                 </span>
+              ) : null}
+            </span>
+            <button
+              type="button"
+              className={styles.lockedRarityTrigger}
+              onClick={() => setRarityMenuOpen((prev) => !prev)}
+              aria-expanded={rarityMenuOpen}
+            >
+              <span className={styles.lockedRarityValue}>{raritySummary}</span>
+              <span className={styles.chevronIcon} aria-hidden>
+                <ChevronDown size={14} strokeWidth={2.2} />
               </span>
-              <button
-                type="button"
-                className={styles.lockedRarityTrigger}
-                onClick={() => setNonProRarityOpen((prev) => !prev)}
-                aria-expanded={nonProRarityOpen}
-              >
-                <span className={styles.lockedRarityValue}>{nonProRaritySummary}</span>
-                <span className={styles.chevronIcon} aria-hidden>
-                  <ChevronDown size={14} strokeWidth={2.2} />
-                </span>
-              </button>
-              {nonProRarityOpen ? (
-                <div className={styles.lockedRarityMenu}>
+            </button>
+            {rarityMenuOpen ? (
+              <div className={styles.lockedRarityMenu}>
+                {enforceNonProRarity ? (
                   <p className={styles.lockedUpgradeText}>Common and Bronze are available on Free. Upgrade to unlock all rarities.</p>
-                  <ul className={styles.lockedRarityList}>
-                    {ALL_RARITIES.map((rarity) => (
-                      NON_PRO_ALLOWED_RARITIES.includes(rarity as (typeof NON_PRO_ALLOWED_RARITIES)[number]) ? (
-                        <li key={rarity} className={styles.freeRarityItem}>
-                          <label className={styles.freeRarityLabel}>
-                            <span>{toTitle(rarity)}</span>
-                            <input
-                              type="checkbox"
-                              checked={selectedRarities.includes(rarity)}
-                              onChange={() => {
-                                setSelectedRarities((current) => {
-                                  const hasValue = current.includes(rarity);
-                                  if (hasValue && current.length === 1) {
-                                    return current;
-                                  }
-                                  return hasValue ? current.filter((entry) => entry !== rarity) : [...current, rarity];
-                                });
-                                setPage(1);
-                              }}
-                            />
-                          </label>
-                        </li>
-                      ) : (
-                        <li key={rarity} className={styles.lockedRarityItem}>
+                ) : (
+                  <p className={styles.lockedUpgradeText}>Select one or more rarities to narrow the board.</p>
+                )}
+                <ul className={styles.lockedRarityList}>
+                  {ALL_RARITIES.map((rarity) => (
+                    NON_PRO_ALLOWED_RARITIES.includes(rarity as (typeof NON_PRO_ALLOWED_RARITIES)[number]) || !enforceNonProRarity ? (
+                      <li key={rarity} className={styles.freeRarityItem}>
+                        <label className={styles.freeRarityLabel}>
                           <span>{toTitle(rarity)}</span>
-                          <span className={styles.lockIcon} aria-hidden>
-                            <Lock size={12} strokeWidth={2.2} />
-                          </span>
-                        </li>
-                      )
-                    ))}
-                  </ul>
+                          <input
+                            type="checkbox"
+                            checked={effectiveSelectedRarities.includes(rarity)}
+                            onChange={() => toggleRarity(rarity)}
+                          />
+                        </label>
+                      </li>
+                    ) : (
+                      <li key={rarity} className={styles.lockedRarityItem}>
+                        <span>{toTitle(rarity)}</span>
+                        <span className={styles.lockIcon} aria-hidden>
+                          <Lock size={12} strokeWidth={2.2} />
+                        </span>
+                      </li>
+                    )
+                  ))}
+                </ul>
+                {enforceNonProRarity ? (
                   <Link href="/account" className={styles.upgradeLink}>
                     Upgrade to Pro
                   </Link>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <label className={styles.filterControl}>
-              <span>Rarity</span>
-              <select
-                value={selectedRarityValue}
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <label className={styles.filterControl}>
+            <span>Buy Price</span>
+            <div className={styles.priceRangeGroup}>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Min"
+                value={minBuyPrice}
                 onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === "all") {
-                    setSelectedRarities([]);
-                  } else {
-                    setSelectedRarities([value]);
-                  }
+                  setMinBuyPrice(normalizeNumericInput(event.target.value));
                   setPage(1);
                 }}
-              >
-                <option value="all">All</option>
-                {ALL_RARITIES.map((rarity) => (
-                  <option key={rarity} value={rarity}>
-                    {toTitle(rarity)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+              />
+              <span className={styles.priceRangeDash}>-</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Max"
+                value={maxBuyPrice}
+                onChange={(event) => {
+                  setMaxBuyPrice(normalizeNumericInput(event.target.value));
+                  setPage(1);
+                }}
+              />
+            </div>
+          </label>
+
+          <button
+            type="button"
+            className={`${styles.predictionsToggle} ${atQuicksellOnly ? styles.predictionsToggleActive : ""}`}
+            onClick={() => {
+              setAtQuicksellOnly((prev) => !prev);
+              setPage(1);
+            }}
+            aria-pressed={atQuicksellOnly}
+          >
+            <span className={styles.predictionsToggleLabel}>At Quicksell</span>
+            <span className={styles.predictionsToggleTrack} aria-hidden>
+              <span className={styles.predictionsToggleThumb} />
+            </span>
+          </button>
 
           <button
             type="button"
@@ -614,75 +734,95 @@ export default function PredictionsPage() {
           <>
             <div className={styles.resultsScroll}>
               <div className={styles.cardList}>
-                {cards.map((card) => (
-                  <Link key={card.id} href={`/cards/${encodeURIComponent(card.id)}`} className={styles.cardRowLink}>
-                    <article className={styles.cardRow}>
-                      <div className={styles.cardImageWrap}>
-                        {card.baked_img ? (
-                          <Image
-                            src={card.baked_img}
-                            alt={card.name}
-                            width={56}
-                            height={78}
-                            className={styles.cardImage}
-                            unoptimized
-                          />
-                        ) : (
-                          <div className={styles.cardImageFallback}>No Image</div>
-                        )}
-                      </div>
+                {cards.map((card) => {
+                  const predictedProfit = getPredictedProfit(card);
+                  const profitClass =
+                    predictedProfit == null
+                      ? ""
+                      : predictedProfit > 0
+                        ? styles.profitPositive
+                        : predictedProfit < 0
+                          ? styles.profitNegative
+                          : styles.profitNeutral;
 
-                      <div className={styles.cardInfo}>
-                        <h2>{card.name}</h2>
-
-                        <div className={styles.teamRow}>
-                          <span className={styles.teamName}>{card.team_short_name || "N/A"}</span>
-                          <span className={styles.verticalDivider} />
-                          <span className={styles.statPill}>Predictions {card.user_prediction_count ?? 0}</span>
-                          <span className={styles.verticalDivider} />
-                          <span className={styles.statPill}>Comments {card.comment_count ?? 0}</span>
-                          <span className={styles.verticalDivider} />
-                          <span className={`${styles.statPill} ${styles.marketStat}`}>
-                            <span className={styles.marketLabel}>
-                              <Image src="/images/stub.png" alt="" width={11} height={11} className={styles.stubIcon} />
-                              Buy:
-                            </span>
-                            <span>{formatStubs(card.best_buy_price)}</span>
-                          </span>
-                          <span className={styles.verticalDivider} />
-                          <span className={`${styles.statPill} ${styles.marketStat}`}>
-                            <span className={styles.marketLabel}>
-                              <Image src="/images/stub.png" alt="" width={11} height={11} className={styles.stubIcon} />
-                              Quicksell:
-                            </span>
-                            <span>{formatStubs(card.quicksell_value)}</span>
-                          </span>
-                          <span className={styles.verticalDivider} />
-                          <span
-                            className={`${styles.statPill} ${styles.quicksellStatus} ${
-                              card.buy_now_uses_quicksell ? styles.quicksellStatusGood : styles.quicksellStatusBad
-                            }`}
-                          >
-                            <span className={styles.quicksellStatusIcon} aria-hidden>
-                              {card.buy_now_uses_quicksell ? "✓" : "✕"}
-                            </span>
-                            <span>
-                              {card.buy_now_uses_quicksell ? "At Quicksell" : `${formatPercent(card.buy_now_above_quicksell_pct)} above QS`}
-                            </span>
-                          </span>
+                  return (
+                    <Link key={card.id} href={`/cards/${encodeURIComponent(card.id)}`} className={styles.cardRowLink}>
+                      <article className={styles.cardRow}>
+                        <div className={styles.cardImageWrap}>
+                          {card.baked_img ? (
+                            <Image
+                              src={card.baked_img}
+                              alt={card.name}
+                              width={56}
+                              height={78}
+                              className={styles.cardImage}
+                              unoptimized
+                            />
+                          ) : (
+                            <div className={styles.cardImageFallback}>No Image</div>
+                          )}
                         </div>
 
-                        <div className={styles.ratingRow}>
-                          <div className={styles.ratingBadge}>
-                            <span className={styles.badgeLabel}>CUR</span>
-                            <strong>{card.ovr}</strong>
+                        <div className={styles.cardInfo}>
+                          <h2>{card.name}</h2>
+
+                          <div className={styles.teamRow}>
+                            <span className={styles.teamName}>{card.team_short_name || "N/A"}</span>
+                            <span className={styles.verticalDivider} />
+                            <span className={styles.statPill}>Predictions {card.user_prediction_count ?? 0}</span>
+                            <span className={styles.verticalDivider} />
+                            <span className={styles.statPill}>Comments {card.comment_count ?? 0}</span>
+                            <span className={styles.verticalDivider} />
+                            <span className={`${styles.statPill} ${styles.marketStat}`}>
+                              <span className={styles.marketLabel}>
+                                <Image src="/images/stub.png" alt="" width={11} height={11} className={styles.stubIcon} />
+                                Buy:
+                              </span>
+                              <span>{formatStubs(card.best_buy_price)}</span>
+                            </span>
+                            <span className={styles.verticalDivider} />
+                            <span className={`${styles.statPill} ${styles.marketStat}`}>
+                              <span className={styles.marketLabel}>
+                                <Image src="/images/stub.png" alt="" width={11} height={11} className={styles.stubIcon} />
+                                Quicksell:
+                              </span>
+                              <span>{formatStubs(card.quicksell_value)}</span>
+                            </span>
+                            <span className={styles.verticalDivider} />
+                            <span className={`${styles.statPill} ${styles.marketStat} ${profitClass}`}>
+                              <span className={styles.marketLabel}>
+                                <Image src="/images/stub.png" alt="" width={11} height={11} className={styles.stubIcon} />
+                                Profit:
+                              </span>
+                              <span>{formatSignedStubs(predictedProfit)}</span>
+                            </span>
+                            <span className={styles.verticalDivider} />
+                            <span
+                              className={`${styles.statPill} ${styles.quicksellStatus} ${
+                                card.buy_now_uses_quicksell ? styles.quicksellStatusGood : styles.quicksellStatusBad
+                              }`}
+                            >
+                              <span className={styles.quicksellStatusIcon} aria-hidden>
+                                {card.buy_now_uses_quicksell ? "✓" : "✕"}
+                              </span>
+                              <span>
+                                {card.buy_now_uses_quicksell ? "At Quicksell" : `${formatPercent(card.buy_now_above_quicksell_pct)} above QS`}
+                              </span>
+                            </span>
                           </div>
-                          {renderPredictionBadge(card)}
+
+                          <div className={styles.ratingRow}>
+                            <div className={styles.ratingBadge}>
+                              <span className={styles.badgeLabel}>CUR</span>
+                              <strong>{card.ovr}</strong>
+                            </div>
+                            {renderPredictionBadge(card)}
+                          </div>
                         </div>
-                      </div>
-                    </article>
-                  </Link>
-                ))}
+                      </article>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
 

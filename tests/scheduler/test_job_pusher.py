@@ -38,6 +38,8 @@ class FakeQueue:
         ("chat_cleaner", {}, {}),
         ("image_cleaner", {}, {}),
         ("show_profile_stats_updater", {}, {}),
+        ("show_game_refresh", {}, {}),
+        ("show_game_agg", {}, {}),
         ("your_ovr_sync", {}, {}),
         ("revenuecat_entitlements_reconcile", {}, {}),
         (

@@ -10,6 +10,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Crown, Lock, MessageSquare } from "l
 import { FloatingShieldsBackground } from "@/components/FloatingShieldsBackground";
 import Navbar from "@/components/navbar";
 import { ApiError, apiGet, apiGetAuth, apiPostAuth, getMyEntitlements } from "@/lib/api";
+import { CURRENT_CARD_SEASON } from "@/lib/config";
 import { getFirebaseAuth } from "@/lib/firebase";
 
 import styles from "./page.module.css";
@@ -1300,7 +1301,7 @@ export default function CardDetailPage() {
     const effectiveWindow = activeStatsWindow === "last_update" && !canAccessLastUpdateWindow ? "season" : activeStatsWindow;
     const windowParam = effectiveWindow !== "season" ? `&window=${effectiveWindow}` : "";
 
-    void apiGet<SeasonStats>(`/mlb_stats/season/${encodeURIComponent(card.id)}?season=2025${windowParam}`)
+    void apiGet<SeasonStats>(`/mlb_stats/season/${encodeURIComponent(card.id)}?season=${CURRENT_CARD_SEASON}${windowParam}`)
       .then((payload) => {
         if (!cancelled) {
           setSeasonStats(payload);

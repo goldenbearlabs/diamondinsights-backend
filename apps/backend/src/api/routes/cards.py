@@ -244,6 +244,13 @@ def _normalized_listing_price(price: Optional[int], ovr: Optional[int]) -> Optio
     return price
 
 
+def _predicted_profit_for_card(card: Card) -> Optional[int]:
+    predicted_quicksell = _quicksell_value_for_ovr(card.predicted_ovr)
+    if predicted_quicksell is None or card.best_buy_price is None:
+        return None
+    return predicted_quicksell - card.best_buy_price
+
+
 def _apply_market_prices_to_card(
     card: Card,
     best_buy_price: Optional[int],
@@ -441,6 +448,9 @@ def get_cards(
     limit: int = Query(50, le=100),
     offset: int = 0,
     my_predictions: bool = Query(False),
+    at_quicksell: bool = Query(False),
+    min_buy_price: Optional[int] = Query(None, ge=0),
+    max_buy_price: Optional[int] = Query(None, ge=0),
     db: Session = Depends(get_db),
     claims: dict = Depends(firebase_claims_optional),
     cache: Redis | None = Depends(get_cache_client),
@@ -496,6 +506,9 @@ def get_cards(
         normalized_limit,
         normalized_offset,
         int(my_predictions),
+        int(at_quicksell),
+        min_buy_price if min_buy_price is not None else "-",
+        max_buy_price if max_buy_price is not None else "-",
     )
     cached = get_cached_json(cache, cache_key)
     if cached is not None:
@@ -675,6 +688,13 @@ def get_cards(
             unique_by_id[card.id] = card
     cards = list(unique_by_id.values())
 
+    if at_quicksell:
+        cards = [card for card in cards if bool(card.buy_now_uses_quicksell)]
+    if min_buy_price is not None:
+        cards = [card for card in cards if card.best_buy_price is not None and card.best_buy_price >= min_buy_price]
+    if max_buy_price is not None:
+        cards = [card for card in cards if card.best_buy_price is not None and card.best_buy_price <= max_buy_price]
+
     your_weight_map = _your_weight_map_for_claims(db, claims)
 
     def sort_key(card: Card):
@@ -706,6 +726,11 @@ def get_cards(
             if card.predicted_ovr is not None and card.ovr is not None:
                 return card.predicted_ovr - card.ovr
             return -999  if reverse else 999
+        if normalized_sort_by == "profit":
+            profit = _predicted_profit_for_card(card)
+            if profit is None:
+                return -999999 if reverse else 999999
+            return profit
 
         value = getattr(card, normalized_sort_by, None)
         rounded = _rounded_number(value)

@@ -8,7 +8,7 @@
 	show_profile_stats_updater show_game_refresh show_game_agg your_ovr_sync
 
 ENV_FILE ?= .env
-RUNNER_ENV ?= .env
+RUNNER_ENV ?= .env.runner
 SERVER_ENV ?= .env
 MONITORING_ENV ?= .env
 JOB_ARGS ?=

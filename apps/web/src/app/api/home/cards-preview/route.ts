@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { backendApiUrl } from "@/lib/backend-api";
+import { CURRENT_CARD_YEAR } from "@/lib/config";
 
 type BackendCardPreview = {
   id?: string;
@@ -43,7 +44,7 @@ function sanitizeCard(row: BackendCardPreview): HomeCardPreview | null {
 export async function GET() {
   try {
     const response = await fetch(
-      backendApiUrl("/cards?series=live&rarity=diamond&year=25&limit=6"),
+      backendApiUrl(`/cards?series=live&rarity=diamond&year=${CURRENT_CARD_YEAR}&limit=6`),
       { cache: "no-store" },
     );
 
