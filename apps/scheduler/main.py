@@ -56,6 +56,26 @@ SCHEDULED_JOBS = [
         },
     },
     {
+        "func_name": "show_game_refresh",
+        "kwargs": {
+            "trigger": "cron",
+            "hour": "3,19",
+            "minute": "0",
+            "misfire_grace_time": 1800,
+            "coalesce": True,
+        },
+    },
+    {
+        "func_name": "show_game_agg",
+        "kwargs": {
+            "trigger": "cron",
+            "hour": "6,22",
+            "minute": "0",
+            "misfire_grace_time": 1800,
+            "coalesce": True,
+        },
+    },
+    {
         "func_name": "card_sync",
         "kwargs": {
             "trigger": "cron",

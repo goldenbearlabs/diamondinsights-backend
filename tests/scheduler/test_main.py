@@ -54,6 +54,12 @@ class StubPusher:
     def your_ovr_sync(self):
         return "your_ovr_sync"
 
+    def show_game_refresh(self):
+        return "show_game_refresh"
+
+    def show_game_agg(self):
+        return "show_game_agg"
+
 
 def _build_with_jobs(monkeypatch, jobs, *, pusher=None, timezone=None, scheduler_cls=FakeScheduler):
     monkeypatch.setattr(scheduler_main, "SCHEDULED_JOBS", jobs)
@@ -221,6 +227,12 @@ def test_module_entrypoint_runs_main(monkeypatch):
             return (firebase_id, user_id, batch_limit)
         def your_ovr_sync(self):
             return "your_ovr_sync"
+
+        def show_game_refresh(self):
+            return "show_game_refresh"
+
+        def show_game_agg(self):
+            return "show_game_agg"
 
     class FakeScheduler:
         def __init__(self, timezone=None):

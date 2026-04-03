@@ -335,6 +335,56 @@
   padding: 8px 10px;
 }
 
+.sortDirectionButton {
+  min-width: 74px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.priceRangeGroup {
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.priceRangeGroup input {
+  width: 86px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.priceRangeGroup input::placeholder {
+  color: var(--color-muted);
+}
+
+.priceRangeDash {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .quickFilterChip {
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(255, 255, 255, 0.05);
@@ -580,6 +630,18 @@
   gap: 6px;
 }
 
+.profitPositive {
+  color: #4ade80;
+}
+
+.profitNegative {
+  color: #f87171;
+}
+
+.profitNeutral {
+  color: #cbd5e1;
+}
+
 .marketLabel {
   display: inline-flex;
   align-items: center;
@@ -776,7 +838,8 @@
     width: 100%;
   }
 
-  .quickFilterChip,
+  .priceRangeGroup,
+  .sortDirectionButton,
   .predictionsToggle {
     width: 100%;
   }

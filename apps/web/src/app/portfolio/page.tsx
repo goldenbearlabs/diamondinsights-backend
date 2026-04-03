@@ -19,6 +19,7 @@ import {
   apiPutAuth,
   getMyEntitlements,
 } from "@/lib/api";
+import { CURRENT_CARD_YEAR } from "@/lib/config";
 import { getFirebaseAuth } from "@/lib/firebase";
 
 import styles from "./page.module.css";
@@ -337,7 +338,7 @@ export default function PortfolioPage() {
     const timer = window.setTimeout(() => {
       setSearching(true);
       void apiGet<CardSearchResult[]>(
-        `/cards?series=live&year=25&name=${encodeURIComponent(searchText.trim())}&limit=8`,
+        `/cards?series=live&year=${CURRENT_CARD_YEAR}&name=${encodeURIComponent(searchText.trim())}&limit=8`,
       )
         .then((results) => {
           if (active) {
