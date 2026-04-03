@@ -1,0 +1,470 @@
+.page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(920px 500px at 0% 0%, var(--blob-left), transparent 70%),
+    radial-gradient(860px 520px at 100% 0%, var(--blob-right), transparent 66%),
+    var(--color-background);
+}
+
+.texture {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, calc(100% - 24px));
+  margin-inline: auto;
+  padding: 16px 0 34px;
+  display: grid;
+  gap: 12px;
+}
+
+.header h1 {
+  color: #fff;
+  font-size: clamp(28px, 5vw, 38px);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  line-height: 1;
+}
+
+.topToggleRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.topToggleButton,
+.topToggleButtonActive,
+.modeButton,
+.modeButtonActive,
+.timeRangeButton,
+.timeRangeButtonActive,
+.dropdownTrigger,
+.dropdownOption,
+.dropdownOptionActive,
+.pageButton,
+.clearButton,
+.applyButton,
+.detailProfileButton {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.topToggleButtonActive,
+.timeRangeButtonActive {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(64, 40, 8, 0.65);
+  color: #fbbf24;
+}
+
+.filterCard,
+.leaderboardHeader,
+.recordCard,
+.statusCard,
+.statusCardError {
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.82);
+}
+
+.filterCard,
+.leaderboardHeader {
+  padding: 12px;
+}
+
+.filterHeaderRow {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.filterHeaderText {
+  display: grid;
+  text-align: left;
+}
+
+.filterHeaderText strong {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.filterHeaderText small,
+.leaderboardHeader p,
+.metaBar span,
+.pageMetaText,
+.lookupHint,
+.statusCard {
+  color: rgba(148, 163, 184, 0.95);
+  font-size: 12px;
+}
+
+.chevron {
+  color: #fff;
+  font-size: 12px;
+}
+
+.filterBody {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.modeRow,
+.timeRangeRow,
+.actionsRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.modeButtonActive {
+  border-color: rgba(59, 130, 246, 0.8);
+  background: rgba(59, 130, 246, 0.22);
+  color: #fff;
+}
+
+.fieldGroup {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldLabel,
+.detailLabel {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.dropdownTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dropdownMenu,
+.suggestionWrap {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.96);
+}
+
+.dropdownOption,
+.dropdownOptionActive,
+.suggestionItem {
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 0;
+  background: transparent;
+  min-height: 0;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.dropdownMenu > :first-child,
+.suggestionWrap > :first-child {
+  border-top: 0;
+}
+
+.dropdownOptionActive {
+  background: rgba(59, 130, 246, 0.18);
+  color: #fff;
+}
+
+.input {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.55);
+  font-size: 13px;
+}
+
+.input::placeholder {
+  color: #94a3b8;
+}
+
+.suggestionItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.suggestionItem strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.suggestionItem span {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.applyButton {
+  background: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.9);
+  color: #fff;
+}
+
+.clearButton:disabled,
+.pageButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.leaderboardHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.leaderboardHeader h2 {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.leaderboardHeader strong {
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.metaBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.paginationRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recordsList {
+  display: grid;
+  gap: 10px;
+}
+
+.recordCard {
+  overflow: hidden;
+}
+
+.condensedRow {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rankBadge {
+  min-width: 62px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  display: grid;
+  justify-items: center;
+  background: rgba(251, 191, 36, 0.16);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.rankBadge strong {
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rankBadge small {
+  color: #fde68a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.condensedCenter,
+.condensedRight {
+  display: grid;
+}
+
+.condensedCenter {
+  min-width: 0;
+}
+
+.condensedCenter strong,
+.profileLinkText {
+  color: #93c5fd;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.condensedCenter small {
+  color: #94a3b8;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.condensedRight {
+  justify-items: end;
+  gap: 2px;
+}
+
+.condensedRight strong {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.condensedRight small {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.detailWrap {
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detailChip {
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(59, 130, 246, 0.16);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.profilesRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profileBlock {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.52);
+  display: grid;
+  gap: 4px;
+}
+
+.detailProfileButton {
+  border: 0;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  color: #93c5fd;
+  font-size: 12px;
+}
+
+.playerRow {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.playerRow strong {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.statusCard,
+.statusCardError {
+  padding: 16px;
+  color: #e2e8f0;
+  font-size: 14px;
+}
+
+.statusCardError {
+  color: #f87171;
+}
+
+@media (max-width: 760px) {
+  .content {
+    width: calc(100% - 8px);
+    padding-bottom: 24px;
+  }
+
+  .topToggleRow,
+  .modeRow,
+  .timeRangeRow,
+  .actionsRow,
+  .profilesRow {
+    grid-template-columns: 1fr;
+  }
+
+  .metaBar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .paginationRow {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .condensedRow {
+    grid-template-columns: 1fr;
+  }
+
+  .condensedRight {
+    justify-items: start;
+  }
+
+  .playerRow {
+    grid-template-columns: 1fr;
+  }
+
+  .playerRow strong {
+    text-align: left;
+  }
+}
