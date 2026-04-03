@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional, Dict, Any, Tuple
 
@@ -10,7 +11,6 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from shared.core.config import CURRENT_SHOW_YEAR
 from shared.db.database import get_db
 from shared.db.models import Users, ShowProfile, ShowProfileOnlineStats
 from src.api.routes.users import firebase_claims
@@ -18,15 +18,12 @@ from src.core.cache import build_cache_key, get_cache_client, get_cached_json, s
 
 from .common import _utcnow, _to_int, _to_float
 from .models import LinkShowBody, ShowProfileOut
+from shared.core.show_api import build_show_search_request
 
 
 router = APIRouter()
 public_router = APIRouter()
-
-SHOW_SEARCH_URL = os.getenv(
-    "SHOW_SEARCH_URL",
-    f"https://mlb{CURRENT_SHOW_YEAR}.theshow.com/apis/player_search.json",
-)
+logger = logging.getLogger(__name__)
 
 
 def _read_positive_int_env(name: str, default: int) -> int:
@@ -57,12 +54,22 @@ def _set_profile_http_cache_headers(response: Response, *, is_public: bool) -> N
 
 
 def _fetch_show_profile(username: str) -> Tuple[dict, dict]:
+    url, params, headers = build_show_search_request(username)
     try:
-        r = requests.get(SHOW_SEARCH_URL, params={"username": username}, timeout=10)
+        r = requests.get(url, params=params, headers=headers, timeout=10)
     except requests.RequestException:
+        logger.exception("show profile fetch transport failure username=%s url=%s", username, url)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to reach The Show API")
 
     if r.status_code != 200:
+        body_sample = (r.text or "")[:200].replace("\n", " ").strip()
+        logger.warning(
+            "show profile fetch upstream error username=%s url=%s status=%s body_sample=%s",
+            username,
+            url,
+            r.status_code,
+            body_sample,
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The Show API returned an error")
 
     try:

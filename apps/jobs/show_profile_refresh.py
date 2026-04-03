@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import random
 import time
 from datetime import datetime, timezone
@@ -10,14 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from apps.jobs.job import Job
-from shared.core.config import CURRENT_SHOW_YEAR
+from shared.core.show_api import build_show_search_request
 from shared.db.models import ShowProfile, ShowProfileOnlineStats
-
-
-SHOW_SEARCH_URL = os.getenv(
-    "SHOW_SEARCH_URL",
-    f"https://mlb{CURRENT_SHOW_YEAR}.theshow.com/apis/player_search.json",
-)
 
 
 def _utcnow() -> datetime:
@@ -114,7 +107,8 @@ class ShowProfileStatsUpdater(Job):
 
     def _fetch_show_profile(self, username: str) -> Tuple[dict, dict]:
         time.sleep(random.uniform(*self.fetch_jitter_range))
-        data = self._api_client.get(SHOW_SEARCH_URL, {"username": username})
+        url, params, headers = build_show_search_request(username)
+        data = self._api_client.get(url, params, headers=headers)
         profiles = data.get("universal_profiles") or []
         if not profiles:
             raise ValueError("username not found")

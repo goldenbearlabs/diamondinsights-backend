@@ -36,6 +36,7 @@ class APIClient:
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
         *,
+        headers: Optional[Dict[str, str]] = None,
         retry_statuses: Optional[set[int]] = None,
         retry_count: Optional[int] = None,
         return_none_on_statuses: Optional[set[int]] = None,
@@ -47,7 +48,7 @@ class APIClient:
 
         last_response: Optional[requests.Response] = None
         for attempt in range(max_retries + 1):
-            response = self.session.get(url, params=params, timeout=40)
+            response = self.session.get(url, params=params, headers=headers, timeout=40)
             last_response = response
 
             if response.status_code in retry_on:
