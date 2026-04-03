@@ -10,6 +10,8 @@ import styles from "./styles.module.css";
 type Props = {
   games: ShowGameLogItem[];
   username: string | null;
+  isSelfView: boolean;
+  viewUsername: string | null;
   loading: boolean;
   error: string | null;
 };
@@ -50,7 +52,7 @@ function dedupeKey(game: ShowGameLogItem, username: string | null): string {
   return `${dateKey}|${opponent}`;
 }
 
-export function GameLogSection({ games, username, loading, error }: Props) {
+export function GameLogSection({ games, username, isSelfView, viewUsername, loading, error }: Props) {
   const [difficulty, setDifficulty] = useState<string>("all");
   const [result, setResult] = useState<ResultFilter>("all");
   const [ballpark, setBallpark] = useState("");
@@ -105,7 +107,15 @@ export function GameLogSection({ games, username, loading, error }: Props) {
   }, [games, difficulty, result, ballpark, username]);
 
   if (selectedGame) {
-    return <GameDetailSection game={selectedGame} username={username} onBack={() => setSelectedGame(null)} />;
+    return (
+      <GameDetailSection
+        game={selectedGame}
+        username={username}
+        isSelfView={isSelfView}
+        viewUsername={viewUsername}
+        onBack={() => setSelectedGame(null)}
+      />
+    );
   }
 
   return (
