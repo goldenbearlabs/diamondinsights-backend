@@ -474,3 +474,95 @@ def test_run_skips_user_that_already_has_game_in_pas_when_global_checkpoint_is_s
     assert "facts/u2/pas.parquet" in written_parquet
     assert written_checkpoints["u2"] == {"g7"}
     assert written_global_checkpoints == [{"g7"}]
+
+
+def test_run_flushes_chunks_periodically_and_reloads_user_state_between_chunks():
+    agg = _agg()
+
+    class FakeSession:
+        pass
+
+    games = [
+        SimpleNamespace(id="g1", home_profile_username="u1", away_profile_username="u2", ball_park_id=None),
+        SimpleNamespace(id="g2", home_profile_username="u1", away_profile_username="u3", ball_park_id=None),
+    ]
+    bundles = {
+        "g1": {
+            "plate_appearances": [{"game_id": "g1", "event_seq": 1, "batter_mlb_id": 10, "pitcher_mlb_id": 20, "result": "single"}],
+            "events": [],
+            "batting_boxscores": [{"mlb_id": 11, "ab": 2}],
+            "pitching_boxscores": [{"mlb_id": 21, "outs_pitched": 6}],
+        },
+        "g2": {
+            "plate_appearances": [{"game_id": "g2", "event_seq": 2, "batter_mlb_id": 12, "pitcher_mlb_id": 22, "result": "home_run"}],
+            "events": [],
+            "batting_boxscores": [{"mlb_id": 11, "ab": 3}],
+            "pitching_boxscores": [{"mlb_id": 23, "outs_pitched": 9}],
+        },
+    }
+
+    parquet_store = {}
+    checkpoint_store = {}
+    global_checkpoint_writes = []
+    operation_log = []
+    record_calls = []
+
+    def fake_env_int(name, default, minimum=1):
+        if name in ("SHOW_GAME_AGG_BUNDLE_FETCH_WORKERS", "SHOW_GAME_AGG_BUNDLE_FETCH_MAX_IN_FLIGHT"):
+            return 1
+        if name == "SHOW_GAME_AGG_FLUSH_EVERY_GAMES":
+            return 1
+        return default
+
+    def fake_load_user_state(username):
+        base_prefix = f"facts/{username}"
+        return {
+            "pas_existing": [dict(row) for row in parquet_store.get(f"{base_prefix}/pas.parquet", [])],
+            "pas_new": [],
+            "batting_box_agg": agg._index_agg_rows(parquet_store.get(f"{base_prefix}/batting_boxscores.parquet", [])),
+            "pitching_box_agg": agg._index_agg_rows(parquet_store.get(f"{base_prefix}/pitching_boxscores.parquet", [])),
+        }
+
+    agg._env_int = fake_env_int
+    agg._fetch_all_games = lambda _db_session, _usernames=None: games
+    agg._fetch_ballpark_elevations = lambda _db_session: {}
+    agg._read_global_checkpoint_game_ids = lambda: set()
+    agg._write_global_checkpoint_game_ids = lambda game_ids: (
+        operation_log.append(("global", set(game_ids))),
+        global_checkpoint_writes.append(set(game_ids)),
+    )
+    agg._read_checkpoint_game_ids = lambda username: set(checkpoint_store.get(username, set()))
+    agg._load_user_state = fake_load_user_state
+    agg._build_facts_for_games = lambda _game, _bundle: None
+    agg._collect_record_candidates = lambda **kwargs: None
+    agg._append_and_write_records = lambda hr, hh: record_calls.append((list(hr), list(hh)))
+    agg._load_game_bundle = lambda game_id: bundles[game_id]
+
+    def fake_put_parquet(key, rows):
+        parquet_store[key] = [dict(row) for row in rows]
+        operation_log.append(("parquet", key))
+
+    def fake_write_checkpoint(username, game_ids):
+        checkpoint_store[username] = set(game_ids)
+        operation_log.append(("user_checkpoint", username, set(game_ids)))
+
+    agg._put_parquet = fake_put_parquet
+    agg._write_checkpoint_game_ids = fake_write_checkpoint
+
+    agg.run(FakeSession())
+
+    assert global_checkpoint_writes == [{"g1"}, {"g1", "g2"}]
+    assert checkpoint_store["u1"] == {"g1", "g2"}
+    assert checkpoint_store["u2"] == {"g1"}
+    assert checkpoint_store["u3"] == {"g2"}
+
+    u1_pas = parquet_store["facts/u1/pas.parquet"]
+    assert {row["game_id"] for row in u1_pas} == {"g1", "g2"}
+    assert parquet_store["facts/u2/pas.parquet"][0]["game_id"] == "g1"
+    assert parquet_store["facts/u3/pas.parquet"][0]["game_id"] == "g2"
+
+    first_global_index = next(i for i, item in enumerate(operation_log) if item[0] == "global" and item[1] == {"g1"})
+    assert ("user_checkpoint", "u1", {"g1"}) in operation_log[:first_global_index]
+    assert ("user_checkpoint", "u2", {"g1"}) in operation_log[:first_global_index]
+    assert len(record_calls) == 1
+    assert record_calls[0] == ([], [])
