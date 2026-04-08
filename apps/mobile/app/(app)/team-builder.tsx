@@ -1134,7 +1134,7 @@ export default function TeamBuilder() {
 
       const buildUrl = (offset: number) => {
         const params = new URLSearchParams({
-          year: "25",
+          year: "26",
           is_hitter: rosterMode === "batters" ? "true" : "false",
           limit: "100",
           offset: String(offset),
@@ -1156,7 +1156,7 @@ export default function TeamBuilder() {
       const unique = new Map<string, TeamCard>();
       for (const card of cards) unique.set(card.id, card);
 
-      setResults(Array.from(unique.values()).filter((card) => card.year === 25));
+      setResults(Array.from(unique.values()).filter((card) => card.year === 26));
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       if (err instanceof Error && err.message === "Not authenticated") {
@@ -1219,7 +1219,7 @@ export default function TeamBuilder() {
     for (let page = 0; page < maxPages; page += 1) {
       const offset = page * pageSize;
       const params = new URLSearchParams({
-        year: "25",
+        year: "26",
         is_hitter: rosterMode === "batters" ? "true" : "false",
         limit: String(pageSize),
         offset: String(offset),
@@ -1234,7 +1234,7 @@ export default function TeamBuilder() {
     const unique = new Map<string, TeamCard>();
     for (const card of collected) unique.set(card.id, card);
 
-    const cached = Array.from(unique.values()).filter((card) => card.year === 25);
+    const cached = Array.from(unique.values()).filter((card) => card.year === 26);
     if (rosterMode === "batters") setAllHitterCardsCache(cached);
     else setAllPitcherCardsCache(cached);
     return cached;
@@ -1500,7 +1500,7 @@ export default function TeamBuilder() {
             </View>
           </View>
         ) : (
-          <Text style={styles.emptySlotText}>Tap to add a Year 25 card for this slot.</Text>
+          <Text style={styles.emptySlotText}>Tap to add a card for this slot.</Text>
         )}
       </TouchableOpacity>
     );
@@ -1648,7 +1648,7 @@ export default function TeamBuilder() {
               <Ionicons name="search" size={16} color={theme.colors.muted} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search Year 25 cards..."
+                placeholder="Search MLB 26 cards..."
                 placeholderTextColor={theme.colors.muted}
                 value={searchText}
                 onChangeText={setSearchText}
