@@ -214,7 +214,7 @@ export default function PlayerDetailsScreen() {
     const effectiveWindow =
       activeWindow === 'last_update' && !canAccessLastUpdateWindow ? 'season' : activeWindow;
     const windowParam = effectiveWindow !== 'season' ? `&window=${effectiveWindow}` : '';
-    apiGet<SeasonStats>(`/mlb_stats/season/${card.id}?season=2025${windowParam}`)
+    apiGet<SeasonStats>(`/mlb_stats/season/${card.id}?season=2026${windowParam}`)
       .then(res => setSeasonStats(res))
       .catch(() => setSeasonStats(null))
       .finally(() => setLoadingStats(false));
