@@ -18,6 +18,9 @@ class FakeRedis:
         return len(self._lists[key])
 
     def brpoplpush(self, source, dest, timeout=0):
+        return self.rpoplpush(source, dest)
+
+    def rpoplpush(self, source, dest):
         src_list = self._lists.get(source, [])
         if not src_list:
             return None
@@ -158,7 +161,7 @@ def test_queue_respects_custom_keys():
 
 
 def test_payload_roundtrip_preserves_fields():
-    payload = Payload(job_type="card_sync", args={"x": 1})
+    payload = Payload(job_type="card_sync", args={"x": 1}, priority="high")
     payload.attempts = 2
     payload.enqueued_at = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
@@ -170,6 +173,7 @@ def test_payload_roundtrip_preserves_fields():
     assert decoded.args == payload.args
     assert decoded.attempts == payload.attempts
     assert decoded.enqueued_at == payload.enqueued_at
+    assert decoded.priority == payload.priority
 
 
 def test_payload_from_json_defaults_args_and_attempts():
@@ -196,6 +200,7 @@ def test_enqueue_pushes_payload_to_pending():
 
     assert payload.job_type == "card_sync"
     assert payload.args == {"reload_all_years": True}
+    assert payload.priority == "normal"
     assert client._lists[queue.pending_key] == [payload.to_json()]
 
 
@@ -227,6 +232,27 @@ def test_reserve_moves_payload_to_processing_and_sets_lease(monkeypatch):
     assert client._lists[queue.processing_key] == [raw]
     assert client._hashes[queue.raw_hash][payload.job_id] == raw
     assert client._zsets[queue.lease_zset][payload.job_id] == 1234.5
+
+
+def test_reserve_prioritizes_high_before_normal_and_low():
+    queue, client = _make_queue()
+
+    low = queue.enqueue("low_job", priority="low")
+    normal = queue.enqueue("normal_job")
+    high = queue.enqueue("high_job", priority="high")
+
+    _, first = queue.reserve()
+    _, second = queue.reserve()
+    _, third = queue.reserve()
+
+    assert [first.job_id, second.job_id, third.job_id] == [
+        high.job_id,
+        normal.job_id,
+        low.job_id,
+    ]
+    assert client._lists[queue.high_pending_key] == []
+    assert client._lists[queue.pending_key] == []
+    assert client._lists[queue.low_pending_key] == []
 
 
 def test_reserve_defaults_missing_args_and_attempts():

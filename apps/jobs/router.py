@@ -161,13 +161,49 @@ class Router:
                                 from apps.jobs.show_profile_refresh import ShowProfileStatsUpdater
                                 ShowProfileStatsUpdater().run(session)
 
+                            case "show_profile_refresh_enqueue":
+                                from apps.jobs.show_profile_refresh import ShowProfileRefreshEnqueuer
+                                ShowProfileRefreshEnqueuer().run(session)
+
+                            case "show_profile_refresh_username":
+                                from apps.jobs.show_profile_refresh import ShowProfileStatsUpdater
+                                username = str(payload.args.get("username") or "").strip()
+                                if not username:
+                                    raise ValueError("show_profile_refresh_username requires username")
+                                ShowProfileStatsUpdater(usernames=[username]).run(session)
+
                             case "show_game_refresh":
                                 from apps.jobs.show_game_refresh import ShowGameRefresh
                                 ShowGameRefresh().run(session)
 
+                            case "show_game_refresh_enqueue":
+                                from apps.jobs.show_game_refresh import ShowGameRefreshEnqueuer
+                                ShowGameRefreshEnqueuer().run(session)
+
+                            case "show_game_refresh_username":
+                                from apps.jobs.show_game_refresh import ShowGameRefresh
+                                username = str(payload.args.get("username") or "").strip()
+                                if not username:
+                                    raise ValueError("show_game_refresh_username requires username")
+                                ShowGameRefresh(usernames=[username]).run(session)
+
                             case "show_game_agg":
                                 from apps.jobs.show_game_agg import ShowGameAgg
                                 ShowGameAgg().run(session)
+
+                            case "show_game_agg_enqueue":
+                                from apps.jobs.show_game_agg import ShowGameAggEnqueuer
+                                ShowGameAggEnqueuer().run(session)
+
+                            case "show_game_agg_batch":
+                                from apps.jobs.show_game_agg import ShowGameAgg
+                                raw_game_ids = payload.args.get("game_ids") or []
+                                if not isinstance(raw_game_ids, list):
+                                    raise ValueError("show_game_agg_batch requires game_ids list")
+                                game_ids = [str(gid).strip() for gid in raw_game_ids if str(gid).strip()]
+                                if not game_ids:
+                                    raise ValueError("show_game_agg_batch requires at least one game_id")
+                                ShowGameAgg(game_ids=game_ids).run(session)
 
                             case "your_ovr_sync":
                                 from apps.jobs.your_ovr_sync import YourOvrSync

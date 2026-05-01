@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from contextlib import contextmanager, nullcontext
+from typing import Any, Iterator, Mapping, Optional, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 import json
 import math
@@ -13,12 +14,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pandas as pd
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from shared.storage.spaces_connector import SpacesConfig, SpacesConnector
 from apps.jobs.job import Job
-from shared.db.models import ShowBallParks, ShowGameSummary
+from shared.db.models import ShowBallParks, ShowGameAggStatus, ShowGameSummary
+from shared.queue.queue import Queue
+from shared.queue.redis_connector import RedisConnector
 
 
 RECORDS_KEY = "records/records.parquet"
@@ -29,6 +33,10 @@ GLOBAL_CHECKPOINT_KEY = "facts/show_game_agg/checkpoint.json"
 BUNDLE_FETCH_WORKERS_DEFAULT = 4
 BUNDLE_FETCH_MAX_IN_FLIGHT_DEFAULT = 8
 FLUSH_EVERY_GAMES_DEFAULT = 250
+AGG_VERSION_DEFAULT = 1
+AGG_BATCH_SIZE_DEFAULT = 100
+AGG_MAX_BATCHES_DEFAULT = 200
+RECORDS_MAX_ROWS_DEFAULT = 2_000_000
 
 # Legacy constants kept for compatibility with older unit tests/importers.
 RECORD_FURTHEST_HR = "furthest_homeruns"
@@ -37,9 +45,13 @@ RECORD_HARDEST_HIT = "hardest_hit_balls"
 
 
 class ShowGameAgg(Job):
-    def __init__(self):
+    def __init__(self, *, game_ids: Optional[Sequence[str]] = None):
         super().__init__()
         self.spaces = SpacesConnector(SpacesConfig.from_env())
+        self.game_ids = [str(gid).strip() for gid in game_ids or [] if str(gid).strip()]
+        self.agg_version = self._env_int("SHOW_GAME_AGG_VERSION", AGG_VERSION_DEFAULT)
+        self.records_max_rows = self._env_int("SHOW_GAME_RECORDS_MAX_ROWS", RECORDS_MAX_ROWS_DEFAULT)
+        self._redis = None
 
     def _game_val(self, game: Mapping[str, Any] | ShowGameSummary, key: str) -> Any:
         if isinstance(game, Mapping):
@@ -79,13 +91,18 @@ class ShowGameAgg(Job):
             flush_every_games,
         )
 
+        explicit_batch = bool(self.game_ids)
         t0 = perf_counter()
-        processed_game_ids = self._read_global_checkpoint_game_ids()
+        if explicit_batch:
+            processed_game_ids = self._read_done_status_game_ids(db_session, self.game_ids)
+        else:
+            processed_game_ids = self._read_global_checkpoint_game_ids()
         load_global_checkpoint_s = perf_counter() - t0
         self.logger.info(
-            "show game agg timing phase=load_global_checkpoint elapsed_s=%.3f processed_games=%s",
+            "show game agg timing phase=load_checkpoint elapsed_s=%.3f processed_games=%s source=%s",
             load_global_checkpoint_s,
             len(processed_game_ids),
+            "db_status" if explicit_batch else "spaces_global",
         )
 
         t0 = perf_counter()
@@ -137,7 +154,8 @@ class ShowGameAgg(Job):
             for username in changed_usernames:
                 ctx = user_contexts[username]
                 write_started = perf_counter()
-                self._write_user_context(username, ctx)
+                with self._user_write_lock(username):
+                    self._write_user_context(username, ctx)
                 timings["write_users_s"] += perf_counter() - write_started
                 users_changed_count += 1
                 user_state = ctx["state"]
@@ -159,8 +177,11 @@ class ShowGameAgg(Job):
 
             if chunk_game_ids:
                 t0 = perf_counter()
-                processed_game_ids.update(chunk_game_ids)
-                self._write_global_checkpoint_game_ids(processed_game_ids)
+                if explicit_batch:
+                    self._mark_games_done(db_session, chunk_game_ids)
+                else:
+                    processed_game_ids.update(chunk_game_ids)
+                    self._write_global_checkpoint_game_ids(processed_game_ids)
                 timings["write_global_checkpoint_s"] += perf_counter() - t0
                 counters["chunks_flushed"] += 1
 
@@ -238,7 +259,12 @@ class ShowGameAgg(Job):
                 if len(chunk_game_ids) >= flush_every_games:
                     flush_chunk()
 
-            for game in self._fetch_all_games(db_session):
+            games_iter = (
+                self._fetch_all_games(db_session, game_ids=self.game_ids)
+                if explicit_batch
+                else self._fetch_all_games(db_session)
+            )
+            for game in games_iter:
                 counters["games_scanned"] += 1
                 if counters["games_scanned"] % 1000 == 0:
                     self.logger.info(
@@ -279,7 +305,7 @@ class ShowGameAgg(Job):
         timings["iterate_games_s"] += perf_counter() - iter_started
 
         flush_chunk()
-        if not records_written:
+        if not records_written and not explicit_batch:
             flush_chunk(force_records_rewrite=True)
 
         total_elapsed_s = perf_counter() - run_started
@@ -318,6 +344,83 @@ class ShowGameAgg(Job):
             counters["hr_candidates"],
             counters["hard_candidates"],
         )
+
+    def _redis_client(self):
+        if self._redis is None:
+            try:
+                self._redis = RedisConnector().client()
+            except Exception as e:
+                self.logger.warning("show game agg redis unavailable; user write locks disabled err=%s", e)
+                self._redis = False
+        return self._redis if self._redis is not False else None
+
+    @contextmanager
+    def _user_write_lock(self, username: str):
+        client = self._redis_client()
+        if client is None:
+            with nullcontext():
+                yield
+            return
+
+        lock_timeout = self._env_int("SHOW_GAME_AGG_USER_LOCK_TIMEOUT_SECONDS", 900)
+        blocking_timeout = self._env_int("SHOW_GAME_AGG_USER_LOCK_WAIT_SECONDS", 900)
+        lock = client.lock(
+            f"lock:show_game_agg:user:{username}",
+            timeout=lock_timeout,
+            blocking_timeout=blocking_timeout,
+        )
+        acquired = lock.acquire(blocking=True)
+        if not acquired:
+            raise TimeoutError(f"timed out acquiring show game agg user lock for {username}")
+        try:
+            yield
+        finally:
+            try:
+                lock.release()
+            except Exception as e:
+                self.logger.warning("show game agg lock release failed username=%s err=%s", username, e)
+
+    def _read_done_status_game_ids(self, db_session: Session, game_ids: Sequence[str]) -> set[str]:
+        if not game_ids:
+            return set()
+        return set(
+            db_session.scalars(
+                select(ShowGameAggStatus.game_id).where(
+                    ShowGameAggStatus.game_id.in_(list(game_ids)),
+                    ShowGameAggStatus.agg_version == self.agg_version,
+                    ShowGameAggStatus.status == "done",
+                )
+            )
+        )
+
+    def _mark_games_done(self, db_session: Session, game_ids: set[str]) -> None:
+        if not game_ids:
+            return
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "game_id": game_id,
+                "agg_version": self.agg_version,
+                "status": "done",
+                "attempts": 0,
+                "aggregated_at": now,
+                "last_error": None,
+                "updated_at": now,
+            }
+            for game_id in sorted(game_ids)
+        ]
+        stmt = pg_insert(ShowGameAggStatus).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["game_id", "agg_version"],
+            set_={
+                "status": "done",
+                "aggregated_at": now,
+                "last_error": None,
+                "updated_at": now,
+            },
+        )
+        db_session.execute(stmt)
+        db_session.commit()
 
     def _append_and_write_records(
         self,
@@ -375,6 +478,7 @@ class ShowGameAgg(Job):
                 global_rank_field="rank_plus",
                 difficulty_rank_field="difficulty_rank_plus",
             )
+            merged_hr = self._cap_record_rows(merged_hr, "distance_ft")
             self._put_records_parquet(
                 RECORDS_HOME_RUNS_KEY,
                 merged_hr,
@@ -391,6 +495,7 @@ class ShowGameAgg(Job):
                 global_rank_field="rank",
                 difficulty_rank_field="difficulty_rank",
             )
+            merged_hard = self._cap_record_rows(merged_hard, "exit_vel_mph")
             self._put_records_parquet(
                 RECORDS_HARDEST_HITS_KEY,
                 merged_hard,
@@ -429,6 +534,25 @@ class ShowGameAgg(Job):
                 duplicate_hr_after_scan,
                 duplicate_hard_after_scan,
             )
+
+    def _cap_record_rows(self, rows: list[dict[str, Any]], value_field: str) -> list[dict[str, Any]]:
+        if self.records_max_rows <= 0 or len(rows) <= self.records_max_rows:
+            return rows
+
+        def sort_key(row: dict[str, Any]) -> tuple[float, str, int]:
+            value = self._coerce_float(row.get(value_field))
+            game_id = str(row.get("game_id") or "")
+            event_id = self._coerce_int(row.get("event_id")) or -1
+            return (-(value if value is not None else float("-inf")), game_id, event_id)
+
+        capped = sorted(rows, key=sort_key)[: self.records_max_rows]
+        self.logger.info(
+            "show game agg capped records value_field=%s before=%s after=%s",
+            value_field,
+            len(rows),
+            len(capped),
+        )
+        return capped
 
     def _home_run_record_row(self, source_row: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1224,7 +1348,12 @@ class ShowGameAgg(Job):
                 out.append(json.loads(line))
         return out
 
-    def _fetch_all_games(self, db_session: Session, usernames: Optional[list[str]] = None):
+    def _fetch_all_games(
+        self,
+        db_session: Session,
+        usernames: Optional[list[str]] = None,
+        game_ids: Optional[Sequence[str]] = None,
+    ):
         stmt = (
             select(
                 ShowGameSummary.id,
@@ -1238,8 +1367,11 @@ class ShowGameAgg(Job):
                 ShowGameSummary.home_name,
                 ShowGameSummary.away_name,
             )
-            .execution_options(yield_per=1000, stream_results=True)
         )
+        if not game_ids:
+            stmt = stmt.execution_options(yield_per=1000, stream_results=True)
+        if game_ids:
+            stmt = stmt.where(ShowGameSummary.id.in_(list(game_ids)))
         if usernames:
             username_filter = or_(
                 ShowGameSummary.home_profile_username.in_(usernames),
@@ -1247,3 +1379,138 @@ class ShowGameAgg(Job):
             )
             stmt = stmt.where(username_filter)
         return db_session.execute(stmt).mappings()
+
+
+class ShowGameAggEnqueuer(Job):
+    def __init__(
+        self,
+        *,
+        queue: Optional[Queue] = None,
+        spaces: Optional[SpacesConnector] = None,
+    ):
+        super().__init__()
+        self.queue = queue or Queue(RedisConnector())
+        self.spaces = spaces or SpacesConnector(SpacesConfig.from_env())
+        self.agg_version = self._env_int("SHOW_GAME_AGG_VERSION", AGG_VERSION_DEFAULT)
+        self.batch_size = self._env_int("SHOW_GAME_AGG_BATCH_SIZE", AGG_BATCH_SIZE_DEFAULT)
+        self.max_batches = self._env_int("SHOW_GAME_AGG_MAX_BATCHES", AGG_MAX_BATCHES_DEFAULT)
+
+    def _env_int(self, name: str, default: int, minimum: int = 1) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return max(minimum, value)
+
+    def run(self, db_session: Session) -> None:
+        had_status = self._status_table_has_rows(db_session)
+        backfilled = self._backfill_status_from_spaces_checkpoint_if_empty(db_session)
+        allow_empty_bootstrap = os.getenv("SHOW_GAME_AGG_ALLOW_EMPTY_CHECKPOINT_BOOTSTRAP", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if not had_status and backfilled == 0 and not allow_empty_bootstrap:
+            self.logger.warning(
+                "show game agg enqueue skipped because agg status is empty and no Spaces checkpoint was backfilled"
+            )
+            self._log_end(
+                backfilled=0,
+                selected_games=0,
+                enqueued_batches=0,
+                batch_size=self.batch_size,
+                max_batches=self.max_batches,
+                agg_version=self.agg_version,
+            )
+            return
+
+        limit = self.batch_size * self.max_batches
+        game_ids = self._select_unaggregated_game_ids(db_session, limit=limit)
+
+        enqueued = 0
+        for batch in self._chunks(game_ids, self.batch_size):
+            self.queue.enqueue("show_game_agg_batch", {"game_ids": batch}, priority="low")
+            enqueued += 1
+
+        self._log_end(
+            backfilled=backfilled,
+            selected_games=len(game_ids),
+            enqueued_batches=enqueued,
+            batch_size=self.batch_size,
+            max_batches=self.max_batches,
+            agg_version=self.agg_version,
+        )
+
+    def _status_table_has_rows(self, db_session: Session) -> bool:
+        existing = db_session.scalar(
+            select(func.count())
+            .select_from(ShowGameAggStatus)
+            .where(ShowGameAggStatus.agg_version == self.agg_version)
+        )
+        return bool(existing)
+
+    def _backfill_status_from_spaces_checkpoint_if_empty(self, db_session: Session) -> int:
+        if self._status_table_has_rows(db_session):
+            return 0
+
+        try:
+            payload = self.spaces.get_json(GLOBAL_CHECKPOINT_KEY)
+        except Exception:
+            return 0
+        if not isinstance(payload, dict):
+            return 0
+        raw_game_ids = payload.get("aggregated_game_ids")
+        if not isinstance(raw_game_ids, list):
+            return 0
+
+        checkpoint_ids = [str(gid).strip() for gid in raw_game_ids if str(gid).strip()]
+        total = 0
+        now = datetime.now(timezone.utc)
+        for chunk in self._chunks(checkpoint_ids, 5000):
+            existing_game_ids = list(
+                db_session.scalars(select(ShowGameSummary.id).where(ShowGameSummary.id.in_(chunk)))
+            )
+            if not existing_game_ids:
+                continue
+            rows = [
+                {
+                    "game_id": game_id,
+                    "agg_version": self.agg_version,
+                    "status": "done",
+                    "attempts": 0,
+                    "aggregated_at": now,
+                    "last_error": None,
+                    "updated_at": now,
+                }
+                for game_id in existing_game_ids
+            ]
+            stmt = pg_insert(ShowGameAggStatus).values(rows)
+            stmt = stmt.on_conflict_do_nothing(index_elements=["game_id", "agg_version"])
+            db_session.execute(stmt)
+            db_session.commit()
+            total += len(rows)
+        return total
+
+    def _select_unaggregated_game_ids(self, db_session: Session, *, limit: int) -> list[str]:
+        done_exists = (
+            select(ShowGameAggStatus.game_id)
+            .where(ShowGameAggStatus.game_id == ShowGameSummary.id)
+            .where(ShowGameAggStatus.agg_version == self.agg_version)
+            .where(ShowGameAggStatus.status == "done")
+            .exists()
+        )
+        return list(
+            db_session.scalars(
+                select(ShowGameSummary.id)
+                .where(~done_exists)
+                .order_by(ShowGameSummary.date.asc(), ShowGameSummary.id.asc())
+                .limit(limit)
+            )
+        )
+
+    def _chunks(self, values: Sequence[str], size: int) -> Iterator[list[str]]:
+        for idx in range(0, len(values), size):
+            yield list(values[idx : idx + size])

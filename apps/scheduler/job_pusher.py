@@ -7,8 +7,14 @@ class JobPusher:
     def __init__(self, redis_connector: Optional[RedisConnector] = None, pending_key: str = "jobs:pending"):
         self.queue = Queue(redis_connector or RedisConnector(), pending_key)
     
-    def push(self, job_type: str, args: Optional[dict[str, Any]] = None) -> Payload:
-        return self.queue.enqueue(job_type, args)
+    def push(
+        self,
+        job_type: str,
+        args: Optional[dict[str, Any]] = None,
+        *,
+        priority: str = "normal",
+    ) -> Payload:
+        return self.queue.enqueue(job_type, args, priority=priority)
     
     def card_sync(self, reload_all_years: bool = False) -> Payload:
         return self.push("card_sync", {"reload_all_years": reload_all_years})
@@ -55,11 +61,29 @@ class JobPusher:
     def show_profile_stats_updater(self) -> Payload:
         return self.push("show_profile_stats_updater")
 
+    def show_profile_refresh_enqueue(self) -> Payload:
+        return self.push("show_profile_refresh_enqueue", priority="high")
+
+    def show_profile_refresh_username(self, username: str, priority: str = "normal") -> Payload:
+        return self.push("show_profile_refresh_username", {"username": username}, priority=priority)
+
     def show_game_refresh(self) -> Payload:
         return self.push("show_game_refresh")
 
+    def show_game_refresh_enqueue(self) -> Payload:
+        return self.push("show_game_refresh_enqueue", priority="high")
+
+    def show_game_refresh_username(self, username: str, priority: str = "normal") -> Payload:
+        return self.push("show_game_refresh_username", {"username": username}, priority=priority)
+
     def show_game_agg(self) -> Payload:
         return self.push("show_game_agg")
+
+    def show_game_agg_enqueue(self) -> Payload:
+        return self.push("show_game_agg_enqueue", priority="normal")
+
+    def show_game_agg_batch(self, game_ids: list[str]) -> Payload:
+        return self.push("show_game_agg_batch", {"game_ids": game_ids}, priority="low")
 
     def your_ovr_sync(self) -> Payload:
         return self.push("your_ovr_sync")

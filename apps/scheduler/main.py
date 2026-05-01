@@ -46,7 +46,7 @@ SCHEDULED_JOBS = [
         },
     },
     {
-        "func_name": "show_profile_stats_updater",
+        "func_name": "show_profile_refresh_enqueue",
         "kwargs": {
             "trigger": "cron",
             "hour": "*/3",
@@ -56,7 +56,7 @@ SCHEDULED_JOBS = [
         },
     },
     {
-        "func_name": "show_game_refresh",
+        "func_name": "show_game_refresh_enqueue",
         "kwargs": {
             "trigger": "cron",
             "hour": "3,19",
@@ -66,7 +66,7 @@ SCHEDULED_JOBS = [
         },
     },
     {
-        "func_name": "show_game_agg",
+        "func_name": "show_game_agg_enqueue",
         "kwargs": {
             "trigger": "cron",
             "hour": "6,22",

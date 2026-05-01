@@ -9,8 +9,8 @@ class FakeQueue:
         self.pending_key = pending_key
         self.calls = []
 
-    def enqueue(self, job_type, args=None):
-        payload = {"job_type": job_type, "args": args or {}}
+    def enqueue(self, job_type, args=None, *, priority="normal"):
+        payload = {"job_type": job_type, "args": args or {}, "priority": priority}
         self.calls.append(payload)
         return payload
 
@@ -24,8 +24,8 @@ class FakeQueue:
         ("roster_update_sync", {"reload_all_years": True}, {"reload_all_years": True}),
         ("market_sync", {}, {}),
         ("market_candle_sync", {}, {}),
-        ("player_sync", {}, {"reload_all_players": False}),
-        ("player_sync", {"reload_all_players": True}, {"reload_all_players": True}),
+        ("player_sync", {}, {"rerun_all_cards": False}),
+        ("player_sync", {"reload_all_players": True}, {"rerun_all_cards": True}),
         ("game_boxscore_sync", {}, {"reload_all_games": False, "season": 2026}),
         ("game_boxscore_sync", {"reload_all_games": True, "season": 2024}, {"reload_all_games": True, "season": 2024}),
         ("prediction_sync", {}, {}),
@@ -38,8 +38,14 @@ class FakeQueue:
         ("chat_cleaner", {}, {}),
         ("image_cleaner", {}, {}),
         ("show_profile_stats_updater", {}, {}),
+        ("show_profile_refresh_enqueue", {}, {}),
+        ("show_profile_refresh_username", {"username": "user-a"}, {"username": "user-a"}),
         ("show_game_refresh", {}, {}),
+        ("show_game_refresh_enqueue", {}, {}),
+        ("show_game_refresh_username", {"username": "user-a"}, {"username": "user-a"}),
         ("show_game_agg", {}, {}),
+        ("show_game_agg_enqueue", {}, {}),
+        ("show_game_agg_batch", {"game_ids": ["g1", "g2"]}, {"game_ids": ["g1", "g2"]}),
         ("your_ovr_sync", {}, {}),
         ("revenuecat_entitlements_reconcile", {}, {}),
         (
@@ -55,7 +61,7 @@ def test_job_pusher_methods_enqueue(method, kwargs, expected_args, monkeypatch):
     pusher = job_pusher.JobPusher()
     payload = getattr(pusher, method)(**kwargs)
 
-    assert pusher.queue.calls == [{"job_type": method, "args": expected_args}]
+    assert pusher.queue.calls == [{"job_type": method, "args": expected_args, "priority": payload["priority"]}]
     assert payload["job_type"] == method
     assert payload["args"] == expected_args
 
@@ -84,3 +90,15 @@ def test_job_pusher_constructs_connector_when_none(monkeypatch):
 
     assert StubRedisConnector.created == 1
     assert isinstance(pusher.queue.redis_connector, StubRedisConnector)
+
+
+def test_job_pusher_assigns_expected_priorities(monkeypatch):
+    monkeypatch.setattr(job_pusher, "Queue", FakeQueue)
+
+    pusher = job_pusher.JobPusher()
+
+    assert pusher.show_profile_refresh_enqueue()["priority"] == "high"
+    assert pusher.show_game_refresh_enqueue()["priority"] == "high"
+    assert pusher.show_game_agg_enqueue()["priority"] == "normal"
+    assert pusher.show_game_agg_batch(["g1"])["priority"] == "low"
+    assert pusher.show_game_refresh_username("user-a", priority="low")["priority"] == "low"
