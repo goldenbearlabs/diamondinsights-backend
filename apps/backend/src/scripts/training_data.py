@@ -26,7 +26,12 @@ from shared.db.database import engine  # noqa: E402
 
 OUTPUT_PATH = SCRIPT_DIR.parent / "training_data.csv"
 
+# Maps The Show's display attribute labels (as they appear in card_attribute_changes.name)
+# to DB column names on the cards table.
+# TODO: verify the exact display labels The Show 26 uses for the new split attributes
+# by inspecting a real card_attribute_changes row after a roster update.
 ATTR_FIELD_MAP = {
+    # Hitting
     "CON L": "contact_left",
     "CON R": "contact_right",
     "POW L": "power_left",
@@ -34,24 +39,32 @@ ATTR_FIELD_MAP = {
     "VIS": "plate_vision",
     "DISC": "plate_discipline",
     "CLT": "batting_clutch",
-    "SPD": "speed",
-    "STEAL": "baserunning_ability",
+    "BNT": "bunting_ability",
+    "DRG BNT": "drag_bunting_ability",
+    # Fielding / speed
     "FLD": "fielding_ability",
     "ARM": "arm_strength",
-    "REAC": "reaction_time",
     "ACC": "arm_accuracy",
+    "REAC F": "reaction_forward",
+    "REAC B": "reaction_back",
+    "REAC L": "reaction_left",
+    "REAC R": "reaction_right",
     "BLK": "blocking",
-    "K/9": "k_per_bf",
+    "SPD": "speed",
+    "STEAL": "base_stealing",
+    "POP": "pop_time",
+    # Pitching
+    "K/9 L": "k_per_bf_left",
+    "K/9 R": "k_per_bf_right",
     "BB/9": "bb_per_bf",
-    "H/9": "hits_per_bf",
+    "H/9 L": "hits_per_bf_left",
+    "H/9 R": "hits_per_bf_right",
     "HR/9": "hr_per_bf",
     "STA": "stamina",
     "VEL": "pitch_velocity",
     "BRK": "pitch_movement",
     "CTRL": "pitch_control",
     "PCLT": "pitching_clutch",
-    "BNT": "bunting_ability",
-    "DRG BNT": "drag_bunting_ability",
 }
 ATTR_NAMES = list(ATTR_FIELD_MAP.keys())
 

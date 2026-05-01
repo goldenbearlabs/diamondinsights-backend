@@ -28,8 +28,8 @@ class MarketSync(Job):
     ):
         super().__init__()
         self.year = THE_SHOW_YEARS[0]
-        self.max_workers = max(1, max_workers or int(os.getenv("MARKET_SYNC_MAX_WORKERS", "2")))
-        self.chunk_size = max(1, chunk_size or int(os.getenv("MARKET_SYNC_CHUNK_SIZE", "50")))
+        self.max_workers = max(1, max_workers or int(os.getenv("MARKET_SYNC_MAX_WORKERS", "6")))
+        self.chunk_size = max(1, chunk_size or int(os.getenv("MARKET_SYNC_CHUNK_SIZE", "200")))
         self.fetch_jitter_range = fetch_jitter_range or (0.05, 0.2)
         self.ovr_min = ovr_min
         self.ovr_max = ovr_max

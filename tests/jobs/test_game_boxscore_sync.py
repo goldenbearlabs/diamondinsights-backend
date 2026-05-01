@@ -153,6 +153,9 @@ class DummyStmt:
     def where(self, *args, **kwargs):
         return self
 
+    def order_by(self, *args, **kwargs):
+        return self
+
     def limit(self, *args, **kwargs):
         return self
 
@@ -582,6 +585,7 @@ def test_upsert_teams_empty_returns(monkeypatch):
 def test_target_game_ids_for_boxscores_paths(monkeypatch):
     monkeypatch.setattr(gbs, "select", lambda *args, **kwargs: DummyStmt())
     monkeypatch.setattr(gbs, "exists", lambda *args, **kwargs: DummyStmt())
+    monkeypatch.setattr(gbs, "or_", lambda *args, **kwargs: DummyStmt())
 
     sync = HelperGameBoxscoreSync(season_year=2025, rerun_all_boxscores=True)
     session = DummySession(execute_results=[DummyScalarResult(scalars=[1, 2])])

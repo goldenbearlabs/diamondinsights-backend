@@ -10,9 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import func, select, text
+from sqlalchemy import bindparam, func, select, text
 
 from apps.jobs.job import Job
+from shared.queue.redis_connector import RedisConnector
 from shared.db.models import Card, CardPrediction, PredictionRun, RosterUpdate
 
 
@@ -200,15 +201,21 @@ class PredictionSync(Job):
             "DISC": "plate_discipline",
             "CLT": "batting_clutch",
             "SPD": "speed",
-            "STEAL": "baserunning_ability",
+            "STEAL": "base_stealing",
             "FLD": "fielding_ability",
             "ARM": "arm_strength",
-            "REAC": "reaction_time",
+            "REAC F": "reaction_forward",
+            "REAC B": "reaction_back",
+            "REAC L": "reaction_left",
+            "REAC R": "reaction_right",
             "ACC": "arm_accuracy",
             "BLK": "blocking",
-            "K/9": "k_per_bf",
+            "POP": "pop_time",
+            "K/9 L": "k_per_bf_left",
+            "K/9 R": "k_per_bf_right",
             "BB/9": "bb_per_bf",
-            "H/9": "hits_per_bf",
+            "H/9 L": "hits_per_bf_left",
+            "H/9 R": "hits_per_bf_right",
             "HR/9": "hr_per_bf",
             "STA": "stamina",
             "VEL": "pitch_velocity",
@@ -220,8 +227,8 @@ class PredictionSync(Job):
         }
 
         # We never apply fielding-run updates in this job version.
-        self._field_run_attrs = {"SPD", "STEAL", "ARM", "ACC", "FLD", "REAC", "BLK"}
-        self._pit_attr_labels = {"K/9", "BB/9", "H/9", "HR/9", "STA", "VEL", "BRK", "CTRL", "PCLT"}
+        self._field_run_attrs = {"SPD", "STEAL", "ARM", "ACC", "FLD", "REAC F", "REAC B", "REAC L", "REAC R", "BLK", "POP"}
+        self._pit_attr_labels = {"K/9 L", "K/9 R", "BB/9", "H/9 L", "H/9 R", "HR/9", "STA", "VEL", "BRK", "CTRL", "PCLT"}
 
     def _configure_lightgbm_logging(self) -> None:
         try:
@@ -292,6 +299,7 @@ class PredictionSync(Job):
 
         self._persist_predictions(db_session, combined)
         db_session.commit()
+        self._invalidate_cards_rankings_cache()
 
         self._log_end(
             year=latest_year,
@@ -299,6 +307,27 @@ class PredictionSync(Job):
             features=len(features),
             predictions=len(combined.get("standard", {}).get("preds", {})),
         )
+
+    def _invalidate_cards_rankings_cache(self) -> int:
+        redis_url = os.getenv("REDIS_URL")
+        if not redis_url:
+            return 0
+
+        deleted = 0
+        try:
+            redis = RedisConnector(redis_url).client()
+            try:
+                keys = list(redis.scan_iter("di:api:cards:rankings_v3:*"))
+                if keys:
+                    deleted = int(redis.delete(*keys) or 0)
+            finally:
+                redis.close()
+        except Exception as exc:
+            self.logger.warning("prediction sync cards cache invalidation failed err=%r", exc)
+            return 0
+
+        self.logger.info("prediction sync cards cache invalidated keys=%s", deleted)
+        return deleted
 
     def _get_latest_year(self, db_session) -> Optional[int]:
         latest_year = db_session.execute(select(func.max(Card.year))).scalar_one_or_none()
@@ -758,7 +787,50 @@ class PredictionSync(Job):
         db_session.add_all(rows)
         db_session.flush()
 
-    def _load_batting(self, db_session) -> pd.DataFrame:
+    def _read_stat_sql(
+        self,
+        db_session,
+        sql: str,
+        *,
+        player_col: str,
+        player_ids: Optional[set[int]] = None,
+        season_year: Optional[int] = None,
+        before_dt: Optional[dt.datetime] = None,
+        parse_dates: Optional[list[str]] = None,
+    ) -> pd.DataFrame:
+        where_parts: list[str] = []
+        params: dict[str, Any] = {}
+
+        if player_ids:
+            where_parts.append(f"{player_col} IN :player_ids")
+            params["player_ids"] = sorted(int(pid) for pid in player_ids)
+        if season_year is not None:
+            where_parts.append("g.season = :season_year")
+            params["season_year"] = int(season_year)
+        if before_dt is not None:
+            where_parts.append("g.game_date < :before_dt")
+            params["before_dt"] = before_dt
+
+        if where_parts:
+            sql = f"{sql}\nWHERE {' AND '.join(where_parts)}"
+
+        stmt = text(sql)
+        if "player_ids" in params:
+            stmt = stmt.bindparams(bindparam("player_ids", expanding=True))
+
+        read_kwargs: dict[str, Any] = {"parse_dates": parse_dates}
+        if params:
+            read_kwargs["params"] = params
+        return pd.read_sql(stmt, db_session.get_bind(), **read_kwargs)
+
+    def _load_batting(
+        self,
+        db_session,
+        *,
+        player_ids: Optional[set[int]] = None,
+        season_year: Optional[int] = None,
+        before_dt: Optional[dt.datetime] = None,
+    ) -> pd.DataFrame:
         q = """
             SELECT b.player_id, g.game_date, g.season, b.split,
                    b.pa, b.r, b.h, b.doubles, b.triples, b.hr,
@@ -766,12 +838,27 @@ class PredictionSync(Job):
             FROM mlb_game_batting_stats b
             JOIN mlb_games g ON g.id = b.game_id
         """
-        df = pd.read_sql(text(q), db_session.get_bind(), parse_dates=["game_date"])
+        df = self._read_stat_sql(
+            db_session,
+            q,
+            player_col="b.player_id",
+            player_ids=player_ids,
+            season_year=season_year,
+            before_dt=before_dt,
+            parse_dates=["game_date"],
+        )
         df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce").fillna(0).astype(int)
         df["season"] = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
         return make_naive(df, "game_date")
 
-    def _load_pitching(self, db_session) -> pd.DataFrame:
+    def _load_pitching(
+        self,
+        db_session,
+        *,
+        player_ids: Optional[set[int]] = None,
+        season_year: Optional[int] = None,
+        before_dt: Optional[dt.datetime] = None,
+    ) -> pd.DataFrame:
         q = """
             SELECT p.player_id, g.game_date, g.season, p.split,
                    p.outs_pitched, p.ip, p.ab, p.pitches_thrown,
@@ -780,31 +867,69 @@ class PredictionSync(Job):
             FROM mlb_game_pitching_stats p
             JOIN mlb_games g ON g.id = p.game_id
         """
-        df = pd.read_sql(text(q), db_session.get_bind(), parse_dates=["game_date"])
+        df = self._read_stat_sql(
+            db_session,
+            q,
+            player_col="p.player_id",
+            player_ids=player_ids,
+            season_year=season_year,
+            before_dt=before_dt,
+            parse_dates=["game_date"],
+        )
         df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce").fillna(0).astype(int)
         df["season"] = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
         return make_naive(df, "game_date")
 
-    def _load_baserunning(self, db_session) -> pd.DataFrame:
+    def _load_baserunning(
+        self,
+        db_session,
+        *,
+        player_ids: Optional[set[int]] = None,
+        season_year: Optional[int] = None,
+        before_dt: Optional[dt.datetime] = None,
+    ) -> pd.DataFrame:
         q = """
             SELECT b.player_id, g.game_date, g.season,
                    b.sb, b.caught_stealing
             FROM mlb_game_baserunning_stats b
             JOIN mlb_games g ON g.id = b.game_id
         """
-        df = pd.read_sql(text(q), db_session.get_bind(), parse_dates=["game_date"])
+        df = self._read_stat_sql(
+            db_session,
+            q,
+            player_col="b.player_id",
+            player_ids=player_ids,
+            season_year=season_year,
+            before_dt=before_dt,
+            parse_dates=["game_date"],
+        )
         df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce").fillna(0).astype(int)
         df["season"] = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
         return make_naive(df, "game_date")
 
-    def _load_fielding(self, db_session) -> pd.DataFrame:
+    def _load_fielding(
+        self,
+        db_session,
+        *,
+        player_ids: Optional[set[int]] = None,
+        season_year: Optional[int] = None,
+        before_dt: Optional[dt.datetime] = None,
+    ) -> pd.DataFrame:
         q = """
             SELECT f.player_id, g.game_date, g.season,
                    f.assists, f.put_outs, f.errors, f.chances
             FROM mlb_game_fielding_stats f
             JOIN mlb_games g ON g.id = f.game_id
         """
-        df = pd.read_sql(text(q), db_session.get_bind(), parse_dates=["game_date"])
+        df = self._read_stat_sql(
+            db_session,
+            q,
+            player_col="f.player_id",
+            player_ids=player_ids,
+            season_year=season_year,
+            before_dt=before_dt,
+            parse_dates=["game_date"],
+        )
         df["player_id"] = pd.to_numeric(df["player_id"], errors="coerce").fillna(0).astype(int)
         df["season"] = pd.to_numeric(df["season"], errors="coerce").fillna(0).astype(int)
         return make_naive(df, "game_date")
@@ -854,16 +979,22 @@ class PredictionSync(Job):
         if last_update_dt.year != update_dt.year:
             base["last_update"] = pd.NaT
 
-        batting = self._load_batting(db_session)
-        pitching = self._load_pitching(db_session)
-        baserunning = self._load_baserunning(db_session)
-        fielding = self._load_fielding(db_session)
+        relevant_ids: set[int] = set()
+        for raw_pid in set(base["mlb_id"].unique()):
+            try:
+                pid = int(raw_pid or 0)
+            except Exception:
+                continue
+            if pid > 0:
+                relevant_ids.add(pid)
+        if not relevant_ids:
+            return pd.DataFrame()
 
-        relevant_ids = set(base["mlb_id"].unique())
-        batting = batting[batting["player_id"].isin(relevant_ids)]
-        pitching = pitching[pitching["player_id"].isin(relevant_ids)]
-        baserunning = baserunning[baserunning["player_id"].isin(relevant_ids)]
-        fielding = fielding[fielding["player_id"].isin(relevant_ids)]
+        query_season_year = int(update_dt.year) if pd.notna(update_dt) else None
+        batting = self._load_batting(db_session, player_ids=relevant_ids, season_year=query_season_year, before_dt=update_dt)
+        pitching = self._load_pitching(db_session, player_ids=relevant_ids, season_year=query_season_year, before_dt=update_dt)
+        baserunning = self._load_baserunning(db_session, player_ids=relevant_ids, season_year=query_season_year, before_dt=update_dt)
+        fielding = self._load_fielding(db_session, player_ids=relevant_ids, season_year=query_season_year, before_dt=update_dt)
 
         rows: List[Dict[str, Any]] = []
         for _, u in base.iterrows():
