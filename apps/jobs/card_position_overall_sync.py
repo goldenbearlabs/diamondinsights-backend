@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -242,11 +242,13 @@ class CardPositionOverallSync(Job):
 
     def _replace_rows(self, db_session: Session, rows: List[Dict[str, Any]], chunk_size: int = 5000) -> None:
         db_session.execute(text("SET LOCAL synchronous_commit TO OFF"))
-        db_session.execute(delete(CardPositionOverall))
 
         if not rows:
+            db_session.execute(delete(CardPositionOverall))
             db_session.commit()
             return
+
+        produced_keys = sorted({(str(row["card_id"]), str(row["position"])) for row in rows})
 
         updatable_cols = {
             "is_primary": insert(CardPositionOverall).excluded.is_primary,
@@ -266,5 +268,11 @@ class CardPositionOverallSync(Job):
                 .on_conflict_do_update(index_elements=["card_id", "position"], set_=updatable_cols)
             )
             db_session.execute(stmt)
+
+        db_session.execute(
+            delete(CardPositionOverall).where(
+                tuple_(CardPositionOverall.card_id, CardPositionOverall.position).not_in(produced_keys)
+            )
+        )
 
         db_session.commit()

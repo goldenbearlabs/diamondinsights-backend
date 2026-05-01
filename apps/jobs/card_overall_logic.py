@@ -15,8 +15,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PITCHER_ATTRS = [
     "stamina",
     "pitching_clutch",
-    "hits_per_bf",
-    "k_per_bf",
+    "hits_per_bf_left",
+    "hits_per_bf_right",
+    "k_per_bf_left",
+    "k_per_bf_right",
     "bb_per_bf",
     "hr_per_bf",
     "pitch_velocity",
@@ -34,26 +36,27 @@ HITTER_ATTRS = [
     "batting_clutch",
     "bunting_ability",
     "drag_bunting_ability",
-    "hitting_durability",
-    "fielding_durability",
     "fielding_ability",
     "arm_strength",
     "arm_accuracy",
-    "reaction_time",
+    "reaction_forward",
+    "reaction_back",
+    "reaction_left",
+    "reaction_right",
     "blocking",
     "speed",
-    "baserunning_ability",
-    "baserunning_aggression",
+    "base_stealing",
+    "pop_time",
 ]
 
 DISPLAY_POSITION_COL = "display_position"
 DEFAULT_TRUE_OVERALL_WEIGHTS_PATH = PROJECT_ROOT / "apps/backend/src/ml/true_overall_weights.json"
 HITTER_EVALUATED_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
-HITTER_POSITION_PENALTY_ATTRS = ("fielding_ability", "arm_accuracy", "reaction_time")
+HITTER_POSITION_PENALTY_ATTRS = ("fielding_ability", "arm_accuracy", "reaction_forward", "reaction_back", "reaction_left", "reaction_right")
 HITTER_SECONDARY_POSITION_PENALTY_PCT = 0.05
-HITTER_OUT_OF_POSITION_BASE_PENALTY_PCT = 0.12
-HITTER_OUTFIELD_INFIELD_CROSS_PENALTY_PCT = 0.16
-HITTER_OUTFIELDER_TO_CATCHER_PENALTY_PCT = 0.30
+HITTER_OUT_OF_POSITION_BASE_PENALTY_PCT = 0.15
+HITTER_OUTFIELD_INFIELD_CROSS_PENALTY_PCT = 0.20
+HITTER_NON_CATCHER_TO_CATCHER_PENALTY_PCT = 0.75
 OUTFIELD_POSITIONS = {"LF", "CF", "RF"}
 INFIELD_POSITIONS = {"C", "1B", "2B", "3B", "SS"}
 
@@ -88,34 +91,38 @@ def _resolve_weights_path(path: Path) -> Path:
 
 # Easy-to-adjust boost dictionaries. Values are percentage boosts, e.g. 0.05 = +5%.
 HITTER_QUIRK_BOOSTS: Dict[str, Dict[str, float]] = {
-    "Bad Ball Hitter": {"plate_vision": 0.05},
-    "Breaking Ball Hitter": {"power_left": 0.05, "power_right": 0.05},
-    "Dead Red": {"power_left": 0.02, "power_right": 0.02},
-    "First Pitch Hitter": {"power_left": 0.01, "power_right": 0.01},
-    "Unfazed": {"contact_left": 0.01, "contact_right": 0.01},
-    "Table Setter": {"contact_left": 0.01, "contact_right": 0.01},
-    "Situational Hitter": {"contact_left": 0.01, "contact_right": 0.01},
-    "Rally Monkey": {"contact_left": 0.01, "contact_right": 0.01},
+    "Bad Ball Hitter": {"plate_vision": 0.07},
+    "Breaking Ball Hitter": {"power_left": 0.07, "power_right": 0.07},
+    "Dead Red": {"power_left": 0.04, "power_right": 0.04},
+    "First Pitch Hitter": {"power_left": 0.03, "power_right": 0.03},
+    "Unfazed": {"contact_left": 0.02, "contact_right": 0.02},
+    "Table Setter": {"contact_left": 0.02, "contact_right": 0.02},
+    "Situational Hitter": {"contact_left": 0.02, "contact_right": 0.02},
+    "Rally Monkey": {"contact_left": 0.02, "contact_right": 0.02},
 }
 
 PITCHER_QUIRK_BOOSTS: Dict[str, Dict[str, float]] = {
-    "Break Outlier": {"pitch_movement": 0.01, "stamina": 0.01},
-    "Outlier I": {"pitch_velocity": 0.01},
-    "Outlier II": {"pitch_velocity": 0.01},
-    "Stopper": {"pitching_clutch": 0.01},
+    "Break Outlier": {"pitch_movement": 0.03, "stamina": 0.03},
+    "Outlier I": {"pitch_velocity": 0.05},
+    "Outlier II": {"pitch_velocity": 0.03},
+    "Stopper": {"pitching_clutch": 0.03},
 }
 
 # Handedness boosts as percentages applied to the predicted meta overall.
 HITTER_BAT_HAND_BOOSTS: Dict[str, float] = {
-    "L": -0.005,  # -0.5%
+    "L": -0.010,  # -1.0%
     "R": 0.0,     #  0.0%
-    "S": 0.05,    # +1.0%
+    "S": 0.07,    # +7.0%
 }
 
 PITCHER_HAND_BOOSTS: Dict[str, float] = {
     "L": 0.005,   # +0.5%
     "R": 0.0,     #  0.0%
 }
+
+# Extra boost for pitchers with strong opposite-side splits (LHP right splits, RHP left splits).
+PITCHER_OPPOSITE_SIDE_BOOST_MAX = 0.02
+PITCHER_OPPOSITE_SIDE_ATTR_BASELINE = 70.0
 
 # Tiny hitter-only height scaling (penalty away from 6'0").
 # Kept intentionally much smaller than handedness.
@@ -128,11 +135,11 @@ HITTER_HEIGHT_SCALING = {
 # Pitch quality coefficients per pitch type:
 # Q_p = a*speed + b*movement + c*control
 PITCH_QUALITY_COEFFICIENTS: Dict[str, Dict[str, float]] = {
-    "DEFAULT": {"a": 0.45, "b": 0.35, "c": 0.20},
-    "4-Seam Fastball": {"a": 0.55, "b": 0.15, "c": 0.30},
-    "2-Seam Fastball": {"a": 0.45, "b": 0.25, "c": 0.30},
-    "Sinker": {"a": 0.35, "b": 0.30, "c": 0.35},
-    "Cutter": {"a": 0.35, "b": 0.40, "c": 0.25},
+    "DEFAULT": {"a": 0.50, "b": 0.30, "c": 0.20},
+    "4-Seam Fastball": {"a": 0.62, "b": 0.08, "c": 0.30},
+    "2-Seam Fastball": {"a": 0.50, "b": 0.20, "c": 0.30},
+    "Sinker": {"a": 0.42, "b": 0.23, "c": 0.35},
+    "Cutter": {"a": 0.42, "b": 0.33, "c": 0.25},
     "Slider": {"a": 0.35, "b": 0.35, "c": 0.30},
     "Curveball": {"a": 0.10, "b": 0.60, "c": 0.30},
     "Slurve": {"a": 0.10, "b": 0.60, "c": 0.30},
@@ -188,19 +195,19 @@ OFFSPEED_NAME_HINTS = (
 
 PITCH_MIX_BOOST_CONFIG = {
     "baseline_quality": 70.0,
-    "boost_per_quality_point": 0.0005,  # 0.05% per quality point
+    "boost_per_quality_point": 0.0006,  # 0.06% per quality point
     "min_boost": -0.01,                 # -1.0%
-    "max_boost": 0.02,                  # +2.0%
+    "max_boost": 0.03,                  # +3.0%
 }
 
 PITCH_SPEED_DIFF_CONFIG = {
     "gap_cap_mph": 30.0,
-    "max_gap_boost": 0.012,          # up to +1.2%
+    "max_gap_boost": 0.018,          # up to +1.8%
     "band_width_mph": 4.0,           # mph bucket width for "distinct bands"
     "baseline_band_count": 2,        # no bonus up to this many bands
-    "bonus_per_extra_band": 0.0015,  # +0.15% per extra band
-    "max_band_bonus": 0.0040,        # cap bonus at +0.4%
-    "max_total_boost": 0.0150,       # overall cap at +1.5%
+    "bonus_per_extra_band": 0.0020,  # +0.20% per extra band
+    "max_band_bonus": 0.0055,        # cap bonus at +0.55%
+    "max_total_boost": 0.0220,       # overall cap at +2.2%
 }
 
 PITCH_TUNNELING_CONFIG = {
@@ -217,8 +224,8 @@ PITCH_TUNNELING_CONFIG = {
     "topk_relief": 2,
     "arsenal_bonus_per_pitch": 0.04,
     "arsenal_bonus_cap_multiplier": 1.12,
-    "boost_per_score": 0.0120,  # 1.2% at tunnel_final_score == 1.0
-    "max_total_boost": 0.0135,  # cap with arsenal bonus
+    "boost_per_score": 0.0160,  # 1.6% at tunnel_final_score == 1.0
+    "max_total_boost": 0.0180,  # cap with arsenal bonus
 }
 
 # Small bonus for coverage across major pitch families.
@@ -272,7 +279,6 @@ PITCH_TUNNEL_DIRECTION_VECTORS_RHP: Dict[str, Tuple[float, float]] = {
 # Global hitter overall weighting (separate from positional archetypes).
 # Multiplier of 0.0 means "do not value this attribute".
 HITTER_OVERALL_WEIGHTS: Dict[str, float] = {
-    # Make contact and power very valuable.
     "contact_left": 2,
     "contact_right": 2,
     "power_left": 2,
@@ -282,17 +288,18 @@ HITTER_OVERALL_WEIGHTS: Dict[str, float] = {
     "fielding_ability": 1.50,
     "arm_strength": 1.10,
     "arm_accuracy": 0.75,
-    "reaction_time": 1.50,
+    # Base weight; HITTER_POSITION_ATTR_SCALES multiplies these before this step.
+    "reaction_forward": 0.80,
+    "reaction_back": 0.80,
+    "reaction_left": 0.80,
+    "reaction_right": 0.80,
     "speed": 1.25,
-    "baserunning_ability": 0.95,
-    # Low-value hitter traits.
+    "base_stealing": 0.95,
+    # Zeroed for non-catchers by HITTER_POSITION_ATTR_SCALES before this step.
+    "pop_time": 1.50,
     "plate_discipline": 0.20,
     "bunting_ability": 0.10,
     "drag_bunting_ability": 0.10,
-    # Zero out durability + baserunning aggression.
-    "hitting_durability": 0.0,
-    "fielding_durability": 0.0,
-    "baserunning_aggression": 0.0,
 }
 # Keep weight distribution centered so overall mass does not drift.
 # If configured weights sum to more than N (where N is number of weighted attrs),
@@ -310,19 +317,20 @@ HITTER_CAP_125_ATTRS = {
     "batting_clutch",
     "bunting_ability",
     "drag_bunting_ability",
-    "hitting_durability",
 }
 
 HITTER_CAP_99_ATTRS = {
-    "fielding_durability",
     "fielding_ability",
     "arm_strength",
     "arm_accuracy",
-    "reaction_time",
+    "reaction_forward",
+    "reaction_back",
+    "reaction_left",
+    "reaction_right",
     "blocking",
     "speed",
-    "baserunning_ability",
-    "baserunning_aggression",
+    "base_stealing",
+    "pop_time",
 }
 PITCHER_ATTR_CAP = 125.0
 
@@ -334,9 +342,25 @@ ATTRIBUTE_GROUP_COLUMNS: Dict[str, List[str]] = {
     "power": ["power_left", "power_right"],
     "contact": ["contact_left", "contact_right", "batting_clutch"],
     "vision": ["plate_vision"],
-    "fielding": ["fielding_ability", "fielding_durability", "reaction_time", "blocking"],
+    "fielding": ["fielding_ability", "reaction_forward", "reaction_back", "reaction_left", "reaction_right", "blocking", "pop_time"],
     "arm": ["arm_strength", "arm_accuracy"],
-    "speed": ["speed", "baserunning_ability", "baserunning_aggression"],
+    "speed": ["speed", "base_stealing"],
+}
+
+# Per-position multipliers for reaction direction attrs and pop_time, applied before global weights.
+# Directions are from the fielder's perspective (forward = toward home plate, back = toward wall).
+# pop_time is zeroed for all non-catchers.
+HITTER_POSITION_ATTR_SCALES: Dict[str, Dict[str, float]] = {
+    "DEFAULT": {"reaction_forward": 1.0, "reaction_back": 1.0, "reaction_left": 1.0, "reaction_right": 1.0, "pop_time": 0.0},
+    "C":  {"reaction_forward": 2.5, "reaction_left": 1.3, "reaction_right": 1.3, "reaction_back": 0.3, "pop_time": 1.0},
+    "1B": {"reaction_forward": 2.0, "reaction_left": 1.8, "reaction_right": 0.8, "reaction_back": 0.2, "pop_time": 0.0},
+    "2B": {"reaction_forward": 1.0, "reaction_left": 1.6, "reaction_right": 1.6, "reaction_back": 0.8, "pop_time": 0.0},
+    "3B": {"reaction_forward": 2.5, "reaction_left": 1.6, "reaction_right": 1.2, "reaction_back": 0.2, "pop_time": 0.0},
+    "SS": {"reaction_forward": 1.1, "reaction_left": 2.0, "reaction_right": 1.6, "reaction_back": 1.0, "pop_time": 0.0},
+    "LF": {"reaction_forward": 1.8, "reaction_back": 1.5, "reaction_right": 1.2, "reaction_left": 0.7, "pop_time": 0.0},
+    "CF": {"reaction_forward": 1.7, "reaction_back": 1.7, "reaction_left": 1.5, "reaction_right": 1.5, "pop_time": 0.0},
+    "RF": {"reaction_forward": 1.8, "reaction_back": 1.5, "reaction_left": 1.2, "reaction_right": 0.7, "pop_time": 0.0},
+    "DH": {"reaction_forward": 0.2, "reaction_back": 0.1, "reaction_left": 0.2, "reaction_right": 0.2, "pop_time": 0.0},
 }
 
 # "DEFAULT" applies when a display_position has no explicit profile.
@@ -350,7 +374,7 @@ POSITION_ARCHETYPE_PROFILES: Dict[str, Dict[str, float]] = {
     "LF": {"power": 1.25, "contact": 1.00, "vision": 0.90, "fielding": 0.85, "arm": 0.90, "speed": 1.10},
     "CF": {"power": 0.85, "contact": 1.00, "vision": 0.90, "fielding": 1.25, "arm": 0.90, "speed": 1.10},
     "RF": {"power": 1.10, "contact": 0.95, "vision": 0.90, "fielding": 0.90, "arm": 1.25, "speed": 0.90},
-    "DH": {"power": 1.35, "contact": 1.20, "vision": 1.10, "fielding": 0.65, "arm": 0.65, "speed": 1.05},
+    "DH": {"power": 1.45, "contact": 1.30, "vision": 1.10, "fielding": 0.50, "arm": 0.50, "speed": 1.05},
     "SP": {"power": 1.00, "contact": 1.00, "vision": 1.00, "fielding": 1.00, "arm": 1.00, "speed": 1.00},
     "RP": {"power": 1.00, "contact": 1.00, "vision": 1.00, "fielding": 1.00, "arm": 1.00, "speed": 1.00},
     "CP": {"power": 1.00, "contact": 1.00, "vision": 1.00, "fielding": 1.00, "arm": 1.00, "speed": 1.00},
@@ -400,8 +424,9 @@ def _hitter_position_penalty(
     if evaluated in secondary_set:
         return HITTER_SECONDARY_POSITION_PENALTY_PCT, "secondary"
 
-    if primary in OUTFIELD_POSITIONS and evaluated == "C":
-        return HITTER_OUTFIELDER_TO_CATCHER_PENALTY_PCT, "out_of_position_outfielder_to_catcher"
+    # Any non-catcher (primary or secondary) playing catcher gets a heavy penalty.
+    if evaluated == "C" and primary != "C" and "C" not in secondary_set:
+        return HITTER_NON_CATCHER_TO_CATCHER_PENALTY_PCT, "out_of_position_to_catcher"
 
     outfield_to_infield = primary in OUTFIELD_POSITIONS and evaluated in INFIELD_POSITIONS
     infield_to_outfield = primary in INFIELD_POSITIONS and evaluated in OUTFIELD_POSITIONS
@@ -525,6 +550,26 @@ def _normalize_archetype_profile(profile: Dict[str, float] | None) -> Dict[str, 
     base = POSITION_ARCHETYPE_PROFILES["DEFAULT"]
     p = profile or {}
     return {g: float(p.get(g, base[g])) for g in ARCHETYPE_GROUPS}
+
+
+def _apply_hitter_position_attr_scales(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    default_scales = HITTER_POSITION_ATTR_SCALES.get("DEFAULT", {})
+    all_attrs = {attr for scales in HITTER_POSITION_ATTR_SCALES.values() for attr in scales}
+
+    for attr in all_attrs:
+        if attr not in out.columns:
+            continue
+        default_scale = float(default_scales.get(attr, 1.0))
+        scale_map = {
+            pos: float(scales[attr])
+            for pos, scales in HITTER_POSITION_ATTR_SCALES.items()
+            if pos != "DEFAULT" and attr in scales
+        }
+        multiplier = out[DISPLAY_POSITION_COL].map(lambda p, m=scale_map, d=default_scale: m.get(p, d)).astype(float)
+        out[attr] = out[attr] * multiplier
+
+    return out
 
 
 def _apply_position_archetypes(df: pd.DataFrame) -> pd.DataFrame:
@@ -1104,6 +1149,7 @@ def _build_hitter_position_scale_factors(
 
         perfect_df = pd.DataFrame([row])
         perfect_df = _apply_position_archetypes(perfect_df)
+        perfect_df = _apply_hitter_position_attr_scales(perfect_df)
         perfect_df, _ = _apply_hitter_overall_weights(perfect_df)
         perfect_df = _apply_hitter_attribute_caps(perfect_df, cap_upper=False)
 
@@ -1212,6 +1258,24 @@ def _format_quirks_for_print(v: object) -> str:
     return ", ".join(v)
 
 
+def _pitcher_opposite_side_boost(row: "pd.Series") -> float:
+    hand = str(row.get("throw_hand", "")).strip().upper()
+    if hand == "L":
+        hits_attr, k_attr = "hits_per_bf_right", "k_per_bf_right"
+    elif hand == "R":
+        hits_attr, k_attr = "hits_per_bf_left", "k_per_bf_left"
+    else:
+        return 0.0
+    hits_val = float(row.get(hits_attr, 0.0) or 0.0)
+    k_val = float(row.get(k_attr, 0.0) or 0.0)
+    avg_opp = (hits_val + k_val) / 2.0
+    baseline = PITCHER_OPPOSITE_SIDE_ATTR_BASELINE
+    cap = float(PITCHER_ATTR_CAP)
+    if avg_opp <= baseline or cap <= baseline:
+        return 0.0
+    return min(PITCHER_OPPOSITE_SIDE_BOOST_MAX * (avg_opp - baseline) / (cap - baseline), PITCHER_OPPOSITE_SIDE_BOOST_MAX)
+
+
 def _apply_handedness_boost(
     df: pd.DataFrame,
     is_hitter_value: bool,
@@ -1219,8 +1283,23 @@ def _apply_handedness_boost(
     if is_hitter_value:
         boost_pct = df["bat_hand"].map(lambda v: HITTER_BAT_HAND_BOOSTS.get(str(v).upper(), 0.0)).astype(float)
     else:
-        # Treat throw_hand as pitch hand for pitchers.
-        boost_pct = df["throw_hand"].map(lambda v: PITCHER_HAND_BOOSTS.get(str(v).upper(), 0.0)).astype(float)
+        base_boost = df["throw_hand"].map(lambda v: PITCHER_HAND_BOOSTS.get(str(v).upper(), 0.0)).astype(float)
+        hand = df["throw_hand"].str.upper().str.strip()
+        hits_val = pd.to_numeric(
+            np.where(hand == "L", df.get("hits_per_bf_right", 0.0), np.where(hand == "R", df.get("hits_per_bf_left", 0.0), 0.0)),
+            errors="coerce",
+        ).fillna(0.0)
+        k_val = pd.to_numeric(
+            np.where(hand == "L", df.get("k_per_bf_right", 0.0), np.where(hand == "R", df.get("k_per_bf_left", 0.0), 0.0)),
+            errors="coerce",
+        ).fillna(0.0)
+        avg_opp = (hits_val + k_val) / 2.0
+        raw_opp = PITCHER_OPPOSITE_SIDE_BOOST_MAX * (avg_opp - PITCHER_OPPOSITE_SIDE_ATTR_BASELINE) / (float(PITCHER_ATTR_CAP) - PITCHER_OPPOSITE_SIDE_ATTR_BASELINE)
+        opp_boost = pd.Series(
+            np.where(avg_opp > PITCHER_OPPOSITE_SIDE_ATTR_BASELINE, np.minimum(raw_opp, PITCHER_OPPOSITE_SIDE_BOOST_MAX), 0.0),
+            index=df.index, dtype=float,
+        )
+        boost_pct = base_boost + opp_boost
     multiplier = 1.0 + boost_pct
     return boost_pct, multiplier
 
@@ -1267,7 +1346,8 @@ def _run_role(
     position_scale = pd.Series(1.0, index=role_df.index, dtype=float)
 
     if is_hitter_value:
-        weighted_base_df, overall_weight_norm_factor = _apply_hitter_overall_weights(archetyped_base_df)
+        reaction_scaled_base_df = _apply_hitter_position_attr_scales(archetyped_base_df)
+        weighted_base_df, overall_weight_norm_factor = _apply_hitter_overall_weights(reaction_scaled_base_df)
         weighted_base_df = _apply_hitter_attribute_caps(weighted_base_df, cap_upper=False)
         position_scale_map = _build_hitter_position_scale_factors(
             role_weights=role_weights,

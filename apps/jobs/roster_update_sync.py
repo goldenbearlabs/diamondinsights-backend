@@ -2,6 +2,7 @@ from datetime import datetime
 from apps.jobs.job import Job
 from shared.core.config import THE_SHOW_YEARS, MAJOR_ROSTER_UPDATES, FIELDING_ROSTER_UPDATES
 from typing import Dict
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 import time
 
@@ -9,7 +10,7 @@ from shared.db.models import RosterUpdate, CardUpdate, CardAttributeChange
 
 
 class RosterUpdateSync(Job):
-    def __init__(self, reload_all_years: bool = True):
+    def __init__(self, reload_all_years: bool = False):
         super().__init__()
         self.reload_all_years = reload_all_years
 
@@ -21,6 +22,7 @@ class RosterUpdateSync(Job):
         years_to_process = THE_SHOW_YEARS if self.reload_all_years else [THE_SHOW_YEARS[0]]
         self._log_start(reload_all_years=self.reload_all_years, years=years_to_process)
         total_updates = 0
+        skipped_existing_details = 0
 
         for year in years_to_process:
             url = f"https://mlb{year}.theshow.com/apis/roster_updates.json"
@@ -37,10 +39,31 @@ class RosterUpdateSync(Job):
                     update_obj.id,
                     update_obj.date,
                 )
+                if not self.reload_all_years and self._has_update_details(db_session, update_obj.id, update_obj.date):
+                    skipped_existing_details += 1
+                    self.logger.info(
+                        "roster update details skipped existing year=%s update_id=%s date=%s",
+                        year,
+                        update_obj.id,
+                        update_obj.date,
+                    )
+                    continue
                 self.sync_update_details(db_session, year, update_obj.id, update_obj.date)
                 time.sleep(1)
             self.logger.info("roster update details complete year=%s count=%s", year, len(roster_updates_map))
-        self._log_end(total_updates=total_updates)
+        self._log_end(total_updates=total_updates, skipped_existing_details=skipped_existing_details)
+
+    def _has_update_details(self, session: Session, update_id: int, update_date) -> bool:
+        try:
+            stmt = (
+                select(CardUpdate.card_id)
+                .where(CardUpdate.update_id == update_id, CardUpdate.update_date == update_date)
+                .limit(1)
+            )
+            return session.execute(stmt).first() is not None
+        except Exception:
+            self.logger.warning("_has_update_details check failed update_id=%s", update_id, exc_info=True)
+            return False
 
     def sync_roster_updates(self, session: Session, year: int, raw_data) -> Dict[int, RosterUpdate]:
         data = self._json_get(raw_data, "roster_updates", [])

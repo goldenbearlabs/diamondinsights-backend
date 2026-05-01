@@ -1,40 +1,10 @@
 {
-  "generated_at_utc": "2026-02-10T17:52:47.839621+00:00",
+  "generated_at_utc": "2026-05-01T18:52:00.665844+00:00",
+  "target": "ovr",
+  "version": 2,
   "roles": {
     "hitter": {
-      "display_position_coefficients": {
-        "1B": 0.4728228121525345,
-        "2B": -0.8841835043175329,
-        "3B": -0.893644129005098,
-        "C": 0.38804940967869483,
-        "CF": -0.30981630649513414,
-        "DH": 3.442801528465473,
-        "LF": -0.8199485678882393,
-        "RF": -0.8070616723984959,
-        "SS": -0.5890195701922091
-      },
-      "intercept": 20.690337434164576,
-      "numeric_coefficients": {
-        "arm_accuracy": 0.0481602131229951,
-        "arm_strength": 0.04517167522013837,
-        "baserunning_ability": 0.022037812485555693,
-        "baserunning_aggression": 0.0075775176025782084,
-        "batting_clutch": 0.04108256803617105,
-        "blocking": 0.021007952184260825,
-        "bunting_ability": 0.013586989669966973,
-        "contact_left": 0.04819509124722324,
-        "contact_right": 0.07903733343702518,
-        "drag_bunting_ability": -0.003155796797957331,
-        "fielding_ability": 0.06682039664212837,
-        "fielding_durability": 8.326672684688674e-17,
-        "hitting_durability": 0.02025538946630264,
-        "plate_discipline": 0.021155678557784156,
-        "plate_vision": 0.12772791768553632,
-        "power_left": 0.08818730085861574,
-        "power_right": 0.15018493325410995,
-        "reaction_time": 0.0654825755035374,
-        "speed": 0.04643507802319548
-      },
+      "intercept": 19.161812195680596,
       "numeric_features": [
         "contact_left",
         "contact_right",
@@ -45,27 +15,60 @@
         "batting_clutch",
         "bunting_ability",
         "drag_bunting_ability",
-        "hitting_durability",
-        "fielding_durability",
         "fielding_ability",
         "arm_strength",
         "arm_accuracy",
-        "reaction_time",
+        "reaction_forward",
+        "reaction_back",
+        "reaction_left",
+        "reaction_right",
         "blocking",
         "speed",
-        "baserunning_ability",
-        "baserunning_aggression"
+        "base_stealing",
+        "pop_time"
       ],
+      "numeric_coefficients": {
+        "contact_left": 0.07887860488030908,
+        "contact_right": 0.056972506833684024,
+        "power_left": 0.1457321347282825,
+        "power_right": 0.14001142055964655,
+        "plate_vision": 0.11158450370420728,
+        "plate_discipline": 0.012905413561942714,
+        "batting_clutch": 0.11286396196132116,
+        "bunting_ability": -0.0022422998979521273,
+        "drag_bunting_ability": 0.002774128286616672,
+        "fielding_ability": 0.06800245008227107,
+        "arm_strength": 0.052937115311080855,
+        "arm_accuracy": 0.03956498570581141,
+        "reaction_forward": 0.004519387938958785,
+        "reaction_back": 0.0020845802529583933,
+        "reaction_left": -0.002020792922375998,
+        "reaction_right": 0.0026129702726534147,
+        "blocking": 0.0018468146616661477,
+        "speed": 0.0503126723599195,
+        "base_stealing": 0.0239726981442,
+        "pop_time": 0.025389338907621104
+      },
+      "display_position_coefficients": {
+        "C": -1.0732081307352566,
+        "1B": 0.35364267624070006,
+        "2B": -1.0360911158953487,
+        "3B": 0.36701024759591466,
+        "SS": -0.48988693414615675,
+        "LF": -0.4870013272321944,
+        "CF": 0.09399042413895231,
+        "RF": -0.44860510802452297,
+        "DH": 2.7201492680577437
+      },
       "secondary_position_coefficients": {
-        "1B": -0.014342240914363114,
-        "2B": -0.07976999694554278,
-        "3B": -0.23784257812020698,
-        "C": -1.966692646579401,
-        "CF": 0.06074222201764202,
-        "LF": -0.08521554159892927,
-        "P": 1.1892899164871493,
-        "RF": -0.18720898709953063,
-        "SS": 0.018857378978928724
+        "1B": -0.08361136999691457,
+        "2B": -0.3263497910243919,
+        "3B": -0.004139095747568306,
+        "C": -1.2380934578368754,
+        "CF": 0.16210289617619145,
+        "LF": -0.3099793248448434,
+        "RF": -0.24448226905467718,
+        "SS": -0.11748166959785705
       },
       "secondary_positions": [
         "1B",
@@ -77,47 +80,52 @@
         "P",
         "RF",
         "SS"
-      ]
+      ],
+      "_train_r2": 0.9767832823654315,
+      "_train_rmse": 1.6187405917522733,
+      "_train_n": 986
     },
     "pitcher": {
-      "display_position_coefficients": {
-        "CP": -1.8624886403298755,
-        "RP": -1.7356606612776122,
-        "SP": 3.5981493016075
-      },
-      "intercept": 16.091277426243416,
-      "numeric_coefficients": {
-        "bb_per_bf": 0.20752364007126212,
-        "hits_per_bf": 0.2214064173534499,
-        "hr_per_bf": 0.001221504029726303,
-        "k_per_bf": 0.20535560727621469,
-        "pitch_control": -0.0056377212316851,
-        "pitch_movement": 0.019089196899144664,
-        "pitch_velocity": 0.08390472674580748,
-        "pitching_clutch": 0.0552147117777253,
-        "stamina": 0.03456655180218952
-      },
+      "intercept": 16.52539969933177,
       "numeric_features": [
         "stamina",
         "pitching_clutch",
-        "hits_per_bf",
-        "k_per_bf",
+        "hits_per_bf_left",
+        "hits_per_bf_right",
+        "k_per_bf_left",
+        "k_per_bf_right",
         "bb_per_bf",
         "hr_per_bf",
         "pitch_velocity",
         "pitch_control",
         "pitch_movement"
       ],
+      "numeric_coefficients": {
+        "stamina": 0.03917810109891932,
+        "pitching_clutch": 0.13290889867059053,
+        "hits_per_bf_left": 0.09335052612272489,
+        "hits_per_bf_right": 0.09815341807211461,
+        "k_per_bf_left": 0.07273023161080797,
+        "k_per_bf_right": 0.08186236970652798,
+        "bb_per_bf": 0.18288607220626749,
+        "hr_per_bf": 0.03206363940200436,
+        "pitch_velocity": 0.07963973439397233,
+        "pitch_control": 0.001736361105565702,
+        "pitch_movement": 0.018366362785192332
+      },
+      "display_position_coefficients": {
+        "SP": 2.4731326001404272,
+        "RP": -1.6075368191203854,
+        "CP": -0.8655957810194884
+      },
       "secondary_position_coefficients": {
-        "1B": 2.066403702804289,
-        "2B": 1.934544112653592,
-        "3B": -3.928651494235994,
-        "C": 0.11124212224678,
-        "CF": 2.1991510791198774,
-        "LF": -1.4360321537185823,
-        "P": 2.081140809137272,
-        "RF": 2.7072793179386365,
-        "SS": 1.6203343279472722
+        "1B": 0.8961877645015034,
+        "2B": 3.203084444012205,
+        "3B": -0.8896541496398952,
+        "CF": 3.0591049852870813,
+        "LF": 0.8961877645015061,
+        "RF": 4.229009582842344,
+        "SS": -1.3842126749569257
       },
       "secondary_positions": [
         "1B",
@@ -129,9 +137,10 @@
         "P",
         "RF",
         "SS"
-      ]
+      ],
+      "_train_r2": 0.961377297102542,
+      "_train_rmse": 1.7718596960051747,
+      "_train_n": 950
     }
-  },
-  "target": "ovr",
-  "version": 2
+  }
 }

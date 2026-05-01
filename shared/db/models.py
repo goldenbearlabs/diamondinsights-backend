@@ -40,6 +40,7 @@ class Card(Base):
     __tablename__ = "cards"
     __table_args__ = (
         UniqueConstraint("year", "source_uuid", name="uq_cards_year_source_uuid"),
+        Index("ix_cards_year_ovr", "year", "ovr"),
         Index("ix_cards_year_mlb_id", "year", "mlb_id"),
         Index("ix_cards_year_mlb_id_display_position", "year", "mlb_id", "display_position"),
     )
@@ -319,6 +320,9 @@ class PriceHistory(Base):
 class CompletedOrder(Base):
     # We store the past 48 hours here.
     __tablename__ = "completed_orders"
+    __table_args__ = (
+        Index("ix_completed_orders_date_card_id", "date", "card_id"),
+    )
 
     card_id: Mapped[str] = mapped_column(ForeignKey("listings.card_id"), primary_key=True)
     date: Mapped[datetime.datetime] = mapped_column(primary_key=True)

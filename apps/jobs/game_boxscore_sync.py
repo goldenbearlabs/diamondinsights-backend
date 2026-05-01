@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from shared.core.batting_aggregator import MLBPlayByPlayBattingAggregator
@@ -33,6 +33,7 @@ MAX_WORKERS = 6
 JITTER_RANGE_S = (0.05, 0.25)
 
 IGNORED_GAME_TYPES = {"S", "A", "I", "E"}
+STAT_READY_STATUS_CODES = {"F", "O"}
 
 
 class GameBoxscoreSync(Job):
@@ -211,6 +212,7 @@ class GameBoxscoreSync(Job):
                 select(MLBGame.id).where(
                     MLBGame.season == season_year,
                     ~MLBGame.game_type.in_(IGNORED_GAME_TYPES),
+                    MLBGame.status_code.in_(STAT_READY_STATUS_CODES),
                     ~exists(select(1).where(MLBGameBoxscore.game_id == MLBGame.id)),
                 ).limit(50)
             ).scalars().all()
@@ -421,13 +423,29 @@ class GameBoxscoreSync(Job):
         base = select(MLBGame.id).where(
             MLBGame.season == season_year,
             ~MLBGame.game_type.in_(IGNORED_GAME_TYPES),
+            MLBGame.status_code.in_(STAT_READY_STATUS_CODES),
         )
 
         if self.rerun_all_boxscores:
-            return list(db_session.execute(base).scalars().all())
+            stmt = base.order_by(MLBGame.game_date.asc())
+            return list(db_session.execute(stmt).scalars().all())
 
-        subq = select(MLBGameBoxscore.game_id).where(MLBGameBoxscore.game_id == MLBGame.id).limit(1)
-        stmt = base.where(~exists(subq))
+        has_boxscore = exists(
+            select(1).where(MLBGameBoxscore.game_id == MLBGame.id).limit(1)
+        )
+        has_batting_stats = exists(
+            select(1).where(MLBGameBattingStats.game_id == MLBGame.id).limit(1)
+        )
+        has_pitching_stats = exists(
+            select(1).where(MLBGamePitchingStats.game_id == MLBGame.id).limit(1)
+        )
+        stmt = base.where(
+            or_(
+                ~has_boxscore,
+                ~has_batting_stats,
+                ~has_pitching_stats,
+            )
+        ).order_by(MLBGame.game_date.asc())
         return list(db_session.execute(stmt).scalars().all())
 
     def _fetch_boxscore_worker(self, game_id: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Set[int]]:
