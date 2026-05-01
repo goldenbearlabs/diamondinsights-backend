@@ -16,6 +16,10 @@ def _agg() -> ShowGameAgg:
         info=lambda *args, **kwargs: None,
         warning=lambda *args, **kwargs: None,
     )
+    agg.game_ids = []
+    agg.agg_version = 1
+    agg.records_max_rows = 2_000_000
+    agg._redis = False
     return agg
 
 
@@ -217,6 +221,21 @@ def test_merge_record_rows_dedupes_when_existing_is_empty():
     assert len(merged) == 2
     keys = {(str(r.get("game_id")), int(r.get("event_id"))) for r in merged}
     assert keys == {("g1", 1), ("g1", 2)}
+
+
+def test_cap_record_rows_keeps_highest_values():
+    agg = _agg()
+    agg.records_max_rows = 2
+
+    rows = [
+        {"game_id": "g1", "event_id": 1, "exit_vel_mph": 101.0},
+        {"game_id": "g2", "event_id": 1, "exit_vel_mph": 115.0},
+        {"game_id": "g3", "event_id": 1, "exit_vel_mph": 108.0},
+    ]
+
+    capped = agg._cap_record_rows(rows, "exit_vel_mph")
+
+    assert [row["game_id"] for row in capped] == ["g2", "g3"]
 
 
 def test_merge_pas_rows_dedupes_when_existing_is_empty():

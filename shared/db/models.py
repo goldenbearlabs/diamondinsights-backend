@@ -1229,7 +1229,35 @@ class ShowGameSummary(Base):
 
     def __repr__(self) -> str:
         return f"SHOW_GAME_SUMMARY (id={self.id}, home={self.home_full_name}, away={self.away_full_name}, date={self.date})"
-    
+
+
+class ShowGameAggStatus(Base):
+    __tablename__ = "show_game_agg_status"
+
+    game_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("show_game_summary.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    agg_version: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="done")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    aggregated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utcnow,
+        onupdate=_utcnow,
+        nullable=False,
+    )
+
+    game: Mapped["ShowGameSummary"] = relationship()
+
+    __table_args__ = (
+        Index("ix_show_game_agg_status_status_version", "status", "agg_version"),
+        Index("ix_show_game_agg_status_updated_at", "updated_at"),
+    )
+
 class ShowBallParks(Base):
     __tablename__ = "show_ball_parks"
     __table_args__ = (

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import os
 import random
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from apps.jobs.job import Job
 from shared.core.show_api import build_show_search_request
 from shared.db.models import ShowProfile, ShowProfileOnlineStats
+from shared.queue.queue import Queue
+from shared.queue.redis_connector import RedisConnector
 
 
 def _utcnow() -> datetime:
@@ -39,10 +42,12 @@ class ShowProfileStatsUpdater(Job):
     def __init__(
         self,
         *,
+        usernames: Optional[Sequence[str]] = None,
         flush_every: Optional[int] = None,
         fetch_jitter_range: Optional[Tuple[float, float]] = None,
     ):
         super().__init__()
+        self.usernames = [u.strip() for u in usernames or [] if u and u.strip()]
         default_flush = int(os.getenv("SHOW_PROFILE_REFRESH_FLUSH_EVERY", "50"))
         self.flush_every = max(1, flush_every or default_flush)
         self.fetch_jitter_range = fetch_jitter_range or (0.05, 0.2)
@@ -53,6 +58,8 @@ class ShowProfileStatsUpdater(Job):
             .options(selectinload(ShowProfile.online_stats))
             .where(ShowProfile.username.is_not(None))
         )
+        if self.usernames:
+            stmt = stmt.where(ShowProfile.username.in_(self.usernames))
         profiles = list(db_session.scalars(stmt))
         self._log_start(flush_every=self.flush_every, total_profiles=len(profiles))
 
@@ -104,6 +111,7 @@ class ShowProfileStatsUpdater(Job):
             skipped=skipped,
             errors=errors,
         )
+
 
     def _fetch_show_profile(self, username: str) -> Tuple[dict, dict]:
         time.sleep(random.uniform(*self.fetch_jitter_range))
@@ -185,3 +193,57 @@ class ShowProfileStatsUpdater(Job):
                 touched += 1
 
         return touched
+
+
+class ShowProfileRefreshEnqueuer(Job):
+    def __init__(self, queue: Optional[Queue] = None):
+        super().__init__()
+        self.queue = queue or Queue(RedisConnector())
+        self.random_unlinked_limit = max(
+            0,
+            int(os.getenv("SHOW_PROFILE_RANDOM_UNLINKED_LIMIT", "500")),
+        )
+
+    def run(self, db_session: Session):
+        linked_usernames = list(
+            db_session.scalars(
+                select(ShowProfile.username)
+                .where(ShowProfile.username.is_not(None))
+                .where(ShowProfile.user_id.is_not(None))
+                .order_by(ShowProfile.username.asc())
+            )
+        )
+
+        unlinked_usernames: list[str] = []
+        if self.random_unlinked_limit > 0:
+            unlinked_usernames = list(
+                db_session.scalars(
+                    select(ShowProfile.username)
+                    .where(ShowProfile.username.is_not(None))
+                    .where(ShowProfile.user_id.is_(None))
+                    .order_by(func.random())
+                    .limit(self.random_unlinked_limit)
+                )
+            )
+
+        for username in linked_usernames:
+            if username:
+                self.queue.enqueue(
+                    "show_profile_refresh_username",
+                    {"username": username},
+                    priority="high",
+                )
+
+        for username in unlinked_usernames:
+            if username:
+                self.queue.enqueue(
+                    "show_profile_refresh_username",
+                    {"username": username},
+                    priority="low",
+                )
+
+        self._log_end(
+            linked_enqueued=len(linked_usernames),
+            unlinked_enqueued=len(unlinked_usernames),
+            random_unlinked_limit=self.random_unlinked_limit,
+        )

@@ -6,7 +6,7 @@ import unicodedata
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Optional, Set, Tuple, List, Dict, Any, Mapping
+from typing import Optional, Sequence, Set, Tuple, List, Dict, Any, Mapping
 from dataclasses import dataclass, field
 
 from sqlalchemy import func, or_, select, exists, and_, case
@@ -31,6 +31,8 @@ from shared.storage.game_files import (
     EventRow, PlateAppearanceRow, RunnerMoveRow, HalfInningRow,
     BatterBoxscoreRow, PitcherBoxscoreRow, PitcherGameScoreRow,
 )
+from shared.queue.queue import Queue
+from shared.queue.redis_connector import RedisConnector
 
 GAME_HISTORY_URL = os.getenv(
     "GAME_HISTORY_URL",
@@ -285,10 +287,57 @@ class GameLog:
             away_pitching_boxscores=away_pit,
         )
 
+class ShowGameRefreshEnqueuer(Job):
+    def __init__(self, queue: Optional[Queue] = None):
+        super().__init__()
+        self.queue = queue or Queue(RedisConnector())
+        self.random_unlinked_limit = max(
+            0,
+            int(os.getenv("SHOW_GAME_RANDOM_UNLINKED_LIMIT", "200")),
+        )
+
+    def run(self, db_session: Session):
+        linked_usernames = list(
+            db_session.scalars(
+                select(ShowProfile.username)
+                .where(ShowProfile.username.is_not(None))
+                .where(ShowProfile.user_id.is_not(None))
+                .order_by(ShowProfile.username.asc())
+            )
+        )
+
+        unlinked_usernames: list[str] = []
+        if self.random_unlinked_limit > 0:
+            unlinked_usernames = list(
+                db_session.scalars(
+                    select(ShowProfile.username)
+                    .where(ShowProfile.username.is_not(None))
+                    .where(ShowProfile.user_id.is_(None))
+                    .order_by(func.random())
+                    .limit(self.random_unlinked_limit)
+                )
+            )
+
+        for username in linked_usernames:
+            if username:
+                self.queue.enqueue("show_game_refresh_username", {"username": username}, priority="high")
+
+        for username in unlinked_usernames:
+            if username:
+                self.queue.enqueue("show_game_refresh_username", {"username": username}, priority="low")
+
+        self._log_end(
+            linked_enqueued=len(linked_usernames),
+            unlinked_enqueued=len(unlinked_usernames),
+            random_unlinked_limit=self.random_unlinked_limit,
+        )
+
+
 class ShowGameRefresh(Job):
 
-    def __init__(self):
+    def __init__(self, *, usernames: Optional[Sequence[str]] = None):
         super().__init__()
+        self.usernames = [u.strip() for u in usernames or [] if u and u.strip()]
         self.spaces = SpacesConnector(SpacesConfig.from_env())
         self._user_workers = max(1, int(os.getenv("SHOW_GAME_USER_WORKERS", "4")))
         self._upload_workers = max(1, int(os.getenv("SHOW_GAME_UPLOAD_WORKERS", "4")))
@@ -379,7 +428,10 @@ class ShowGameRefresh(Job):
             worker._clear_resolver_caches()
 
     def run(self, db_session: Session):
-        usernames = [u for u in db_session.scalars(select(ShowProfile.username)) if u]
+        if self.usernames:
+            usernames = self.usernames
+        else:
+            usernames = [u for u in db_session.scalars(select(ShowProfile.username)) if u]
         random.shuffle(usernames)
         self._log_start(total_usernames=len(usernames), user_workers=self._user_workers)
         self.logger.info(

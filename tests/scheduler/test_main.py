@@ -57,8 +57,17 @@ class StubPusher:
     def show_game_refresh(self):
         return "show_game_refresh"
 
+    def show_game_refresh_enqueue(self):
+        return "show_game_refresh_enqueue"
+
     def show_game_agg(self):
         return "show_game_agg"
+
+    def show_game_agg_enqueue(self):
+        return "show_game_agg_enqueue"
+
+    def show_profile_refresh_enqueue(self):
+        return "show_profile_refresh_enqueue"
 
 
 def _build_with_jobs(monkeypatch, jobs, *, pusher=None, timezone=None, scheduler_cls=FakeScheduler):
@@ -231,8 +240,17 @@ def test_module_entrypoint_runs_main(monkeypatch):
         def show_game_refresh(self):
             return "show_game_refresh"
 
+        def show_game_refresh_enqueue(self):
+            return "show_game_refresh_enqueue"
+
         def show_game_agg(self):
             return "show_game_agg"
+
+        def show_game_agg_enqueue(self):
+            return "show_game_agg_enqueue"
+
+        def show_profile_refresh_enqueue(self):
+            return "show_profile_refresh_enqueue"
 
     class FakeScheduler:
         def __init__(self, timezone=None):
